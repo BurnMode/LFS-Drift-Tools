@@ -662,7 +662,7 @@ namespace LFSDriftBuddy
             MakeLabel(headerPanel, "COLORS", 300, 14, 55, 22,
             Color.FromArgb(60, 60, 60), null, ContentAlignment.MiddleRight, locKey: "header.theme");
 
-            var wheelSetupBtn = MakeButton(headerPanel, "🎮", 270, 10, 30, 28, Color.FromArgb(70, 70, 90));
+            var wheelSetupBtn = MakeButton(headerPanel, "🎮", 260, 5, 40, 40, Color.FromArgb(70, 70, 90));
             wheelSetupBtn.Click += (s, e) => ShowWheelSetupDialog(_wheelInput.GetAvailableDevices());
 
             _themeSwitch = new MacToggleSwitch
@@ -902,7 +902,7 @@ namespace LFSDriftBuddy
 
             // after
 
-            var revBindingsBtn = MakeButton(revLimiterPanel, "⚙", 200, 55, 40, 40, Color.FromArgb(70, 70, 90));
+            var revBindingsBtn = MakeButton(revLimiterPanel, "⚙", 255, 5, 40, 40, Color.FromArgb(70, 70, 90));
             revBindingsBtn.Click += (s, e) => OpenRevLimiterBindings();
             MakeLabel(revLimiterPanel, "Bind functions using the gear icon.", 15, 55, 270, 18,
                       Color.FromArgb(140, 140, 170), null, ContentAlignment.MiddleLeft, locKey: "rev.calibratehint");
