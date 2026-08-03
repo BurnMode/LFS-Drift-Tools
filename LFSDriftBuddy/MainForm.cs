@@ -60,7 +60,7 @@ namespace LFSDriftBuddy
 
         
 
-        private const int TitleBarHeight = 36;
+        private const int TitleBarHeight = 40;
         private Panel _titleBar;
         private Label _titleBarLabel;
         private CaptionButton _btnMinimize;
@@ -160,8 +160,19 @@ namespace LFSDriftBuddy
         private RoundedPanel statusPanel;
         #endregion
 
-        public MainForm()
+
+        private WindowShadow _shadow;
+
+        // np. na końcu BuildUI() albo w konstruktorze po InitializeComponent()
+       
+
+    public MainForm()
         {
+
+
+
+
+
             _insim = new InSimConnection();
 
             _insim.CarDataReceived += OnCarData;
@@ -285,13 +296,33 @@ namespace LFSDriftBuddy
             _awardTimer.Tick += AwardTimer_Tick;
 
             InitializeComponent();
-            
+
+            _shadow = new WindowShadow(this); // <-- no Owner = this
+
+            this.Load += (s, e) => _shadow.Reposition();
+            this.Move += (s, e) => _shadow.Reposition();
+            this.Resize += (s, e) => _shadow.Reposition();
+            this.Activated += (s, e) => _shadow.Reposition();   // re-pin z-order whenever we regain focus
+            this.VisibleChanged += (s, e) => { if (Visible) _shadow.Reposition(); else _shadow.Hide(); };
+            this.Resize += (s, e) =>
+            {
+                if (Width > 0 && Height > 0)
+                    this.Region = CreateSmoothRoundedRegion(Width, Height, 20);
+            };
+            //this.Region = CreateSmoothRoundedRegion(this.Width, this.Height, 20);
             _overlay = new OverlayForm();
             _overlay.ComboTimeoutSec = DriftEngine.COMBO_TIMEOUT_SEC;
             Localization.LanguageChanged += ApplyLanguage;
             BuildUI();
+
             LoadSettings();
         }
+
+
+
+
+
+
         private SteeringWheelInput _wheelInput;
         private GlobalHotkey _globalHotkey;
         private RevLimiter _revLimiter = new RevLimiter();
@@ -313,7 +344,76 @@ namespace LFSDriftBuddy
             _statusLabel.Text = Localization.T("status.hint");
         }
 
+        // Buduje Region z antyaliasowanej maski (supersampling), dzięki czemu krawędzie
+        // wyglądają gładko mimo że Region i tak jest binarny (piksel wewnątrz/na zewnątrz).
+        // Zamiast pojedynczej linii łuku, próbkujemy w wyższej rozdzielczości i uśredniamy,
+        // przez co próg "wewnątrz/na zewnątrz" przebiega bliżej rzeczywistego okręgu
+        // na poziomie sub-piksela, a widoczne "schodki" są dużo drobniejsze.
+        private Region CreateSmoothRoundedRegion(int width, int height, int radius)
+        {
+            const int scale = 4; // supersampling 4x
 
+            int sw = width * scale;
+            int sh = height * scale;
+            int sr = radius * scale;
+
+            using var mask = new Bitmap(sw, sh, System.Drawing.Imaging.PixelFormat.Format32bppArgb);
+            using (var g = Graphics.FromImage(mask))
+            {
+                g.SmoothingMode = SmoothingMode.None; // liczy się gęstość próbek, nie AA
+                g.Clear(Color.Transparent);
+                using var path = RoundedPath(new Rectangle(0, 0, sw - 1, sh - 1), sr);
+                using var brush = new SolidBrush(Color.Black);
+                g.FillPath(brush, path);
+            }
+
+            var region = new Region(Rectangle.Empty); // start: puste
+
+            var bits = mask.LockBits(new Rectangle(0, 0, sw, sh),
+                System.Drawing.Imaging.ImageLockMode.ReadOnly,
+                System.Drawing.Imaging.PixelFormat.Format32bppArgb);
+
+            try
+            {
+                int stride = bits.Stride;
+                byte[] rowBuffer = new byte[stride];
+
+                for (int y = 0; y < height; y++)
+                {
+                    int sampleY = Math.Min(y * scale + scale / 2, sh - 1);
+
+                    // kopiujemy tylko jeden potrzebny wiersz próbkowanej bitmapy
+                    IntPtr rowPtr = bits.Scan0 + sampleY * stride;
+                    Marshal.Copy(rowPtr, rowBuffer, 0, stride);
+
+                    int runStart = -1;
+                    for (int x = 0; x <= width; x++)
+                    {
+                        bool filled = false;
+                        if (x < width)
+                        {
+                            int sampleX = Math.Min(x * scale + scale / 2, sw - 1);
+                            byte alpha = rowBuffer[sampleX * 4 + 3]; // kanał A w BGRA
+                            filled = alpha >= 128;
+                        }
+
+                        if (filled && runStart == -1)
+                            runStart = x;
+                        else if (!filled && runStart != -1)
+                        {
+                            region.Union(new Rectangle(runStart, y, x - runStart, 1));
+                            runStart = -1;
+                        }
+                    }
+                }
+            }
+            finally
+            {
+                mask.UnlockBits(bits);
+            }
+
+            return region;
+        }
         private void LoadSettings()
         {
             try
@@ -583,7 +683,7 @@ namespace LFSDriftBuddy
                       .GetCustomAttribute<AssemblyInformationalVersionAttribute>()
                       ?.InformationalVersion;
 
-            string appVersion = $"v. {version?.Split('+')[0] ?? "Unknown"}.prealpha";
+            string appVersion = $"v. {version?.Split('+')[0] ?? "Unknown"}.alpha";
 
         int marginTop = 40;
 
@@ -596,7 +696,7 @@ namespace LFSDriftBuddy
 
             Size = new Size(890, 600 + TitleBarHeight);
 
-            MinimumSize = new Size(890, 635);
+            MinimumSize = new Size(890, 640);
 
             MaximumSize = Size;
 
@@ -605,6 +705,8 @@ namespace LFSDriftBuddy
             BackColor = ApplePalette.Background;
 
             Font = new Font("Segoe UI", 10f);
+
+            
 
 
 
@@ -1109,9 +1211,7 @@ namespace LFSDriftBuddy
 
             BuildTitleBar();
 
-            using (var path = RoundedPath(new Rectangle(0, 0, Width, Height), 20))
-                Region = new Region(path);
-
+            //Region = CreateSmoothRoundedRegion(Width, Height, 20);
             this.Paint += MainForm_Paint;
             /*
             // ────────────────────────────────────────────────────────
@@ -1182,7 +1282,6 @@ namespace LFSDriftBuddy
             g.SmoothingMode = SmoothingMode.AntiAlias;
 
             Rectangle rect = new Rectangle(0, 0, Width - 1, Height - 1);
-
             using (GraphicsPath path = RoundedPath(rect, 20))
             using (Pen border = new Pen(ApplePalette.Border, 1.4f))
             {
@@ -1217,10 +1316,7 @@ namespace LFSDriftBuddy
             // Zaokrąglenie okna
             popup.Shown += (s, e) =>
             {
-                popup.Region = new Region(
-                    RoundedPath(
-                        new Rectangle(0, 0, popup.Width, popup.Height),
-                        18));
+                popup.Region = CreateSmoothRoundedRegion(popup.Width, popup.Height, 20);
             };
 
 
@@ -1301,10 +1397,8 @@ namespace LFSDriftBuddy
                 y += 52;
             }
 
-            closeButton.Region = new Region(
-            RoundedPath(
-                new Rectangle(0, 0, closeButton.Width, closeButton.Height),
-                14));
+            closeButton.Region = CreateSmoothRoundedRegion(closeButton.Width, closeButton.Height, 14);
+           
 
 
             popup.Paint += (s, e) =>
@@ -1962,7 +2056,7 @@ namespace LFSDriftBuddy
 
             popup.Shown += (s, e) =>
             {
-                popup.Region = new Region(RoundedPath(new Rectangle(0, 0, popup.Width, popup.Height), 18));
+                popup.Region = CreateSmoothRoundedRegion(popup.Width, popup.Height, 18);
             };
 
             var card = new RoundedPanel { Dock = DockStyle.Fill };
@@ -1984,7 +2078,7 @@ namespace LFSDriftBuddy
             closeButton.FlatAppearance.MouseOverBackColor = Color.FromArgb(235, 235, 240);
             closeButton.FlatAppearance.MouseDownBackColor = Color.FromArgb(220, 220, 225);
             closeButton.Click += (s, e) => popup.Close();
-            closeButton.Region = new Region(RoundedPath(new Rectangle(0, 0, closeButton.Width, closeButton.Height), 14));
+            closeButton.Region = CreateSmoothRoundedRegion(closeButton.Width, closeButton.Height, 14);
 
             MakeLabel(card, Localization.T("rev.bindings.title"), 20, 15, 220, 28,
                 ApplePalette.Title, new Font("Segoe UI Semibold", 11f));
@@ -2070,10 +2164,7 @@ namespace LFSDriftBuddy
 
             popup.Shown += (s, e) =>
             {
-                popup.Region = new Region(
-                    RoundedPath(
-                        new Rectangle(0, 0, popup.Width, popup.Height),
-                        18));
+                popup.Region = CreateSmoothRoundedRegion(popup.Width, popup.Height, 20);
             };
 
 
@@ -2121,14 +2212,7 @@ namespace LFSDriftBuddy
             };
 
 
-            closeButton.Region = new Region(
-                RoundedPath(
-                    new Rectangle(
-                        0,
-                        0,
-                        closeButton.Width,
-                        closeButton.Height),
-                    14));
+            closeButton.Region = CreateSmoothRoundedRegion(closeButton.Width, closeButton.Height, 14);
 
 
             card.Controls.Add(closeButton);
@@ -2174,14 +2258,7 @@ namespace LFSDriftBuddy
 
                 // okrągły kolor
 
-                b.Region = new Region(
-                    RoundedPath(
-                        new Rectangle(
-                            0,
-                            0,
-                            b.Width,
-                            b.Height),
-                        21));
+                b.Region = CreateSmoothRoundedRegion(b.Width, b.Height, 20);
 
 
 
@@ -2757,6 +2834,8 @@ namespace LFSDriftBuddy
                 _insim.ShowButton(BTN_RIGHTIND, "", l: xPos, t: 0, w: 1, h: 1, bStyle: 2);
                 _insim.ShowButton(BTN_LEFTIND, "", l: xPos, t: 0, w: 1, h: 1, bStyle: 2);
             }
+
+
         }
 
         private void BuildTitleBar()
@@ -2772,7 +2851,7 @@ namespace LFSDriftBuddy
             _titleBar.Paint += (s, e) =>
             {
                 using (var pen = new Pen(ApplePalette.Border))
-                    e.Graphics.DrawLine(pen, 0, _titleBar.Height - 1, _titleBar.Width, _titleBar.Height - 1);
+                    e.Graphics.DrawLine(pen, 0, _titleBar.Height + 1, _titleBar.Width, _titleBar.Height + 1);
             };
 
             _titleBarLabel = new Label
@@ -2794,7 +2873,12 @@ namespace LFSDriftBuddy
 
             void LayoutButtons()
             {
+                int btnHeight = _titleBar.Height;
+
+                _btnClose.Size = new Size(_btnClose.Width, btnHeight);
                 _btnClose.Location = new Point(_titleBar.Width - _btnClose.Width, 0);
+
+                _btnMinimize.Size = new Size(_btnMinimize.Width, btnHeight);
                 _btnMinimize.Location = new Point(_btnClose.Left - _btnMinimize.Width, 0);
             }
 
@@ -2803,9 +2887,9 @@ namespace LFSDriftBuddy
             _titleBar.Controls.Add(_titleBarLabel);
             _titleBar.Controls.Add(_btnMinimize);
             _titleBar.Controls.Add(_btnClose);
-
+            
             LayoutButtons();
-
+            _titleBar.Region = CreateSmoothRoundedRegion(_titleBar.Width + 16, _titleBar.Height, 20);
             _titleBar.MouseDown += TitleBar_MouseDown;
             _titleBarLabel.MouseDown += TitleBar_MouseDown;
 
@@ -3418,6 +3502,7 @@ namespace LFSDriftBuddy
             _revLimiter.Dispose();
             _globalHotkey.Dispose();
             _overlay?.Dispose();
+            _shadow?.Close();
             base.OnFormClosing(e);
         }
 
@@ -4095,5 +4180,169 @@ namespace LFSDriftBuddy
         public string SteeringWheelDeviceGuid { get; set; } = "";
         public string SteeringWheelAxis { get; set; } = "X";
 
+
+
+    }
+
+
+
+}
+public class WindowShadow : Form
+{
+    private const int ShadowMargin = 200;
+    private const int CornerRadius = 30;
+    private readonly Form _owner;
+    private Size _lastRenderedSize = Size.Empty;
+
+    [DllImport("user32.dll", ExactSpelling = true, SetLastError = true)]
+    private static extern bool UpdateLayeredWindow(IntPtr hwnd, IntPtr hdcDst, ref POINT pptDst,
+        ref SIZE psize, IntPtr hdcSrc, ref POINT pptSrc, int crKey, ref BLENDFUNCTION pblend, int dwFlags);
+
+    [DllImport("user32.dll")] private static extern IntPtr GetDC(IntPtr hWnd);
+    [DllImport("user32.dll")] private static extern int ReleaseDC(IntPtr hWnd, IntPtr hDC);
+    [DllImport("gdi32.dll")] private static extern IntPtr CreateCompatibleDC(IntPtr hDC);
+    [DllImport("gdi32.dll")] private static extern bool DeleteDC(IntPtr hdc);
+    [DllImport("gdi32.dll")] private static extern IntPtr SelectObject(IntPtr hdc, IntPtr hgdiobj);
+    [DllImport("gdi32.dll")] private static extern bool DeleteObject(IntPtr hObject);
+    [DllImport("user32.dll")]
+    private static extern bool SetWindowPos(IntPtr hWnd, IntPtr hWndInsertAfter,
+        int X, int Y, int cx, int cy, uint uFlags);
+
+    [StructLayout(LayoutKind.Sequential)] private struct POINT { public int X, Y; }
+    [StructLayout(LayoutKind.Sequential)] private struct SIZE { public int cx, cy; }
+    [StructLayout(LayoutKind.Sequential)]
+    private struct BLENDFUNCTION { public byte BlendOp, BlendFlags, SourceConstantAlpha, AlphaFormat; }
+
+    private const int WS_EX_LAYERED = 0x80000;
+    private const int WS_EX_TRANSPARENT = 0x20;
+    private const int WS_EX_TOOLWINDOW = 0x80;
+    private const int ULW_ALPHA = 2;
+    private const byte AC_SRC_OVER = 0;
+    private const byte AC_SRC_ALPHA = 1;
+    private const uint SWP_NOACTIVATE = 0x0010;
+
+    public WindowShadow(Form owner)
+    {
+        _owner = owner;
+        FormBorderStyle = FormBorderStyle.None;
+        ShowInTaskbar = false;
+        StartPosition = FormStartPosition.Manual;
+        // NOTE: no Owner assignment — that's what was forcing us above the main form.
+    }
+
+    // Prevents Show() from stealing focus/activation, which is what triggered
+    // the owner-above-owned reordering in the first place.
+    protected override bool ShowWithoutActivation => true;
+
+    protected override CreateParams CreateParams
+    {
+        get
+        {
+            var cp = base.CreateParams;
+            cp.ExStyle |= WS_EX_LAYERED | WS_EX_TRANSPARENT | WS_EX_TOOLWINDOW;
+            return cp;
+        }
+    }
+
+    public void Reposition()
+    {
+        if (!_owner.IsHandleCreated || _owner.WindowState == FormWindowState.Minimized || !_owner.Visible)
+        {
+            if (Visible) Hide();
+            return;
+        }
+
+        var newBounds = new Rectangle(
+            _owner.Left - ShadowMargin,
+            _owner.Top - ShadowMargin + 12,
+            _owner.Width + ShadowMargin * 2,
+            _owner.Height + ShadowMargin * 2);
+
+        bool sizeChanged = newBounds.Size != _lastRenderedSize;
+
+        if (!Visible)
+            Show(); // safe now: ShowWithoutActivation = true means owner keeps focus
+
+        if (sizeChanged)
+        {
+            Bounds = newBounds;
+            Render(newBounds);
+            _lastRenderedSize = newBounds.Size;
+        }
+        else
+        {
+            // Move without touching size/z-order via UpdateLayeredWindow directly
+            MoveOnly(newBounds.Location);
+        }
+
+        // Always re-pin directly behind the main window, regardless of any
+        // z-order shuffling caused by focus changes elsewhere.
+        SetWindowPos(Handle, _owner.Handle, 0, 0, 0, 0,
+            0x0001 /*SWP_NOSIZE*/ | 0x0002 /*SWP_NOMOVE*/ | SWP_NOACTIVATE);
+    }
+
+    private void MoveOnly(Point location)
+    {
+        Left = location.X;
+        Top = location.Y;
+    }
+
+    private void Render(Rectangle bounds)
+    {
+        if (bounds.Width <= 0 || bounds.Height <= 0) return;
+
+        using var bmp = new Bitmap(bounds.Width, bounds.Height, System.Drawing.Imaging.PixelFormat.Format32bppArgb);
+        using (var g = Graphics.FromImage(bmp))
+        {
+            g.SmoothingMode = SmoothingMode.AntiAlias;
+            g.Clear(Color.Transparent);
+
+            var windowRect = new Rectangle(ShadowMargin, ShadowMargin - 12, _owner.Width, _owner.Height);
+
+            for (int i = ShadowMargin; i >= 1; i--)
+            {
+                int alpha = (int)(55 * Math.Pow(0.35 - (double)i / ShadowMargin, 2.2));
+                if (alpha <= 0) continue;
+
+                var layerRect = Rectangle.Inflate(windowRect, i, i);
+                using var path = RoundedPath(layerRect, CornerRadius + i);
+                using var brush = new SolidBrush(Color.FromArgb(alpha, 0, 0, 0));
+                g.FillPath(brush, path);
+            }
+        }
+
+        DrawBitmap(bmp, bounds.Location);
+    }
+
+    private void DrawBitmap(Bitmap bmp, Point location)
+    {
+        IntPtr screenDc = GetDC(IntPtr.Zero);
+        IntPtr memDc = CreateCompatibleDC(screenDc);
+        IntPtr hBitmap = bmp.GetHbitmap(Color.FromArgb(0));
+        IntPtr oldBitmap = SelectObject(memDc, hBitmap);
+
+        var size = new SIZE { cx = bmp.Width, cy = bmp.Height };
+        var pptSrc = new POINT { X = 0, Y = 0 };
+        var pptDst = new POINT { X = location.X, Y = location.Y };
+        var blend = new BLENDFUNCTION { BlendOp = AC_SRC_OVER, SourceConstantAlpha = 255, AlphaFormat = AC_SRC_ALPHA };
+
+        UpdateLayeredWindow(Handle, screenDc, ref pptDst, ref size, memDc, ref pptSrc, 0, ref blend, ULW_ALPHA);
+
+        SelectObject(memDc, oldBitmap);
+        DeleteObject(hBitmap);
+        DeleteDC(memDc);
+        ReleaseDC(IntPtr.Zero, screenDc);
+    }
+
+    private static GraphicsPath RoundedPath(Rectangle rect, int radius)
+    {
+        var path = new GraphicsPath();
+        int d = Math.Max(1, radius * 2);
+        path.AddArc(rect.X, rect.Y, d, d, 180, 90);
+        path.AddArc(rect.Right - d, rect.Y, d, d, 270, 90);
+        path.AddArc(rect.Right - d, rect.Bottom - d, d, d, 0, 90);
+        path.AddArc(rect.X, rect.Bottom - d, d, d, 90, 90);
+        path.CloseFigure();
+        return path;
     }
 }
