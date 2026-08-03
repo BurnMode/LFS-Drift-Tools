@@ -15,12 +15,13 @@ using static LFSDriftBuddy.DriftEngine;
 using static LFSDriftBuddy.IndicatorManager;
 using static System.Net.Mime.MediaTypeNames;
 using SharpDX.DirectInput;
+using System.Reflection;
 
 namespace LFSDriftBuddy
 {
     public partial class MainForm : Form
     {
-        private string appVersion = "v. 0.27.0802.prealpha";
+        
 
         private readonly string SettingsFile =
         Path.Combine(System.Windows.Forms.Application.StartupPath, "settings.json");
@@ -157,9 +158,6 @@ namespace LFSDriftBuddy
         private RoundedPanel indicatorPanel;
 
         private RoundedPanel statusPanel;
-
-
-
         #endregion
 
         public MainForm()
@@ -463,12 +461,6 @@ namespace LFSDriftBuddy
             }
         }
 
-
-
-
-
-
-
         private void OnRevData(OutGaugeData data)
         {
             BeginInvoke((Action)(() =>
@@ -585,7 +577,15 @@ namespace LFSDriftBuddy
         // ─────────────────────────────────────────────────────
         private void BuildUI()
         {
-            int marginTop = 40;
+
+            var version = Assembly
+                      .GetExecutingAssembly()
+                      .GetCustomAttribute<AssemblyInformationalVersionAttribute>()
+                      ?.InformationalVersion;
+
+            string appVersion = $"v. {version?.Split('+')[0] ?? "Unknown"}.prealpha";
+
+        int marginTop = 40;
 
 
             SuspendLayout();
@@ -649,8 +649,6 @@ namespace LFSDriftBuddy
                 110, locKey: "header.title");
 
 
-
-
             MakeLabel(headerPanel, appVersion, 21, 78, 200, 18,
                       Color.FromArgb(140, 140, 170));
             _connectionStateLabel = MakeLabel(headerPanel, "", 20, 60, 200, 16, ApplePalette.Text, new Font("Segoe UI", 8f), locKey: "status.disconnected");
@@ -680,9 +678,6 @@ namespace LFSDriftBuddy
             };
 
             headerPanel.Controls.Add(_themeSwitch);
-
-
-
 
             connectionPanel = CreateCard(
                 "Connection",
@@ -749,8 +744,6 @@ namespace LFSDriftBuddy
             _adminBox = MakeTextBox(connectionPanel, "", 235, 70, 140, 30);
 
 
-
-
             speedometerPanel = CreateCard(
                 "Speedometer",
                 20,
@@ -768,15 +761,9 @@ namespace LFSDriftBuddy
             };
             // speedometerPanel.Controls.Add(_speedometer);
 
-
-
-
             _speedLabel = MakeLabel(speedometerPanel, "0", 20, 85, 70, 25, Color.FromArgb(255, 200, 50), new Font("Segoe UI", 24f, FontStyle.Bold));
             _speedUnitLabel = MakeLabel(speedometerPanel, "km/h", 20, 120, 50, 20, ApplePalette.Text);
             MakeLabel(speedometerPanel, "SPEED", 20, 60, 50, 20, ApplePalette.Text, new Font("Segoe UI", 7.5f, FontStyle.Bold), locKey: "speedometer.speed");
-
-
-
 
             var marginSide = 10;
 
@@ -787,10 +774,6 @@ namespace LFSDriftBuddy
                 140 + TitleBarHeight,
                 420,
                 180, locKey: "score.title");
-
-
-
-
 
 
             MakeLabel(scorePanel, "TOTAL SCORE", 10 + marginSide, marginTop + 20, 110, 14, ApplePalette.Text, new Font("Segoe UI", 7.5f, FontStyle.Bold), ContentAlignment.TopLeft, locKey: "score.total");
@@ -1181,9 +1164,6 @@ namespace LFSDriftBuddy
                 new Font("Segoe UI", 8));
 
             */
-
-
-
         }
 
 
@@ -1365,10 +1345,7 @@ namespace LFSDriftBuddy
                 overlay.Close();
                 overlay.Dispose();
             }
-
-
         }
-
 
 
         private InputBinding _revToggleBinding = InputBinding.None;
@@ -2107,8 +2084,6 @@ namespace LFSDriftBuddy
 
             popup.Controls.Add(card);
 
-
-
             // Close button
 
             var closeButton = new Button
@@ -2157,9 +2132,6 @@ namespace LFSDriftBuddy
 
 
             card.Controls.Add(closeButton);
-
-
-
             // Title
 
             MakeLabel(
@@ -2173,8 +2145,6 @@ namespace LFSDriftBuddy
                 new Font(
                     "Segoe UI Semibold",
                     11f));
-
-
 
             // Color buttons
 
@@ -2240,8 +2210,6 @@ namespace LFSDriftBuddy
 
                 card.Controls.Add(b);
 
-
-
                 x += 50;
 
 
@@ -2251,8 +2219,6 @@ namespace LFSDriftBuddy
                     y += 50;
                 }
             }
-
-
 
             // shadow popup
 
@@ -2298,10 +2264,7 @@ namespace LFSDriftBuddy
                 }
             };
 
-
-
             overlay.Show();
-
             popup.Owner = overlay;
 
 
@@ -2324,8 +2287,6 @@ namespace LFSDriftBuddy
 
         private const uint WM_KEYDOWN = 0x0100;
         private const uint WM_KEYUP = 0x0101;
-        private const int VK_W = 0x57;  // klawisz "W" – gaz w LFS
-        private const int VK_C = 0x43;  // klawisz "C"
 
         private void ExecuteLightToggle()
         {
@@ -2899,8 +2860,6 @@ namespace LFSDriftBuddy
                 return;
             }
             
-
-
                 if (_drift.LastAwardedText != "") 
             {
                 _insim.ShowButton(BTN_AWARD, colorCurrentMain + _drift.LastAwardedText,
@@ -2913,7 +2872,6 @@ namespace LFSDriftBuddy
 
             }
             //UpdateInGameHUD();
-
 
         }
 
@@ -2943,8 +2901,6 @@ namespace LFSDriftBuddy
             }
         }
 
-
-        // Flash award text — show 3 times then clear
         private void AwardTimer_Tick(object? sender, EventArgs e)
         {
             _awardTick++;
@@ -3030,7 +2986,6 @@ namespace LFSDriftBuddy
 
             wrapper.Controls.Add(nud);
             parent.Controls.Add(wrapper);
-
 
 
             // 🍏 Apple rounded border
@@ -3227,7 +3182,6 @@ namespace LFSDriftBuddy
             protected override void OnMouseLeave(EventArgs e) { _isHover = false; _isDown = false; Invalidate(); base.OnMouseLeave(e); }
             protected override void OnMouseDown(MouseEventArgs e) { _isDown = true; Invalidate(); base.OnMouseDown(e); }
             protected override void OnMouseUp(MouseEventArgs e) { _isDown = false; Invalidate(); base.OnMouseUp(e); }
-
             protected override void OnPaint(PaintEventArgs e)
             {
                 var g = e.Graphics;
@@ -3417,8 +3371,6 @@ namespace LFSDriftBuddy
             return path;
         }
 
-
-
         private void UpdateTireLimiterUI(bool isPatched)
         {
             if (_tireStatusLabel != null)
@@ -3513,7 +3465,7 @@ namespace LFSDriftBuddy
                 true);
 
             Cursor = Cursors.Hand;
-            Size = new Size(51, 30); // proporcje jak w iOS/macOS
+            Size = new Size(51, 30); 
 
             _animTimer = new System.Windows.Forms.Timer { Interval = 15 };
             _animTimer.Tick += AnimTimer_Tick;
@@ -3524,7 +3476,7 @@ namespace LFSDriftBuddy
             if (_checked == value) return;
             _checked = value;
             AnimateTo(value ? 1f : 0f);
-            // celowo bez CheckedChanged?.Invoke(...)
+          
         }
 
         private void AnimateTo(float target)
@@ -3708,7 +3660,7 @@ namespace LFSDriftBuddy
                 ControlStyles.SupportsTransparentBackColor,
                 true);
 
-            Height = 8; // cienki, jak w macOS
+            Height = 8; 
         }
 
         protected override void OnPaint(PaintEventArgs e)
@@ -3785,8 +3737,6 @@ namespace LFSDriftBuddy
             return path;
         }
     }
-
-
 
     public class MacCheckBox : CheckBox
     {
@@ -3994,9 +3944,6 @@ namespace LFSDriftBuddy
             e.Graphics.Clear(Color.FromArgb(13, 13, 20));
         }
     }
-
-
-
 
     public static class ApplePalette
     {
