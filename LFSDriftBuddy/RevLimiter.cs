@@ -166,8 +166,7 @@ namespace LFSDriftBuddy
 
             Error?.Invoke($"Rev limiter: wymuszam przywrócenie zapłonu ({reason}) — silnik utknął zgaszony.");
 
-            // próbuj kilka razy — jeśli okno LFS chwilowo nie odpowiada (np. przez
-            // sam lag który spowodował problem), pierwsza próba może nie wystarczyć
+           
             for (int attempt = 0; attempt < 3; attempt++)
             {
                 if (TryPressIgnitionKey())
@@ -269,9 +268,7 @@ namespace LFSDriftBuddy
             }
             finally
             {
-                // finally gwarantuje, że nawet gdy powyżej wyleci wyjątek,
-                // spróbujemy przywrócić zapłon i zwolnić stan IsCutting —
-                // watchdog i tak by to naprawił, ale nie ma sensu czekać
+               
                 bool needsRestore;
                 lock (_lock)
                 {

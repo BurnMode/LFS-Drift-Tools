@@ -127,6 +127,7 @@ namespace LFSDriftBuddy
         private Button _colorBtn4;
         private Button _colorBtn5;
         private Button _calibrateBtn1;
+        private Button revBindingsBtn;
         private Button _langBtn;
 
         // ── Kierunkowskazy ────────────────────────────────────
@@ -164,14 +165,12 @@ namespace LFSDriftBuddy
         private WindowShadow _shadow;
 
         // np. na końcu BuildUI() albo w konstruktorze po InitializeComponent()
+
+
        
 
     public MainForm()
         {
-
-
-
-
 
             _insim = new InSimConnection();
 
@@ -297,6 +296,12 @@ namespace LFSDriftBuddy
 
             InitializeComponent();
 
+            SetStyle(
+            ControlStyles.AllPaintingInWmPaint |
+            ControlStyles.UserPaint |
+            ControlStyles.OptimizedDoubleBuffer,
+            true);
+       
             _shadow = new WindowShadow(this); // <-- no Owner = this
 
             this.Load += (s, e) => _shadow.Reposition();
@@ -307,7 +312,11 @@ namespace LFSDriftBuddy
             this.Resize += (s, e) =>
             {
                 if (Width > 0 && Height > 0)
-                    this.Region = CreateSmoothRoundedRegion(Width, Height, 20);
+                {
+                    //EnableLayeredWindowMode();
+                    //this.Region = CreateSmoothRoundedRegion(Width, Height, 20);
+                }
+                    
             };
             //this.Region = CreateSmoothRoundedRegion(this.Width, this.Height, 20);
             _overlay = new OverlayForm();
@@ -316,6 +325,8 @@ namespace LFSDriftBuddy
             BuildUI();
 
             LoadSettings();
+            
+            
         }
 
 
@@ -358,9 +369,10 @@ namespace LFSDriftBuddy
             int sr = radius * scale;
 
             using var mask = new Bitmap(sw, sh, System.Drawing.Imaging.PixelFormat.Format32bppArgb);
+
             using (var g = Graphics.FromImage(mask))
             {
-                g.SmoothingMode = SmoothingMode.None; // liczy się gęstość próbek, nie AA
+                g.SmoothingMode = SmoothingMode.AntiAlias; // liczy się gęstość próbek, nie AA
                 g.Clear(Color.Transparent);
                 using var path = RoundedPath(new Rectangle(0, 0, sw - 1, sh - 1), sr);
                 using var brush = new SolidBrush(Color.Black);
@@ -372,6 +384,8 @@ namespace LFSDriftBuddy
             var bits = mask.LockBits(new Rectangle(0, 0, sw, sh),
                 System.Drawing.Imaging.ImageLockMode.ReadOnly,
                 System.Drawing.Imaging.PixelFormat.Format32bppArgb);
+
+
 
             try
             {
@@ -425,6 +439,7 @@ namespace LFSDriftBuddy
                     SetButtonColor(_colorBtn3, Color.Yellow);
                     SetButtonColor(_colorBtn4, Color.Magenta);
                     SetButtonColor(_colorBtn5, Color.Red);
+                    ApplyTheme(false);
                     return;
                 }
 
@@ -596,6 +611,7 @@ namespace LFSDriftBuddy
             ApplePalette.SetDark(dark);
 
             this.BackColor = ApplePalette.Background;
+           
 
             ApplyThemeRecursive(this);
 
@@ -675,6 +691,20 @@ namespace LFSDriftBuddy
         // ─────────────────────────────────────────────────────
         //  UI
         // ─────────────────────────────────────────────────────
+
+        // Kolor "niemożliwy" do przypadkowego wystąpienia w UI (brak magenty w ApplePalette)
+        private static readonly Color WindowKeyColor = Color.FromArgb(255, 255, 0, 254);
+
+        // wywołaj raz, np. w BuildUI() przed ustawieniem Region
+        private void EnableLayeredWindowMode()
+        {
+            this.BackColor = WindowKeyColor;
+            this.TransparencyKey = WindowKeyColor;
+        }
+
+        private Color ButtonColor => _isDarkTheme
+    ? Color.FromArgb(70, 70, 90)     // ciemny motyw — bez zmian
+    : Color.FromArgb(205, 205, 220); // jasny motyw — jasny szaro-fiolet
         private void BuildUI()
         {
 
@@ -702,13 +732,13 @@ namespace LFSDriftBuddy
 
             DoubleBuffered = true;
 
-            BackColor = ApplePalette.Background;
+            BackColor = Color.Black;
 
             Font = new Font("Segoe UI", 10f);
 
-            
+            //Region = CreateSmoothRoundedRegion(Width, Height, 20);
 
-
+      
 
 
             _wheelInput = new SteeringWheelInput(
@@ -756,7 +786,7 @@ namespace LFSDriftBuddy
             _connectionStateLabel = MakeLabel(headerPanel, "", 20, 60, 200, 16, ApplePalette.Text, new Font("Segoe UI", 8f), locKey: "status.disconnected");
 
             _langBtn = MakeButton(headerPanel, Localization.LanguageDisplayName(Localization.CurrentLanguage),
-            320, 75, 90, 26, Color.FromArgb(70, 70, 90));
+            310, 70, 100, 30);
             _langBtn.Click += (s, e) => OpenLanguagePicker(_langBtn);
 
             //_localizedControls.Add((_langBtn, null)); // patrz uwaga niżej — obsłużymy ręcznie
@@ -764,9 +794,7 @@ namespace LFSDriftBuddy
             MakeLabel(headerPanel, "COLORS", 300, 14, 55, 22,
             Color.FromArgb(60, 60, 60), null, ContentAlignment.MiddleRight, locKey: "header.theme");
 
-            var wheelSetupBtn = MakeButton(headerPanel, "🎮", 260, 5, 40, 40, Color.FromArgb(70, 70, 90));
-            wheelSetupBtn.Click += (s, e) => ShowWheelSetupDialog(_wheelInput.GetAvailableDevices());
-
+            
             _themeSwitch = new MacToggleSwitch
             {
                 Location = new Point(360, 10),
@@ -891,7 +919,7 @@ namespace LFSDriftBuddy
             _angleValueLabel = MakeLabel(scorePanel, "0°", 160 + marginSide, marginTop + 90, 50, 20, ApplePalette.Text, new Font("Segoe UI", 14f, FontStyle.Bold));
 
 
-            _resetBtn = MakeButton(scorePanel, "RESET SCORE", 280 + marginSide, 140, 120, 30, Color.FromArgb(200, 20, 20), locKey: "score.reset");
+            _resetBtn = MakeButton(scorePanel, "RESET SCORE", 240 + marginSide, 140, 160, 30, Color.FromArgb(200, 20, 20), locKey: "score.reset");
 
             _resetBtn.Enabled = false;
 
@@ -907,11 +935,11 @@ namespace LFSDriftBuddy
                 180, locKey: "hud.title");
 
 
-            _colorBtn1 = MakeButton(hudPanel, "", 15, 60, 45, 45, Color.White);
-            _colorBtn2 = MakeButton(hudPanel, "", 65, 60, 45, 45, Color.Cyan);
-            _colorBtn3 = MakeButton(hudPanel, "", 115, 60, 45, 45, Color.Yellow);
-            _colorBtn4 = MakeButton(hudPanel, "", 165, 60, 45, 45, Color.Magenta);
-            _colorBtn5 = MakeButton(hudPanel, "", 215, 60, 45, 45, Color.Red);
+            _colorBtn1 = MakeButton(hudPanel, "", 15, 55, 45, 45, Color.White);
+            _colorBtn2 = MakeButton(hudPanel, "", 65, 55, 45, 45, Color.Cyan);
+            _colorBtn3 = MakeButton(hudPanel, "", 115, 55, 45, 45, Color.Yellow);
+            _colorBtn4 = MakeButton(hudPanel, "", 165, 55, 45, 45, Color.Magenta);
+            _colorBtn5 = MakeButton(hudPanel, "", 215, 55, 45, 45, Color.Red);
 
 
             _colorBtn1.Click += (s, e) =>
@@ -949,7 +977,7 @@ namespace LFSDriftBuddy
             _showOverlayCheck = new MacCheckBox
             {
                 Text = "Forza-style overlay",
-                Location = new Point(16, 160),
+                Location = new Point(16, 155),
                 Size = new Size(240, 20),
                 BackColor = Color.Transparent,
                 Checked = true
@@ -960,7 +988,7 @@ namespace LFSDriftBuddy
             {
                 Text = "Show ingame HUD (IS_BTN)",
 
-                Location = new Point(16, 110),
+                Location = new Point(16, 105),
                 Size = new Size(240, 20),
                 BackColor = Color.Transparent,
                 Checked = false
@@ -984,7 +1012,7 @@ namespace LFSDriftBuddy
             {
                 Text = "Show ingame REV Limitter HUD",
 
-                Location = new Point(16, 135),
+                Location = new Point(16, 130),
                 Size = new Size(240, 20),
                 BackColor = Color.Transparent,
                 Checked = true
@@ -1002,16 +1030,16 @@ namespace LFSDriftBuddy
                 420,
                 180, locKey: "rev.title");
 
-            // after
+            
 
-            var revBindingsBtn = MakeButton(revLimiterPanel, "⚙", 255, 5, 40, 40, Color.FromArgb(70, 70, 90));
+            revBindingsBtn = MakeButton(revLimiterPanel, "⚙", 255, 5, 40, 40);
             revBindingsBtn.Click += (s, e) => OpenRevLimiterBindings();
             MakeLabel(revLimiterPanel, "Bind functions using the gear icon.", 15, 55, 270, 18,
                       Color.FromArgb(140, 140, 170), null, ContentAlignment.MiddleLeft, locKey: "rev.calibratehint");
 
             
 
-            _calibrateBtn1 = MakeButton(revLimiterPanel, "CALIBRATE", 310, 70, 100, 30, locKey: "rev.calibrate");
+            _calibrateBtn1 = MakeButton(revLimiterPanel, "CALIBRATE", 300, 70, 110, 30, locKey: "rev.calibrate");
 
             _calibrateBtn1.Click += async (s, e) => await RPMLimitterCalibrate();
 
@@ -1097,6 +1125,10 @@ namespace LFSDriftBuddy
                330 + TitleBarHeight,
                310,
                180, locKey: "indicators.title");
+
+            var wheelSetupBtn = MakeButton(indicatorPanel, "🎮", 260, 5, 40, 40);
+            wheelSetupBtn.Click += (s, e) => ShowWheelSetupDialog(_wheelInput.GetAvailableDevices());
+
 
             _wheelInput.Log += msg => BeginInvoke((Action)(() => _statusLabel.Text = msg));
             _wheelInput.SteeringChanged += pct => BeginInvoke((Action)(() =>
@@ -1202,7 +1234,7 @@ namespace LFSDriftBuddy
 
             _statusLabel = MakeLabel(statusPanel, "Type /insim 29999 w LFS, and click CONNECT.", 20, 25, 620, 18, ApplePalette.Text, new Font("Segoe UI", 8f), locKey: "status.hint");
 
-
+            
             ResumeLayout();
 
             StartPosition = FormStartPosition.CenterScreen;
@@ -1211,7 +1243,7 @@ namespace LFSDriftBuddy
 
             BuildTitleBar();
 
-            //Region = CreateSmoothRoundedRegion(Width, Height, 20);
+           
             this.Paint += MainForm_Paint;
             /*
             // ────────────────────────────────────────────────────────
@@ -1264,6 +1296,7 @@ namespace LFSDriftBuddy
                 new Font("Segoe UI", 8));
 
             */
+            //this.Region = CreateSmoothRoundedRegion(this.Width, this.Height, 20);
         }
 
 
@@ -1276,14 +1309,26 @@ namespace LFSDriftBuddy
             var player = new SoundPlayer(path);
             player.PlaySync();
         }
+
+        protected override void OnPaintBackground(PaintEventArgs e)
+        {
+            
+        }
         private void MainForm_Paint(object sender, PaintEventArgs e)
         {
             var g = e.Graphics;
-            g.SmoothingMode = SmoothingMode.AntiAlias;
 
+            // 1) Wypełnij całe tło BEZ AA — Region już przycina to do zaokrąglonego kształtu,
+            //    więc nie trzeba tu drugi raz "zaokrąglać" ścieżką.
+            g.SmoothingMode = SmoothingMode.AntiAlias;
+            using (var bgBrush = new SolidBrush(this.BackColor))
+                g.FillRectangle(bgBrush, this.ClientRectangle);
+
+            // 2) Dopiero teraz obwódka z AA, rysowana na świeżo wypełnionym tle
+            g.SmoothingMode = SmoothingMode.AntiAlias;
             Rectangle rect = new Rectangle(0, 0, Width - 1, Height - 1);
-            using (GraphicsPath path = RoundedPath(rect, 20))
-            using (Pen border = new Pen(ApplePalette.Border, 1.4f))
+            using (GraphicsPath path = RoundedPath(rect, 2))
+            using (Pen border = new Pen(ApplePalette.Border, 1.6f))
             {
                 g.DrawPath(border, path);
             }
@@ -2250,6 +2295,8 @@ namespace LFSDriftBuddy
                     Cursor = Cursors.Hand,
 
                     Text = ""
+
+
                 };
 
 
@@ -2842,8 +2889,8 @@ namespace LFSDriftBuddy
         {
             _titleBar = new Panel
             {
-                Location = new Point(0, 0),
-                Size = new Size(ClientSize.Width, TitleBarHeight),
+                Location = new Point(1, 1),
+                Size = new Size(ClientSize.Width-2, TitleBarHeight),
                 BackColor = ApplePalette.Card,
                 Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right
             };
@@ -2889,7 +2936,7 @@ namespace LFSDriftBuddy
             _titleBar.Controls.Add(_btnClose);
             
             LayoutButtons();
-            _titleBar.Region = CreateSmoothRoundedRegion(_titleBar.Width + 16, _titleBar.Height, 20);
+            //_titleBar.Region = CreateSmoothRoundedRegion(_titleBar.Width + 16, _titleBar.Height, 20);
             _titleBar.MouseDown += TitleBar_MouseDown;
             _titleBarLabel.MouseDown += TitleBar_MouseDown;
 
@@ -3350,7 +3397,7 @@ namespace LFSDriftBuddy
                 BackColor = Color.Transparent,
                 ForeColor = Color.White,
 
-                Font = new Font("Segoe UI Semibold", 11f),
+                Font = new Font("Segoe UI Semibold", 10f),
                 Cursor = Cursors.Hand,
                 TabStop = false,
 

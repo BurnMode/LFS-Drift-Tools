@@ -5,19 +5,16 @@ using System.Text.Json;
 
 namespace LFSDriftBuddy
 {
-    /// <summary>
-    /// Calculates drift angle from CompCar data and awards points
-    /// like Forza Horizon — rewards speed, angle, and sustained drifts.
-    /// 
+   
     /// InSim Direction/Heading: word, 0 = world Y axis, 32768 = 180 degrees.
     /// Drift angle = angular difference between motion direction and car heading.
-    /// </summary>
+    
     public class DriftEngine
     {
         // ── Drift scoring ───────────────────────────────────────
         private const double MIN_SPEED_KMH = 20.0;
         private const double MIN_DRIFT_ANGLE_DEG = 20.0;
-        private const double MAX_DRIFT_ANGLE_DEG = 110.0;
+        private const double MAX_DRIFT_ANGLE_DEG = 130.0;
         public const double COMBO_TIMEOUT_SEC = 3.0;
         private const double BONUS_TIMEOUT_SEC = 2.5;
         private const double POINTS_PER_SECOND = 400.0;
@@ -86,8 +83,7 @@ namespace LFSDriftBuddy
             LoadLapRecords();
         }
 
-        //
-
+       
         // ────────────────────────────────────────────────────────
         //  Driver handling
         // ────────────────────────────────────────────────────────
@@ -116,7 +112,7 @@ namespace LFSDriftBuddy
             ApplyTrackKey();
         }
 
-        public void SetLayout(string layoutName)   // ← NOWE
+        public void SetLayout(string layoutName)  
         {
             _currentLayoutName = layoutName ?? "";
             ApplyTrackKey();
@@ -129,18 +125,14 @@ namespace LFSDriftBuddy
 
             _currentTrackKey = newKey;
 
-            MigrateDefaultLapRecordIfNeeded();   // ← NOWE
+            MigrateDefaultLapRecordIfNeeded(); 
 
             BestLapScore = GetBestLapForDriver(CurrentDriver, _currentTrackCode, _currentLayoutName);
             LapScore = 0;
             HasActiveLapContext = false;
         }
 
-        /// <summary>
-        /// Jeśli wcześniej (przez pusty LName z InSim) najlepszy wynik dla tej trasy zapisał się
-        /// pod kluczem "default", a teraz mamy poprawną nazwę layoutu bez własnego zapisu —
-        /// przenieś wynik pod właściwy klucz zamiast zaczynać od zera.
-        /// </summary>
+       
         private void MigrateDefaultLapRecordIfNeeded()
         {
             if (string.IsNullOrWhiteSpace(_currentLayoutName)) return;
@@ -164,7 +156,7 @@ namespace LFSDriftBuddy
 
             LapCompleted?.Invoke(LapScore, BestLapScore);
             LapScore = 0;
-            HasActiveLapContext = true;   // ← NOWE: od teraz ramka może być widoczna
+            HasActiveLapContext = true;   
         }
 
         // ────────────────────────────────────────────────────────
@@ -210,8 +202,6 @@ namespace LFSDriftBuddy
                 eBrakeCount += 1;
                 eDriftActive = true;
             }
-
-
 
             if (!speeding && !drifting) 
             { 
@@ -400,9 +390,6 @@ namespace LFSDriftBuddy
 
                     DriftStarted?.Invoke();
                 }
-
-               
-
 
                 _lastDriftTime = now;
                 double driftTime = (now - _driftStartTime).TotalMilliseconds;

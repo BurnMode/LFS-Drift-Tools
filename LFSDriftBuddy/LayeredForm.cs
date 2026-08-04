@@ -18,8 +18,7 @@ namespace LFSDriftBuddy
         private const int WS_EX_NOACTIVATE = 0x08000000;
         private const int WS_EX_TOPMOST = 0x00000008; // ← NOWE
         private const int GWL_EXSTYLE = -20;
-
-       
+          
 
         [DllImport("user32.dll")] private static extern int GetWindowLong(IntPtr hWnd, int nIndex);
         [DllImport("user32.dll")] private static extern int SetWindowLong(IntPtr hWnd, int nIndex, int dwNewLong);
@@ -44,7 +43,7 @@ namespace LFSDriftBuddy
         private const uint SWP_NOSIZE = 0x0001;
         private const uint SWP_NOACTIVATE = 0x0010;
 
-        /// <summary>Wymusza umieszczenie okna na samej górze z-ordera.</summary>
+        
         public void ForceTopmost()
         {
             SetWindowPos(Handle, HWND_TOPMOST, 0, 0, 0, 0,
@@ -77,7 +76,7 @@ namespace LFSDriftBuddy
             }
         }
 
-        /// <summary>Włącza/wyłącza przepuszczanie kliknięć myszy do okna pod spodem (do gry).</summary>
+       
         public void SetClickThrough(bool enabled)
         {
             int ex = GetWindowLong(Handle, GWL_EXSTYLE);

@@ -11,30 +11,18 @@ public class SteeringWheelInput : IDisposable
     private readonly DirectInput _directInput;
     private Joystick _wheel;
     private readonly System.Windows.Forms.Timer _pollTimer;
-
-    // stan poprzedniej klatki, żeby wykrywać zbocze (naciśnięcie), a nie "trzymanie"
     private bool[] _previousButtons = Array.Empty<bool>();
-    // mapowanie: indeks przycisku (0-based) -> akcja wywoływana przy naciśnięciu
     private readonly Dictionary<int, Action> _buttonBindings;
-
-    // ustawiane na true po pierwszej próbie auto-connecta (żeby Poll() nie próbował w kółko
-    // i żeby WheelNotFound wystrzelił dokładnie raz, gdy subskrybenci już są podpięci)
     private bool _autoConnectAttempted = false;
-
     public bool IsConnected => _wheel != null;
     public string DeviceName { get; private set; } = "";
     public Guid DeviceGuid { get; private set; } = Guid.Empty;
     public event Action<string> Log;
 
-    // odpala się dla KAŻDEGO naciśniętego przycisku, niezależnie od tego,
-    // czy ma przypisaną akcję — używane m.in. przez dialog bindowania
     public event Action<int> AnyButtonPressed;
-
-    // -100 (do oporu w lewo) .. 0 (środek) .. 100 (do oporu w prawo)
     public double SteeringPercent { get; private set; } = 0;
     public event Action<double> SteeringChanged;
 
-    // wystrzeliwuje się, gdy automatyczna detekcja nie znajdzie znanej kierownicy —
     // UI (MainForm) łapie to i pokazuje dialog ręcznego wyboru urządzenia
     public event Action<List<(Guid Guid, string Name)>> WheelNotFound;
 
@@ -64,8 +52,6 @@ public class SteeringWheelInput : IDisposable
         "CSL", "Fanatec", "ClubSport"
     };
 
-    // znane wyjątki, gdzie skręt NIE jest zgłaszany jako oś X — dopisuj tu modele,
-    // dla których użytkownicy zgłoszą problem zamiast każdorazowo kalibrować ręcznie
     private static readonly Dictionary<string, JoystickOffset> KnownAxisOverrides =
         new(StringComparer.OrdinalIgnoreCase)
         {
@@ -98,9 +84,7 @@ public class SteeringWheelInput : IDisposable
         _buttonBindings = bindings.ToDictionary(b => b.buttonIndex, b => b.onPressed);
         _directInput = new DirectInput();
 
-        // UWAGA: świadomie NIE łączymy się tutaj automatycznie. Robimy to w pierwszym
-        // Tick() timera, żeby wywołujący (MainForm) zdążył podpiąć się pod WheelNotFound
-        // zanim ta próba w ogóle się odbędzie.
+      
         _pollTimer = new System.Windows.Forms.Timer { Interval = 20 }; // ~50Hz
         _pollTimer.Tick += (s, e) => Poll();
         _pollTimer.Start();
@@ -165,7 +149,6 @@ public class SteeringWheelInput : IDisposable
         Connect(instanceGuid, axis, info.ProductName);
         return true;
     }
-
 
     private void PollXInput()
     {
@@ -273,14 +256,11 @@ public class SteeringWheelInput : IDisposable
             _wheel = new Joystick(_directInput, instanceGuid);
             _wheel.Properties.BufferSize = 128;
 
-            // Bez tego pady (XInput przez DirectInput) tracą input, gdy okno aplikacji
-            // nie ma fokusu (np. gdy LFS jest na pierwszym planie). Kierownice zwykle
-            // działały "przypadkiem" dzięki własnym sterownikom.
+           
             _wheel.SetCooperativeLevel(_ownerHandle, CooperativeLevel.Background | CooperativeLevel.NonExclusive);
             _wheel.Acquire();
 
-            // wymuś stały, znany zakres na WSZYSTKICH osiach — niezależnie od tego,
-            // którą finalnie wybierzemy jako skręt
+         
             foreach (var deviceObject in _wheel.GetObjects(DeviceObjectTypeFlags.Axis))
             {
                 _wheel.GetObjectPropertiesById(deviceObject.ObjectId).Range = new InputRange(-AxisRange, AxisRange);
@@ -290,7 +270,7 @@ public class SteeringWheelInput : IDisposable
             DeviceName = name;
             DeviceGuid = instanceGuid;
             _previousButtons = new bool[_wheel.Capabilities.ButtonCount];
-            _autoConnectAttempted = true; // nie nadpisuj ręcznego/zapisanego wyboru auto-detekcją
+            _autoConnectAttempted = true; 
 
             Log?.Invoke($"{Localization.T("status.connected")} {DeviceName} {Localization.T("wheelconfig.axis")} {SteeringAxis})");
         }
@@ -301,8 +281,6 @@ public class SteeringWheelInput : IDisposable
             _wheel = null;
         }
     }
-
-
 
     private void Poll()
     {
@@ -338,8 +316,6 @@ public class SteeringWheelInput : IDisposable
                 SteeringChanged?.Invoke(SteeringPercent);
             }
 
-            // tylko gdy ktoś faktycznie słucha (np. dialog kalibracji) — żeby nie alokować
-            // słownika 50 razy na sekundę bez potrzeby
             if (RawAxesChanged != null)
             {
                 RawAxesChanged.Invoke(new Dictionary<JoystickOffset, int>

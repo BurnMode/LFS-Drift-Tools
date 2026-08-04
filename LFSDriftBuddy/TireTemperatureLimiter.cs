@@ -7,7 +7,7 @@ namespace LFSDriftBuddy
     /// <summary>
     /// Tire Temperature Limiter for LFS 0.8C
     /// Patches LFS.exe memory to prevent tire temperature increase during drift.
-    /// Ported from C++ to C#
+
     /// </summary>
     public class TireTemperatureLimiter
     {
@@ -81,7 +81,7 @@ namespace LFSDriftBuddy
 
         // Byte pattern for LFS 0.8C tire temperature code
         // For 0.7F it was: 0xD8, 0x4D, 0xDC, 0xD8, 0x65, 0x14, 0xD8
-        // 0.8C might differ - try these patterns (you may need to adjust)
+        // 0.8C i don't know what pattern is for 0.8C
         private readonly byte[] _toFind = { 0xD8, 0x4D, 0xDC, 0xD8, 0x65, 0x14, 0xD8 };
         private readonly byte[] _toReplace = { 0x90, 0x90, 0x90, 0xD8, 0x65, 0x14, 0xD8 }; // NOP out first 3 bytes
 
