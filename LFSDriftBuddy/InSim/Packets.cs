@@ -22,7 +22,7 @@ namespace LFSDriftBuddy.InSim
             byte   prefix    = 33,   // '!'
             ushort interval  = 200,  // ms between MCI packets
             string admin     = "",
-            string iname     = "DriftBuddy")
+            string iname     = "DriftTools")
         {
             byte[] packet = new byte[44];
             int i = 0;
