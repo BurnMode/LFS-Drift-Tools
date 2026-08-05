@@ -1,6 +1,6 @@
 # LFS Drift Tools
 
-**LFS Drift Tools** is a companion application for [Live for Speed](https://www.lfs.net/) that turns your drift sessions into a scored, feature-rich experience. It connects to LFS via InSim/OutGauge and adds real-time scoring, an in-game HUD, a transparent overlay, a configurable rev limiter, and a smarter turn signal system - all wrapped in a clean, modern desktop UI.
+**LFS Drift Tools** is a companion application for [Live for Speed](https://www.lfs.net/) that turns your drift sessions into a more fun experience. It connects to LFS via InSim/OutGauge and adds real-time scoring, an in-game HUD, a transparent overlay, a configurable rev limiter, and a smarter turn signal system - all wrapped in a clean, modern UI.
 
 ## Key Features
 
