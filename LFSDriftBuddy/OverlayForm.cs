@@ -38,16 +38,16 @@ namespace LFSDriftBuddy
         {
             string fontPath = Path.Combine(Application.StartupPath, "Fonts");
 
-            _fontCollection.AddFontFile(Path.Combine(fontPath, "idle.ttf"));
+            //_fontCollection.AddFontFile(Path.Combine(fontPath, "idle.ttf"));
             _fontCollection.AddFontFile(Path.Combine(fontPath, "active.otf"));
 
-            FontFamily idle = _fontCollection.Families[1];
-            FontFamily active = _fontCollection.Families[1];
+            //FontFamily idle = _fontCollection.Families[1];
+            FontFamily active = _fontCollection.Families[0];
 
 
-            _idleFont24 = new Font(idle, 24f, FontStyle.Bold);
-            _idleFont26 = new Font(idle, 26f, FontStyle.Bold);
-            _idleFont32 = new Font(idle, 32f, FontStyle.Bold);
+            _idleFont24 = new Font(active, 24f, FontStyle.Bold);
+            _idleFont26 = new Font(active, 26f, FontStyle.Bold);
+            _idleFont32 = new Font(active, 32f, FontStyle.Bold);
 
             _activeFont11 = new Font(active, 11f, FontStyle.Regular);
             _activeFont24 = new Font(active, 24f, FontStyle.Bold);

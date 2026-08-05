@@ -322,6 +322,7 @@ namespace LFSDriftBuddy
             _overlay = new OverlayForm();
             _overlay.ComboTimeoutSec = DriftEngine.COMBO_TIMEOUT_SEC;
             Localization.LanguageChanged += ApplyLanguage;
+
             BuildUI();
 
             LoadSettings();
@@ -713,7 +714,7 @@ namespace LFSDriftBuddy
                       .GetCustomAttribute<AssemblyInformationalVersionAttribute>()
                       ?.InformationalVersion;
 
-            string appVersion = $"v. {version?.Split('+')[0] ?? "Unknown"}.alpha";
+            string appVersion = $"v.{version?.Split('+')[0] ?? "Unknown"}.alpha";
 
         int marginTop = 40;
 
@@ -726,7 +727,7 @@ namespace LFSDriftBuddy
 
             Size = new Size(890, 600 + TitleBarHeight);
 
-            MinimumSize = new Size(890, 640);
+            MinimumSize = new Size(890, 600 + TitleBarHeight);
 
             MaximumSize = Size;
 
