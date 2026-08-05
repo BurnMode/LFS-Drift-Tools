@@ -440,7 +440,10 @@ namespace LFSDriftBuddy
                     SetButtonColor(_colorBtn3, Color.Yellow);
                     SetButtonColor(_colorBtn4, Color.Magenta);
                     SetButtonColor(_colorBtn5, Color.Red);
-                    ApplyTheme(false);
+                    ApplyTheme(true);
+                    _isDarkTheme = true;
+                    if (_themeSwitch != null)
+                        _themeSwitch.SetCheckedSilent(_isDarkTheme);
                     return;
                 }
 
@@ -604,7 +607,7 @@ namespace LFSDriftBuddy
             }));
         }
 
-        private bool _isDarkTheme = false;
+        private bool _isDarkTheme = true;
 
         private void ApplyTheme(bool dark)
         {
@@ -4206,7 +4209,7 @@ namespace LFSDriftBuddy
 
         public string Language { get; set; } = "English";
 
-        public bool DarkTheme { get; set; } = false;
+        public bool DarkTheme { get; set; } = true;
 
         public string InSimColor1 { get; set; } = "^7";
         public string InSimColor2 { get; set; } = "^6";
