@@ -38,9 +38,6 @@
     <None Update="Fonts\idle.otf">
       <CopyToOutputDirectory>Always</CopyToOutputDirectory>
     </None>
-    <None Update="Fonts\idle.ttf">
-      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
-    </None>
     <None Update="indicator_cancel.wav">
       <CopyToOutputDirectory>Never</CopyToOutputDirectory>
     </None>
