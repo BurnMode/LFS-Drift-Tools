@@ -98,6 +98,9 @@ namespace LFSDriftBuddy
         private Label _comboLabel, _comboValueLabel;
         private Label _scoreLabel, _scoreValueLabel;
         private Label _runLabel, _runValueLabel;
+        private Label _bestRunValueLabel;
+        private Label _bestDriftValueLabel;
+        private Label _bestDeepDriftValueLabel;
         private Label _statusLabel;
         private TextBox _hostBox, _adminBox;
         private NumericUpDown _portBox;
@@ -132,7 +135,12 @@ namespace LFSDriftBuddy
 
         // ── Kierunkowskazy ────────────────────────────────────
         private Label _indicatorStatusLabel;
-       
+        private MacCheckBox _indicatorSoundsCheck;
+        private MacCheckBox _indicatorAutoCancelCheck;
+        private MacSlider _indicatorVolumeSlider;
+        private Label _indicatorVolumeValueLabel;
+        private int _indicatorSoundsVolume = 100;
+
         private Button _bindLeftBtn, _bindRightBtn, _bindHazardBtn, _bindLightBtn;
         private CheckBox _autoReturnCheck;
         
@@ -326,14 +334,10 @@ namespace LFSDriftBuddy
             BuildUI();
 
             LoadSettings();
-            
-            
+
+            UpdateBestStatsLabels();
+
         }
-
-
-
-
-
 
         private SteeringWheelInput _wheelInput;
         private GlobalHotkey _globalHotkey;
@@ -444,10 +448,17 @@ namespace LFSDriftBuddy
                     _isDarkTheme = true;
                     if (_themeSwitch != null)
                         _themeSwitch.SetCheckedSilent(_isDarkTheme);
+
+
+                    _indicatorVolumeSlider.SetValueSilent(100);
+                    _indicatorSoundsVolume = 100;
+                    _indicatorVolumeValueLabel.Text = $"{_indicatorSoundsVolume}%";
+                    _indicatorSoundsCheck.Checked = true;
+                    _indicatorAutoCancelCheck.Checked = true;
+
+                   
                     return;
                 }
-
-
 
                 string json = File.ReadAllText(SettingsFile);
 
@@ -520,7 +531,19 @@ namespace LFSDriftBuddy
                         _savedWheelAxis = savedAxis;
                         _wheelInput.ConnectToDevice(savedGuid, savedAxis);
                     }
+                    try 
+                    {
+                        _indicatorSoundsVolume = Math.Clamp(settings.IndicatorSoundsVolume, 0, 100);
+                        _indicatorVolumeSlider.SetValueSilent(_indicatorSoundsVolume);
+                        _indicatorVolumeValueLabel.Text = $"{_indicatorSoundsVolume}%";
+                        _indicatorSoundsCheck.Checked = settings.IndicatorSoundsEnabled;
+                        _indicatorAutoCancelCheck.Checked = settings.IndicatorAutoCancelOnCenter;
+
+                    } catch { }
+                    
+
                 }
+                
             }
             catch
             {
@@ -566,6 +589,10 @@ namespace LFSDriftBuddy
                     SteeringWheelDeviceGuid = _savedWheelGuid.ToString(),
                     SteeringWheelAxis = _savedWheelAxis.ToString(),
 
+                    IndicatorSoundsEnabled = _indicatorSoundsCheck.Checked,
+                    IndicatorSoundsVolume = _indicatorVolumeSlider.Value,
+                    IndicatorAutoCancelOnCenter = _indicatorAutoCancelCheck.Checked,
+
                 };
 
                 string json = JsonSerializer.Serialize(settings, new JsonSerializerOptions()
@@ -588,7 +615,7 @@ namespace LFSDriftBuddy
                 _rpmLabel.Text = ((int)data.RPM).ToString("N0");
                 _overlay.UpdateRpm((int)data.RPM);
                 _rpmBar.Value = (int)Math.Min(data.RPM, _rpmBar.Maximum);
-                
+               
 
                 // Podświetl czerwono gdy blisko limitu
                 _rpmLabel.ForeColor = data.RPM >= _revLimiter.RpmLimit * 0.95
@@ -728,9 +755,9 @@ namespace LFSDriftBuddy
 
             StartPosition = FormStartPosition.CenterScreen;
 
-            Size = new Size(890, 600 + TitleBarHeight);
+            Size = new Size(890, 670 + TitleBarHeight);
 
-            MinimumSize = new Size(890, 600 + TitleBarHeight);
+            MinimumSize = new Size(890, 670 + TitleBarHeight);
 
             MaximumSize = Size;
 
@@ -883,7 +910,7 @@ namespace LFSDriftBuddy
                 20,
                 330 + TitleBarHeight,
                 240,
-                180, locKey: "speedometer.title");
+                260, locKey: "speedometer.title");
 
 
             // ── Speedometer ───────────────────────────────────
@@ -897,7 +924,7 @@ namespace LFSDriftBuddy
 
             _speedLabel = MakeLabel(speedometerPanel, "0", 20, 85, 70, 25, Color.FromArgb(255, 200, 50), new Font("Segoe UI", 24f, FontStyle.Bold));
             _speedUnitLabel = MakeLabel(speedometerPanel, "km/h", 20, 120, 50, 20, ApplePalette.Text);
-            MakeLabel(speedometerPanel, "SPEED", 20, 60, 50, 20, ApplePalette.Text, new Font("Segoe UI", 7.5f, FontStyle.Bold), locKey: "speedometer.speed");
+            MakeLabel(speedometerPanel, "SPEED", 20, 60, 100, 20, ApplePalette.Text, new Font("Segoe UI", 7.5f, FontStyle.Bold), locKey: "speedometer.speed");
 
             var marginSide = 10;
 
@@ -916,14 +943,24 @@ namespace LFSDriftBuddy
             MakeLabel(scorePanel, "RUN SCORE", 10 + marginSide, marginTop + 70, 100, 14, ApplePalette.Text, new Font("Segoe UI", 7.5f, FontStyle.Bold), ContentAlignment.TopLeft, locKey: "score.run");
             _runValueLabel = MakeLabel(scorePanel, "0", 10 + marginSide, marginTop + 90, 140, 20, Color.FromArgb(80, 220, 120), new Font("Segoe UI", 14f, FontStyle.Bold));
 
-            MakeLabel(scorePanel, "COMBO", 160 + marginSide, marginTop + 20, 100, 14, ApplePalette.Text, new Font("Segoe UI", 7.5f, FontStyle.Bold), ContentAlignment.TopLeft, locKey: "score.combo");
-            _comboValueLabel = MakeLabel(scorePanel, "x1", 160 + marginSide, marginTop + 40, 100, 20, Color.FromArgb(255, 120, 40), new Font("Segoe UI", 14f, FontStyle.Bold));
+            MakeLabel(scorePanel, "COMBO", 150 + marginSide, marginTop + 20, 60, 14, ApplePalette.Text, new Font("Segoe UI", 7.5f, FontStyle.Bold), ContentAlignment.TopLeft, locKey: "score.combo");
+            _comboValueLabel = MakeLabel(scorePanel, "x1", 150 + marginSide, marginTop + 40, 60, 20, Color.FromArgb(255, 120, 40), new Font("Segoe UI", 14f, FontStyle.Bold));
 
-            MakeLabel(scorePanel, "DRIFT ANGLE", 160 + marginSide, marginTop + 70, 100, 14, ApplePalette.Text, new Font("Segoe UI", 7.5f, FontStyle.Bold), ContentAlignment.TopLeft, locKey: "score.angle");
-            _angleValueLabel = MakeLabel(scorePanel, "0°", 160 + marginSide, marginTop + 90, 50, 20, ApplePalette.Text, new Font("Segoe UI", 14f, FontStyle.Bold));
+            MakeLabel(scorePanel, "DRIFT ANGLE", 150 + marginSide, marginTop + 70, 70, 14, ApplePalette.Text, new Font("Segoe UI", 7.5f, FontStyle.Bold), ContentAlignment.TopLeft, locKey: "score.angle");
+            _angleValueLabel = MakeLabel(scorePanel, "0°", 150 + marginSide, marginTop + 90, 50, 20, ApplePalette.Text, new Font("Segoe UI", 14f, FontStyle.Bold));
+
+            MakeLabel(scorePanel, "BEST RUN", 240 + marginSide, marginTop + 20, 160, 14, ApplePalette.Text, new Font("Segoe UI", 7.5f, FontStyle.Bold), ContentAlignment.TopLeft, locKey: "score.bestrun");
+            _bestRunValueLabel = MakeLabel(scorePanel, "0", 240 + marginSide, marginTop + 40, 160, 18, Color.FromArgb(255, 200, 50), new Font("Segoe UI", 14f, FontStyle.Bold));
+
+            MakeLabel(scorePanel, "BEST DRIFT", 240 + marginSide, marginTop + 70, 75, 14, ApplePalette.Text, new Font("Segoe UI", 7.5f, FontStyle.Bold), ContentAlignment.TopLeft, locKey: "score.bestdrift");
+            _bestDriftValueLabel = MakeLabel(scorePanel, "0.0s", 240 + marginSide, marginTop + 90, 75, 18, Color.FromArgb(60, 180, 255), new Font("Segoe UI", 14f, FontStyle.Bold));
+
+            MakeLabel(scorePanel, "BEST DEEP DRIFT", 325 + marginSide, marginTop + 70, 80, 14, ApplePalette.Text, new Font("Segoe UI", 7.5f, FontStyle.Bold), ContentAlignment.TopLeft, locKey: "score.bestdeepdrift");
+            _bestDeepDriftValueLabel = MakeLabel(scorePanel, "0.0s", 325 + marginSide, marginTop + 90, 80, 18, Color.FromArgb(255, 80, 80), new Font("Segoe UI", 14f, FontStyle.Bold));
 
 
-            _resetBtn = MakeButton(scorePanel, "RESET SCORE", 240 + marginSide, 140, 160, 30, Color.FromArgb(200, 20, 20), locKey: "score.reset");
+
+            _resetBtn = MakeButton(scorePanel, "RESET SCORE", 240 + marginSide, 10, 160, 30, Color.FromArgb(200, 20, 20), locKey: "score.reset");
 
             _resetBtn.Enabled = false;
 
@@ -936,14 +973,16 @@ namespace LFSDriftBuddy
                 270,
                 330 + TitleBarHeight,
                 280,
-                180, locKey: "hud.title");
+                260, locKey: "hud.title");
+
+            MakeLabel(hudPanel, "Colors:", 15, marginTop + 15, 100, 22, ApplePalette.Text, null, ContentAlignment.MiddleLeft, locKey: "hud.colors");
 
 
-            _colorBtn1 = MakeButton(hudPanel, "", 15, 55, 45, 45, Color.White);
-            _colorBtn2 = MakeButton(hudPanel, "", 65, 55, 45, 45, Color.Cyan);
-            _colorBtn3 = MakeButton(hudPanel, "", 115, 55, 45, 45, Color.Yellow);
-            _colorBtn4 = MakeButton(hudPanel, "", 165, 55, 45, 45, Color.Magenta);
-            _colorBtn5 = MakeButton(hudPanel, "", 215, 55, 45, 45, Color.Red);
+            _colorBtn1 = MakeButton(hudPanel, "", 15, 80, 45, 45, Color.White);
+            _colorBtn2 = MakeButton(hudPanel, "", 65, 80, 45, 45, Color.Cyan);
+            _colorBtn3 = MakeButton(hudPanel, "", 115, 80, 45, 45, Color.Yellow);
+            _colorBtn4 = MakeButton(hudPanel, "", 165, 80, 45, 45, Color.Magenta);
+            _colorBtn5 = MakeButton(hudPanel, "", 215, 80, 45, 45, Color.Red);
 
 
             _colorBtn1.Click += (s, e) =>
@@ -977,27 +1016,61 @@ namespace LFSDriftBuddy
                  SaveSettings();
              });
 
-
-            _showOverlayCheck = new MacCheckBox
-            {
-                Text = "Forza-style overlay",
-                Location = new Point(16, 155),
-                Size = new Size(240, 20),
-                BackColor = Color.Transparent,
-                Checked = true
-            };
-            hudPanel.Controls.Add(_showOverlayCheck);
-
             _showHudCheck = new MacCheckBox
             {
                 Text = "Show ingame HUD (IS_BTN)",
 
-                Location = new Point(16, 105),
+                Location = new Point(16, 155),
                 Size = new Size(240, 20),
                 BackColor = Color.Transparent,
                 Checked = false
 
             };
+
+            _showOverlayCheck = new MacCheckBox
+            {
+                Text = "Forza-style overlay",
+                Location = new Point(16, 130),
+                Size = new Size(240, 20),
+                BackColor = Color.Transparent,
+                Checked = true
+            };
+
+            _showOverlayCheck.CheckedChanged += (s, e) =>
+            {
+                if (_showOverlayCheck.Checked)
+                {
+                    IntPtr lfsHwnd = FindLfsWindow();
+                    if (lfsHwnd != IntPtr.Zero)
+                    {
+                        _overlay.UpdateScore(_drift.TotalScore);
+                        _overlay.UpdateAccentColor(InSimCodeToColor(InSimColor1));
+                        _overlay.AttachTo(lfsHwnd);
+                    }
+                }
+                else 
+                {
+                    _overlay.Detach();
+                    
+                }
+                SaveSettings();
+            };
+
+            _showRPMHudCheck = new MacCheckBox
+            {
+
+                Text = "Show ingame REV Limitter HUD",
+
+                Location = new Point(16, 180),
+                Size = new Size(240, 20),
+                BackColor = Color.Transparent,
+                Checked = true
+
+            };
+
+            hudPanel.Controls.Add(_showOverlayCheck);
+
+           
             _showHudCheck.CheckedChanged += (s, e) =>
             {
                 if (!_showHudCheck.Checked)
@@ -1012,16 +1085,7 @@ namespace LFSDriftBuddy
                 }
             };
 
-            _showRPMHudCheck = new MacCheckBox
-            {
-                Text = "Show ingame REV Limitter HUD",
-
-                Location = new Point(16, 130),
-                Size = new Size(240, 20),
-                BackColor = Color.Transparent,
-                Checked = true
-
-            };
+            
             hudPanel.Controls.Add(_showHudCheck);
             hudPanel.Controls.Add(_showRPMHudCheck);
             _localizedControls.Add((_showHudCheck, "hud.show"));
@@ -1128,7 +1192,7 @@ namespace LFSDriftBuddy
                560,
                330 + TitleBarHeight,
                310,
-               180, locKey: "indicators.title");
+               260, locKey: "indicators.title");
 
             var wheelSetupBtn = MakeButton(indicatorPanel, "🎮", 260, 5, 40, 40);
             wheelSetupBtn.Click += (s, e) => ShowWheelSetupDialog(_wheelInput.GetAvailableDevices());
@@ -1147,24 +1211,27 @@ namespace LFSDriftBuddy
 
                 IndicatorManager.IndicatorState newState = _indicators.CurrentState;
 
-                if (indClickONOFF == true && pct < 5 && newState == IndicatorState.Right || indClickONOFF == true && pct > -5 && newState == IndicatorState.Left)
+                if (_indicatorAutoCancelCheck != null && _indicatorAutoCancelCheck.Checked)
                 {
-                    indClickONOFF = false;
-                    if (newState == IndicatorState.Right)
+                    if (indClickONOFF == true && pct < 5 && newState == IndicatorState.Right || indClickONOFF == true && pct > -5 && newState == IndicatorState.Left)
                     {
-                        _indicators.ToggleRight();
+                        indClickONOFF = false;
+                        if (newState == IndicatorState.Right)
+                        {
+                            _indicators.ToggleRight();
+                        }
+                        if (newState == IndicatorState.Left)
+                        {
+                            _indicators.ToggleLeft();
+                        }
                     }
-                    if (newState == IndicatorState.Left)
+
+                    if (indClickONOFF == false && pct >= 25 && newState == IndicatorState.Right || indClickONOFF == false && pct <= -25 && newState == IndicatorState.Left)
                     {
-                        _indicators.ToggleLeft();
+                        indClickONOFF = true;
                     }
                 }
 
-                if (indClickONOFF == false && pct >= 25 && newState == IndicatorState.Right || indClickONOFF == false && pct <= -25 && newState == IndicatorState.Left) 
-                {
-                    indClickONOFF = true;
-                }
-                
 
             }));
 
@@ -1229,14 +1296,70 @@ namespace LFSDriftBuddy
                 SaveSettings();
             });
 
+            _indicatorSoundsCheck = new MacCheckBox
+            {
+                Text = Localization.T("indicators.soundscheck"),
+               
+                Location = new Point(15, 175),
+                Size = new Size(270, 20),
+                BackColor = Color.Transparent,
+                Checked = true
+            };
+            _indicatorSoundsCheck.CheckedChanged += (s, e) =>
+            {
+                if (!_indicatorSoundsCheck.Checked)
+                    _indicatorClick.Stop();
+                SaveSettings();
+            };
+            indicatorPanel.Controls.Add(_indicatorSoundsCheck);
+
+            _indicatorAutoCancelCheck = new MacCheckBox
+            {
+                Text = Localization.T("indicators.centeroff"),
+
+                Location = new Point(15, 200),
+                Size = new Size(270, 20),
+                BackColor = Color.Transparent,
+                Checked = true
+            };
+            _indicatorAutoCancelCheck.CheckedChanged += (s, e) => SaveSettings();
+            indicatorPanel.Controls.Add(_indicatorAutoCancelCheck);
+
+            MakeLabel(indicatorPanel, Localization.T("indicators.volume"), 15, 230, 65, 22, locKey: "indicators.volume");
+            _indicatorVolumeSlider = new MacSlider
+            {
+                Location = new Point(80, 230),
+                Size = new Size(170, 22),
+                Minimum = 0,
+                Maximum = 100,
+                Value = _indicatorSoundsVolume
+            };
+
+            _indicatorVolumeValueLabel = MakeLabel(indicatorPanel, $"{_indicatorSoundsVolume}%", 260, 230, 45, 22,
+                ApplePalette.Text, null, ContentAlignment.MiddleLeft);
+
+            _indicatorVolumeSlider.ValueChanged += (s, e) =>
+            {
+                _indicatorSoundsVolume = _indicatorVolumeSlider.Value;
+                _indicatorVolumeValueLabel.Text = $"{_indicatorSoundsVolume}%";
+                ApplyIndicatorVolume();
+                SaveSettings();
+            };
+
+            indicatorPanel.Controls.Add(_indicatorVolumeSlider);
+
+            _localizedControls.Add((_indicatorAutoCancelCheck, "indicators.centeroff"));
+            _localizedControls.Add((_indicatorSoundsCheck, "indicators.soundscheck"));
+           
+
             statusPanel = CreateCard(
                 "",
                 20,
-                520 + TitleBarHeight,
+                600 + TitleBarHeight,
                 850,
-                60);
+                50);
 
-            _statusLabel = MakeLabel(statusPanel, "Type /insim 29999 w LFS, and click CONNECT.", 20, 25, 620, 18, ApplePalette.Text, new Font("Segoe UI", 8f), locKey: "status.hint");
+            _statusLabel = MakeLabel(statusPanel, "Type /insim 29999 w LFS, and click CONNECT.", 20, 16, 620, 18, ApplePalette.Text, new Font("Segoe UI", 8f), locKey: "status.hint");
 
             
             ResumeLayout();
@@ -2406,6 +2529,16 @@ namespace LFSDriftBuddy
                 overlay.Dispose();
             }
         }
+        [DllImport("winmm.dll")]
+        private static extern int waveOutSetVolume(IntPtr hwo, uint dwVolume);
+
+        private void ApplyIndicatorVolume()
+        {
+            int pct = Math.Clamp(_indicatorSoundsVolume, 0, 100);
+            ushort vol = (ushort)(0xFFFF * pct / 100);
+            uint vol32 = ((uint)vol << 16) | vol;
+            waveOutSetVolume(IntPtr.Zero, vol32);
+        }
 
         [DllImport("user32.dll", SetLastError = true)]
         private static extern IntPtr FindWindow(string? lpClassName, string lpWindowName);
@@ -2641,31 +2774,27 @@ namespace LFSDriftBuddy
                 {
                     if (_previousIndicatorState != newState)
                     {
-                        // automatyczne wyłączenie po skręcie
-                        if ((_previousIndicatorState == IndicatorState.Left ||
-                             _previousIndicatorState == IndicatorState.Right) &&
-                             newState == IndicatorState.Off &&
-                             !indClickONOFF)
-                        {
-                            
-                            _indicatorClick.Stop();
-                            _indicatorCancel.Play();
-                        }
-                        else if (newState == IndicatorState.Off &&
-                             !indClickONOFF)
-                        {
-                            _indicatorClick.Stop();
-                            _indicatorCancel.Play();
-                        }
-                        else
-                        {
-                            
-                            
-                            _indicatorClick.PlayLooping();
-                        }
-                        
+                        bool isCancelCase =
+                            ((_previousIndicatorState == IndicatorState.Left ||
+                              _previousIndicatorState == IndicatorState.Right) &&
+                              newState == IndicatorState.Off &&
+                              !indClickONOFF)
+                            ||
+                            (newState == IndicatorState.Off && !indClickONOFF);
 
-                            _previousIndicatorState = newState;
+                        _indicatorClick.Stop();
+
+                        if (_indicatorSoundsCheck.Checked)
+                        {
+                            ApplyIndicatorVolume();
+
+                            if (isCancelCase)
+                                _indicatorCancel.Play();
+                            else
+                                _indicatorClick.PlayLooping();
+                        }
+
+                        _previousIndicatorState = newState;
                     }
                 }
                 catch { }
@@ -2744,9 +2873,18 @@ namespace LFSDriftBuddy
                 ? _drift.CurrentRunPoints.ToString("N0") : "—";
             _comboValueLabel.Text = $"x{_drift.ComboMultiplier}";
             _comboValueLabel.ForeColor = Color.FromArgb(255, 60, 60);
-            
+
+            UpdateBestStatsLabels();
         }
 
+        private void UpdateBestStatsLabels()
+        {
+            if (_bestRunValueLabel == null) return;
+
+            _bestRunValueLabel.Text = _drift.BestRunScore.ToString("N0");
+            _bestDriftValueLabel.Text = $"{_drift.BestDriftDurationMs / 1000.0:F1}s";
+            _bestDeepDriftValueLabel.Text = $"{_drift.BestDeepDriftDurationMs / 1000.0:F1}s";
+        }
         // ─────────────────────────────────────────────────────
         //  In-game HUD via IS_BTN
         //
@@ -3751,7 +3889,255 @@ namespace LFSDriftBuddy
             return path;
         }
     }
+    public class MacSlider : Control
+    {
+        private int _minimum = 0;
+        private int _maximum = 100;
+        private int _value = 0;
+        private bool _isDragging = false;
+        private bool _isHoverKnob = false;
 
+        public event EventHandler ValueChanged;
+
+        public int Minimum
+        {
+            get => _minimum;
+            set { _minimum = value; Invalidate(); }
+        }
+
+        public int Maximum
+        {
+            get => _maximum;
+            set { _maximum = value; Invalidate(); }
+        }
+
+        public int Value
+        {
+            get => _value;
+            set
+            {
+                int clamped = Math.Max(_minimum, Math.Min(_maximum, value));
+                if (_value == clamped) return;
+                _value = clamped;
+                Invalidate();
+                ValueChanged?.Invoke(this, EventArgs.Empty);
+            }
+        }
+
+        public Color TrackColor { get; set; } = Color.FromArgb(225, 225, 230);
+        public Color FillColor { get; set; } = Color.FromArgb(0, 122, 255); // Apple blue
+        public Color KnobColor { get; set; } = Color.White;
+
+        public MacSlider()
+        {
+            SetStyle(
+                ControlStyles.UserPaint |
+                ControlStyles.AllPaintingInWmPaint |
+                ControlStyles.OptimizedDoubleBuffer |
+                ControlStyles.ResizeRedraw |
+                ControlStyles.SupportsTransparentBackColor,
+                true);
+
+            Cursor = Cursors.Hand;
+            Height = 22;
+        }
+
+        public void SetValueSilent(int value)
+        {
+            int clamped = Math.Max(_minimum, Math.Min(_maximum, value));
+            if (_value == clamped) return;
+            _value = clamped;
+            Invalidate();
+        }
+
+        private int TrackY => Height / 2;
+        private int KnobDiameter => Math.Min(18, Height - 2);
+        private int TrackHeight => 6;
+
+        private int ValueToX(int value)
+        {
+            int knobRadius = KnobDiameter / 2;
+            float fraction = (_maximum > _minimum)
+                ? (float)(value - _minimum) / (_maximum - _minimum)
+                : 0f;
+            int travel = Width - KnobDiameter;
+            return knobRadius + (int)(travel * fraction);
+        }
+
+        private int XToValue(int x)
+        {
+            int knobRadius = KnobDiameter / 2;
+            int travel = Width - KnobDiameter;
+            if (travel <= 0) return _minimum;
+
+            float fraction = (float)(x - knobRadius) / travel;
+            fraction = Math.Max(0f, Math.Min(1f, fraction));
+            return _minimum + (int)Math.Round(fraction * (_maximum - _minimum));
+        }
+
+        protected override void OnMouseDown(MouseEventArgs e)
+        {
+            base.OnMouseDown(e);
+            if (e.Button == MouseButtons.Left)
+            {
+                _isDragging = true;
+                Value = XToValue(e.X);
+                Invalidate();
+            }
+        }
+
+        protected override void OnMouseMove(MouseEventArgs e)
+        {
+            base.OnMouseMove(e);
+
+            int knobX = ValueToX(_value);
+            bool overKnob = Math.Abs(e.X - knobX) <= KnobDiameter / 2 + 4;
+            if (overKnob != _isHoverKnob)
+            {
+                _isHoverKnob = overKnob;
+                Invalidate();
+            }
+
+            if (_isDragging)
+            {
+                Value = XToValue(e.X);
+            }
+        }
+
+        protected override void OnMouseUp(MouseEventArgs e)
+        {
+            base.OnMouseUp(e);
+            _isDragging = false;
+            Invalidate();
+        }
+
+        protected override void OnMouseLeave(EventArgs e)
+        {
+            base.OnMouseLeave(e);
+            _isHoverKnob = false;
+            Invalidate();
+        }
+
+        protected override void OnPaint(PaintEventArgs e)
+        {
+            var g = e.Graphics;
+            g.SmoothingMode = SmoothingMode.AntiAlias;
+
+            using (var parentBrush = new SolidBrush(Parent?.BackColor ?? BackColor))
+                g.FillRectangle(parentBrush, ClientRectangle);
+
+            int knobDiameter = KnobDiameter;
+            int trackHeight = TrackHeight;
+            int trackY = (Height - trackHeight) / 2;
+            int knobRadius = knobDiameter / 2;
+
+            Rectangle trackRect = new Rectangle(knobRadius, trackY, Width - knobDiameter, trackHeight);
+            int radius = trackHeight / 2;
+
+            // pełne tło paska
+            using (GraphicsPath trackPath = RoundedPath(trackRect, radius))
+            using (SolidBrush trackBrush = new SolidBrush(TrackColor))
+            {
+                g.FillPath(trackBrush, trackPath);
+            }
+
+            int knobX = ValueToX(_value);
+
+            // wypełnienie od lewej do kropki
+            int fillWidth = Math.Max(0, knobX - knobRadius);
+            if (fillWidth > 0)
+            {
+                Rectangle fillRect = new Rectangle(knobRadius, trackY, fillWidth, trackHeight);
+                using (GraphicsPath fillPath = RoundedPath(fillRect, radius))
+                using (var gradient = new LinearGradientBrush(
+                           new Rectangle(knobRadius, trackY, Math.Max(fillWidth, 1), trackHeight),
+                           Lighten(FillColor, 0.10),
+                           FillColor,
+                           LinearGradientMode.Vertical))
+                {
+                    g.FillPath(gradient, fillPath);
+                }
+            }
+
+            // cień pod kropką
+            Rectangle knobRect = new Rectangle(knobX - knobRadius, (Height - knobDiameter) / 2, knobDiameter, knobDiameter);
+            Rectangle shadowRect = knobRect;
+            shadowRect.Offset(0, 1);
+            using (GraphicsPath shadowPath = new GraphicsPath())
+            {
+                shadowPath.AddEllipse(shadowRect);
+                using (SolidBrush shadowBrush = new SolidBrush(Color.FromArgb(40, 0, 0, 0)))
+                    g.FillPath(shadowBrush, shadowPath);
+            }
+
+            // kropka
+            Color knob = _isDragging ? Darken(KnobColor, 0.05)
+                       : _isHoverKnob ? Lighten(KnobColor, 0.0)
+                       : KnobColor;
+
+            using (GraphicsPath knobPath = new GraphicsPath())
+            {
+                knobPath.AddEllipse(knobRect);
+                using (SolidBrush knobBrush = new SolidBrush(knob))
+                    g.FillPath(knobBrush, knobPath);
+
+                using (Pen knobBorder = new Pen(Color.FromArgb(35, 0, 0, 0), 1f))
+                    g.DrawPath(knobBorder, knobPath);
+            }
+
+            if (_isHoverKnob || _isDragging)
+            {
+                using (GraphicsPath ringPath = new GraphicsPath())
+                {
+                    Rectangle ringRect = Rectangle.Inflate(knobRect, 3, 3);
+                    ringPath.AddEllipse(ringRect);
+                    using (Pen ringPen = new Pen(Color.FromArgb(60, FillColor), 2f))
+                        g.DrawPath(ringPen, ringPath);
+                }
+            }
+        }
+
+        private static Color Lighten(Color c, double amount)
+        {
+            return Color.FromArgb(
+                c.A,
+                Math.Min(255, (int)(c.R + (255 - c.R) * amount)),
+                Math.Min(255, (int)(c.G + (255 - c.G) * amount)),
+                Math.Min(255, (int)(c.B + (255 - c.B) * amount)));
+        }
+
+        private static Color Darken(Color c, double amount)
+        {
+            return Color.FromArgb(
+                c.A,
+                (int)(c.R * (1 - amount)),
+                (int)(c.G * (1 - amount)),
+                (int)(c.B * (1 - amount)));
+        }
+
+        private static GraphicsPath RoundedPath(Rectangle rect, int radius)
+        {
+            var path = new GraphicsPath();
+
+            if (radius <= 0 || rect.Width <= 0 || rect.Height <= 0)
+            {
+                if (rect.Width > 0 && rect.Height > 0)
+                    path.AddRectangle(rect);
+                return path;
+            }
+
+            int d = radius * 2;
+            d = Math.Min(d, Math.Min(rect.Width, rect.Height));
+
+            path.AddArc(rect.X, rect.Y, d, d, 180, 90);
+            path.AddArc(rect.Right - d, rect.Y, d, d, 270, 90);
+            path.AddArc(rect.Right - d, rect.Bottom - d, d, d, 0, 90);
+            path.AddArc(rect.X, rect.Bottom - d, d, d, 90, 90);
+
+            path.CloseFigure();
+            return path;
+        }
+    }
 
     public class MacProgressBar : Control
     {
@@ -4230,6 +4616,10 @@ namespace LFSDriftBuddy
 
         public string SteeringWheelDeviceGuid { get; set; } = "";
         public string SteeringWheelAxis { get; set; } = "X";
+
+        public bool IndicatorSoundsEnabled { get; set; } = true;
+        public int IndicatorSoundsVolume { get; set; } = 100;
+        public bool IndicatorAutoCancelOnCenter { get; set; } = true;
 
 
 

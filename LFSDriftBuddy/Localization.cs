@@ -228,6 +228,30 @@ namespace LFSDriftBuddy
                     [AppLanguage.German] = "PUNKTZAHL ZURÜCKSETZEN",
                     [AppLanguage.Spanish] = "REINICIAR PUNTUACIÓN",
                 },
+                ["score.bestrun"] = new()
+                {
+                    [AppLanguage.English] = "Best Run",
+                    [AppLanguage.Polish] = "Najlepszy przejazd",
+                    [AppLanguage.Turkish] = "En İyi Koşu",
+                    [AppLanguage.German] = "Bester Lauf",
+                    [AppLanguage.Spanish] = "Mejor tirada",
+                },
+                ["score.bestdrift"] = new()
+                {
+                    [AppLanguage.English] = "Best Drift",
+                    [AppLanguage.Polish] = "Najdłuższy drift",
+                    [AppLanguage.Turkish] = "En Uzun Drift",
+                    [AppLanguage.German] = "Längster Drift",
+                    [AppLanguage.Spanish] = "Derrape más largo",
+                },
+                ["score.bestdeepdrift"] = new()
+                {
+                    [AppLanguage.English] = "Best Deep Drift",
+                    [AppLanguage.Polish] = "Najdłuższy głęboki drift",
+                    [AppLanguage.Turkish] = "En Uzun Derin Drift",
+                    [AppLanguage.German] = "Längster tiefer Drift",
+                    [AppLanguage.Spanish] = "Derrape profundo más largo",
+                },
                 ["hud.title"] = new()
                 {
                     [AppLanguage.English] = "HUD Settings",
@@ -235,6 +259,14 @@ namespace LFSDriftBuddy
                     [AppLanguage.Turkish] = "HUD Ayarları",
                     [AppLanguage.German] = "HUD-Einstellungen",
                     [AppLanguage.Spanish] = "Configuración del HUD",
+                },
+                ["hud.colors"] = new()
+                {
+                    [AppLanguage.English] = "HUD Colors",
+                    [AppLanguage.Polish] = "Kolory HUD",
+                    [AppLanguage.Turkish] = "HUD Renkleri",
+                    [AppLanguage.German] = "HUD-Farben",
+                    [AppLanguage.Spanish] = "Colores del HUD",
                 },
                 ["hud.show"] = new()
                 {
@@ -372,6 +404,30 @@ namespace LFSDriftBuddy
                     [AppLanguage.Turkish] = "Sinyaller",
                     [AppLanguage.German] = "Blinker",
                     [AppLanguage.Spanish] = "Intermitentes",
+                },
+                ["indicators.soundscheck"] = new()
+                {
+                    [AppLanguage.English] = "Indicator sounds",
+                    [AppLanguage.Polish] = "Dźwięki kierunkowskazów",
+                    [AppLanguage.Turkish] = "Sinyal sesleri",
+                    [AppLanguage.German] = "Blinkertöne",
+                    [AppLanguage.Spanish] = "Sonidos de intermitentes",
+                },
+                ["indicators.centeroff"] = new()
+                {
+                    [AppLanguage.English] = "Auto-cancel on wheel centering",
+                    [AppLanguage.Polish] = "Auto-wyłączanie po centrowaniu kierownicy",
+                    [AppLanguage.Turkish] = "Direksiyon ortalanınca otomatik kapat",
+                    [AppLanguage.German] = "Automatisches Abschalten beim Zentrieren des Lenkrads",
+                    [AppLanguage.Spanish] = "Desactivación automática al centrar el volante",
+                },
+                ["indicators.volume"] = new()
+                {
+                    [AppLanguage.English] = "Volume",
+                    [AppLanguage.Polish] = "Głośność",
+                    [AppLanguage.Turkish] = "Ses düzeyi",
+                    [AppLanguage.German] = "Lautstärke",
+                    [AppLanguage.Spanish] = "Volumen",
                 },
                 ["indicators.lights"] = new()
                 {

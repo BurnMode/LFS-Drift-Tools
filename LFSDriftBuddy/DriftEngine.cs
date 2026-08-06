@@ -5,10 +5,19 @@ using System.Text.Json;
 
 namespace LFSDriftBuddy
 {
-   
+
+    public class DriverStats
+    {
+        public long TotalScore { get; set; } = 0;
+        public long BestRunScore { get; set; } = 0;
+        public double BestDriftDurationMs { get; set; } = 0;
+        public double BestDeepDriftDurationMs { get; set; } = 0;
+    }
+
+
     /// InSim Direction/Heading: word, 0 = world Y axis, 32768 = 180 degrees.
     /// Drift angle = angular difference between motion direction and car heading.
-    
+
     public class DriftEngine
     {
         // ── Drift scoring ───────────────────────────────────────
@@ -37,6 +46,9 @@ namespace LFSDriftBuddy
         public long BestLapScore { get; private set; }    // ← NOWE
         public long TotalScore { get; private set; }
         public double ComboMultiplier { get; private set; } = 1;
+        public long BestRunScore { get; private set; }
+        public double BestDriftDurationMs { get; private set; }
+        public double BestDeepDriftDurationMs { get; private set; }
         public double SpeedKmh { get; private set; }
         public string LastAwardedText { get; private set; } = "";
 
@@ -47,7 +59,7 @@ namespace LFSDriftBuddy
             AppDomain.CurrentDomain.BaseDirectory,
             "driver_stats.json");
 
-        private Dictionary<string, long> _driverScores = new();
+        private Dictionary<string, DriverStats> _driverScores = new();
         private readonly string _lapRecordsFile = Path.Combine(
         AppDomain.CurrentDomain.BaseDirectory,
         "driver_lap_records.json");
@@ -65,6 +77,8 @@ namespace LFSDriftBuddy
         private DateTime _lastBonusTime = DateTime.MinValue;
         private DateTime _lastDriftTime = DateTime.MinValue;
         private DateTime _lastSpeedingTime = DateTime.MinValue;
+        private DateTime _driftSessionStart = DateTime.MinValue;
+        private DateTime? _deepDriftSessionStart = null;
         private double _dtSec = 0;
         private bool _previouslyDrifting = false;
         private bool _previouslyDriftSideRight = true;
@@ -83,7 +97,7 @@ namespace LFSDriftBuddy
             LoadLapRecords();
         }
 
-       
+
         // ────────────────────────────────────────────────────────
         //  Driver handling
         // ────────────────────────────────────────────────────────
@@ -95,9 +109,14 @@ namespace LFSDriftBuddy
             CurrentDriver = driverName;
 
             if (!_driverScores.ContainsKey(CurrentDriver))
-                _driverScores[CurrentDriver] = 0;
+                _driverScores[CurrentDriver] = new DriverStats();
 
-            TotalScore = _driverScores[CurrentDriver];
+            var stats = _driverScores[CurrentDriver];
+            TotalScore = stats.TotalScore;
+            BestRunScore = stats.BestRunScore;
+            BestDriftDurationMs = stats.BestDriftDurationMs;
+            BestDeepDriftDurationMs = stats.BestDeepDriftDurationMs;
+
             BestLapScore = GetBestLapForDriver(CurrentDriver, _currentTrackCode, _currentLayoutName);   // ← poprawione
         }
         private static string CombineTrackKey(string track, string layout)
@@ -295,6 +314,7 @@ namespace LFSDriftBuddy
                 if (!drifting)
                 {
                     DriftEnded?.Invoke(CurrentRunPoints);
+                    RegisterRunEnd(CurrentRunPoints);
                     if (ComboMultiplier > 1) { }
                     else
                     {
@@ -319,19 +339,30 @@ namespace LFSDriftBuddy
                 LastAwardedText = $"";
             }
 
-           
+
 
             if (drifting)
             {
+                if (DriftAngleDeg >= 55)
+                {
+                    if (_deepDriftSessionStart == null)
+                        _deepDriftSessionStart = now;
+                }
+                else if (_deepDriftSessionStart != null)
+                {
+                    FinalizeDeepDriftSession(now);
+                }
+
                 double angleScore = AngleScore(DriftAngleDeg);
                 double speedScore = SpeedScore(SpeedKmh);
 
                 //if (_isHandBrakeON) { eBrakeCount+=2; }
-                
+
 
                 if (!_previouslyDrifting)
                 {
                     _driftStartTime = now;
+                    _driftSessionStart = now;
                     driftTimeMultipler = 0;
                     //CurrentRunPoints = 0;
                     if (!_isHandBrakeON) { eBrakeCount--; }
@@ -515,24 +546,24 @@ namespace LFSDriftBuddy
             else if (_previouslyDrifting)
             {
                 IsDrifting = false;
-                
 
-                //
-                
+                FinalizeDriftSession(now);
+                FinalizeDeepDriftSession(now);
 
                 SaveCurrentDriver();
-                
 
-                
-                
-                if (!speeding) 
+
+
+
+                if (!speeding)
                 {
 
-                    
+
                     //LastAwardedText = FormatRunResult(CurrentRunPoints, ComboMultiplier);
                     //_driftStartTime = now;
                     //_lastDriftTime = now;
                     DriftEnded?.Invoke(CurrentRunPoints);
+                    RegisterRunEnd(CurrentRunPoints);
 
 
 
@@ -540,7 +571,7 @@ namespace LFSDriftBuddy
 
 
                 }
-                
+
             }
             if (!drifting && _previouslyDrifting)
             {
@@ -578,18 +609,33 @@ namespace LFSDriftBuddy
             {
                 if (!File.Exists(_statsFile))
                 {
-                    _driverScores = new Dictionary<string, long>();
+                    _driverScores = new Dictionary<string, DriverStats>();
                     return;
                 }
 
                 string json = File.ReadAllText(_statsFile);
 
-                _driverScores = JsonSerializer.Deserialize<Dictionary<string, long>>(json)
-                                ?? new Dictionary<string, long>();
+                try
+                {
+                    _driverScores = JsonSerializer.Deserialize<Dictionary<string, DriverStats>>(json)
+                                    ?? new Dictionary<string, DriverStats>();
+                }
+                catch
+                {
+                    // migracja ze starego formatu pliku (Dictionary<string, long>)
+                    var old = JsonSerializer.Deserialize<Dictionary<string, long>>(json);
+                    _driverScores = new Dictionary<string, DriverStats>();
+
+                    if (old != null)
+                    {
+                        foreach (var kv in old)
+                            _driverScores[kv.Key] = new DriverStats { TotalScore = kv.Value };
+                    }
+                }
             }
             catch
             {
-                _driverScores = new Dictionary<string, long>();
+                _driverScores = new Dictionary<string, DriverStats>();
             }
         }
 
@@ -666,7 +712,16 @@ namespace LFSDriftBuddy
         {
             try
             {
-                _driverScores[CurrentDriver] = TotalScore;
+                if (!_driverScores.TryGetValue(CurrentDriver, out var stats))
+                {
+                    stats = new DriverStats();
+                    _driverScores[CurrentDriver] = stats;
+                }
+
+                stats.TotalScore = TotalScore;
+                stats.BestRunScore = BestRunScore;
+                stats.BestDriftDurationMs = BestDriftDurationMs;
+                stats.BestDeepDriftDurationMs = BestDeepDriftDurationMs;
 
                 string json = JsonSerializer.Serialize(
                     _driverScores,
@@ -680,6 +735,46 @@ namespace LFSDriftBuddy
             catch
             {
             }
+        }
+
+        // ────────────────────────────────────────────────────────
+        //  Rekordy: najlepszy run / najdłuższy drift / głęboki drift
+        // ────────────────────────────────────────────────────────
+        private void RegisterRunEnd(long runPoints)
+        {
+            if (runPoints > BestRunScore)
+            {
+                BestRunScore = runPoints;
+                SaveCurrentDriver();
+            }
+        }
+
+        private void FinalizeDriftSession(DateTime now)
+        {
+            if (_driftSessionStart == DateTime.MinValue) return;
+
+            double durationMs = (now - _driftSessionStart).TotalMilliseconds;
+            if (durationMs > BestDriftDurationMs)
+            {
+                BestDriftDurationMs = durationMs;
+                SaveCurrentDriver();
+            }
+
+            _driftSessionStart = DateTime.MinValue;
+        }
+
+        private void FinalizeDeepDriftSession(DateTime now)
+        {
+            if (_deepDriftSessionStart == null) return;
+
+            double durationMs = (now - _deepDriftSessionStart.Value).TotalMilliseconds;
+            if (durationMs > BestDeepDriftDurationMs)
+            {
+                BestDeepDriftDurationMs = durationMs;
+                SaveCurrentDriver();
+            }
+
+            _deepDriftSessionStart = null;
         }
 
         // ────────────────────────────────────────────────────────
