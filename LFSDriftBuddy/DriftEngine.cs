@@ -952,6 +952,10 @@ namespace LFSDriftBuddy
             _lastDriftTime = DateTime.MinValue;
             _lastSpeedingTime = DateTime.MinValue;
 
+            BestRunScore = 0;
+            BestDriftDurationMs= 0;
+            BestDeepDriftDurationMs = 0;
+
             SaveCurrentDriver();
         }
         public void ResetLapScore()

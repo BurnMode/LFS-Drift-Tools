@@ -122,6 +122,12 @@ namespace LFSDriftBuddy
         private string InSimColor4 = "^5";
         private string InSimColor5 = "^1";
 
+        private Color OverlayColor1 = Color.White;
+        private Color OverlayColor2 = Color.Cyan;
+        private Color OverlayColor3 = Color.Yellow;
+        private Color OverlayColor4 = Color.Magenta;
+        private Color OverlayColor5 = Color.Red;
+
         private string colorCurrentMain = "^7";
 
         private Button _colorBtn1;
@@ -455,8 +461,8 @@ namespace LFSDriftBuddy
                     _indicatorVolumeValueLabel.Text = $"{_indicatorSoundsVolume}%";
                     _indicatorSoundsCheck.Checked = true;
                     _indicatorAutoCancelCheck.Checked = true;
+                    RefreshColorButtonSwatches();
 
-                   
                     return;
                 }
 
@@ -480,14 +486,18 @@ namespace LFSDriftBuddy
                 InSimColor4 = settings.InSimColor4;
                 InSimColor5 = settings.InSimColor5;
 
-                
+                if (settings.OverlayColor1 != -1) OverlayColor1 = Color.FromArgb(settings.OverlayColor1);
+                if (settings.OverlayColor2 != -1) OverlayColor2 = Color.FromArgb(settings.OverlayColor2);
+                if (settings.OverlayColor3 != -1) OverlayColor3 = Color.FromArgb(settings.OverlayColor3);
+                if (settings.OverlayColor4 != -1) OverlayColor4 = Color.FromArgb(settings.OverlayColor4);
+                if (settings.OverlayColor5 != -1) OverlayColor5 = Color.FromArgb(settings.OverlayColor5);
 
                 SetButtonColor(_colorBtn1, InSimCodeToColor(InSimColor1));
                 SetButtonColor(_colorBtn2, InSimCodeToColor(InSimColor2));
                 SetButtonColor(_colorBtn3, InSimCodeToColor(InSimColor3));
                 SetButtonColor(_colorBtn4, InSimCodeToColor(InSimColor4));
                 SetButtonColor(_colorBtn5, InSimCodeToColor(InSimColor5));
-
+                RefreshColorButtonSwatches();
                 ApplyTheme(settings.DarkTheme);
                 if (_themeSwitch != null)
                     _themeSwitch.SetCheckedSilent(settings.DarkTheme);
@@ -575,6 +585,12 @@ namespace LFSDriftBuddy
                     InSimColor3 = InSimColor3,
                     InSimColor4 = InSimColor4,
                     InSimColor5 = InSimColor5,
+
+                    OverlayColor1 = OverlayColor1.ToArgb(),
+                    OverlayColor2 = OverlayColor2.ToArgb(),
+                    OverlayColor3 = OverlayColor3.ToArgb(),
+                    OverlayColor4 = OverlayColor4.ToArgb(),
+                    OverlayColor5 = OverlayColor5.ToArgb(),
 
                     RevToggleBinding = _revToggleBinding,
                     LightToggleBinding = _lightToggleBinding,
@@ -985,36 +1001,11 @@ namespace LFSDriftBuddy
             _colorBtn5 = MakeButton(hudPanel, "", 215, 80, 45, 45, Color.Red);
 
 
-            _colorBtn1.Click += (s, e) =>
-             OpenInSimPalette(_colorBtn1, c =>
-             {
-                 InSimColor1 = c;
-                 SaveSettings();
-             });
-            _colorBtn2.Click += (s, e) =>
-             OpenInSimPalette(_colorBtn2, c =>
-             {
-                 InSimColor2 = c;
-                 SaveSettings();
-             });
-            _colorBtn3.Click += (s, e) =>
-             OpenInSimPalette(_colorBtn3, c =>
-             {
-                 InSimColor3 = c;
-                 SaveSettings();
-             });
-            _colorBtn4.Click += (s, e) =>
-             OpenInSimPalette(_colorBtn4, c =>
-             {
-                 InSimColor4 = c;
-                 SaveSettings();
-             });
-            _colorBtn5.Click += (s, e) =>
-             OpenInSimPalette(_colorBtn5, c =>
-             {
-                 InSimColor5 = c;
-                 SaveSettings();
-             });
+            _colorBtn1.Click += (s, e) => HandleColorButtonClick(_colorBtn1, 1);
+            _colorBtn2.Click += (s, e) => HandleColorButtonClick(_colorBtn2, 2);
+            _colorBtn3.Click += (s, e) => HandleColorButtonClick(_colorBtn3, 3);
+            _colorBtn4.Click += (s, e) => HandleColorButtonClick(_colorBtn4, 4);
+            _colorBtn5.Click += (s, e) => HandleColorButtonClick(_colorBtn5, 5);
 
             _showHudCheck = new MacCheckBox
             {
@@ -1044,16 +1035,19 @@ namespace LFSDriftBuddy
                     if (lfsHwnd != IntPtr.Zero)
                     {
                         _overlay.UpdateScore(_drift.TotalScore);
-                        _overlay.UpdateAccentColor(InSimCodeToColor(InSimColor1));
+                        _overlay.UpdateAccentColor(OverlayColor1);   // ← zmienione z InSimCodeToColor(InSimColor1)
                         _overlay.AttachTo(lfsHwnd);
+                        //_showRPMHudCheck.Checked = false;
+                       
                     }
+                    _showHudCheck.Checked = false;
                 }
-                else 
+                else
                 {
                     _overlay.Detach();
-                    
                 }
                 SaveSettings();
+                RefreshColorButtonSwatches();   // ← NOWE
             };
 
             _showRPMHudCheck = new MacCheckBox
@@ -1070,7 +1064,7 @@ namespace LFSDriftBuddy
 
             hudPanel.Controls.Add(_showOverlayCheck);
 
-           
+
             _showHudCheck.CheckedChanged += (s, e) =>
             {
                 if (!_showHudCheck.Checked)
@@ -1083,9 +1077,13 @@ namespace LFSDriftBuddy
                     _insim.ShowButton(BTN_RIGHTIND, "", l: xPos, t: 0, w: 1, h: 1, bStyle: 2);
                     _insim.ShowButton(BTN_LEFTIND, "", l: xPos, t: 0, w: 1, h: 1, bStyle: 2);
                 }
+                else { 
+                    _showOverlayCheck.Checked = false; 
+                }
+                RefreshColorButtonSwatches(); 
             };
 
-            
+
             hudPanel.Controls.Add(_showHudCheck);
             hudPanel.Controls.Add(_showRPMHudCheck);
             _localizedControls.Add((_showHudCheck, "hud.show"));
@@ -2628,7 +2626,7 @@ namespace LFSDriftBuddy
                 _overlay.UpdateLapScore(_drift.LapScore);
 
                 if (!_isDrifting && !_isSpeeding)
-                    _overlay.UpdateAccentColor(InSimCodeToColor(InSimColor1));
+                    _overlay.UpdateAccentColor(OverlayColor1);
                 _speedLabel.Text = ((int)speed).ToString();
                 _angleValueLabel.Text = ((int)_driftAngle).ToString() + "°";
                 _angleValueLabel.ForeColor = _isDrifting
@@ -2681,11 +2679,29 @@ namespace LFSDriftBuddy
                     _ => InSimColor1,
                 };
 
+                Color overlayAccent = _driftLabelKind switch
+                {
+                    DriftLabelKind.AngleHigh => OverlayColor3,
+                    DriftLabelKind.AngleExtreme => OverlayColor4,
+                    DriftLabelKind.AngleBackward => OverlayColor3,
+                    DriftLabelKind.AngleUltraExtreme => OverlayColor5,
+                    DriftLabelKind.AngleHighE => OverlayColor3,
+                    DriftLabelKind.AngleExtremeE => OverlayColor4,
+                    DriftLabelKind.AngleBackwardE => OverlayColor3,
+                    DriftLabelKind.AngleUltraExtremeE => OverlayColor5,
+                    DriftLabelKind.Fast2 => OverlayColor3,
+                    DriftLabelKind.Fast3 => OverlayColor4,
+                    DriftLabelKind.AngleGood => OverlayColor2,
+                    DriftLabelKind.AngleGoodE => OverlayColor2,
+                    DriftLabelKind.Fast1 => OverlayColor2,
+                    _ => OverlayColor1,
+                };
+
                 _overlay.UpdateScore(_totalScore);
                 _overlay.UpdateRun(_runPoints);
                 _overlay.UpdateCombo(_combo);
                 _overlay.UpdateLabel(label);
-                _overlay.UpdateAccentColor(InSimCodeToColor(angleColCode));
+                _overlay.UpdateAccentColor(overlayAccent);
 
                 if (!string.IsNullOrEmpty(_drift.LastAwardedText) && _drift.LastAwardedText != _lastOverlayBonusText)
                 {
@@ -2823,7 +2839,7 @@ namespace LFSDriftBuddy
                     if (lfsHwnd != IntPtr.Zero)
                     {
                         _overlay.UpdateScore(_drift.TotalScore);
-                        _overlay.UpdateAccentColor(InSimCodeToColor(InSimColor1));
+                        _overlay.UpdateAccentColor(OverlayColor1);
                         _overlay.AttachTo(lfsHwnd);
                     }
                 }
@@ -3624,6 +3640,266 @@ namespace LFSDriftBuddy
         }
 
         // Pomocnicza metoda: podmienia bazowy kolor przycisku i wymusza przerysowanie
+
+        private Color GetOverlayColorSlot(int slot) => slot switch
+        {
+            1 => OverlayColor1,
+            2 => OverlayColor2,
+            3 => OverlayColor3,
+            4 => OverlayColor4,
+            5 => OverlayColor5,
+            _ => OverlayColor1
+        };
+
+        private void SetOverlayColorSlot(int slot, Color c)
+        {
+            switch (slot)
+            {
+                case 1: OverlayColor1 = c; break;
+                case 2: OverlayColor2 = c; break;
+                case 3: OverlayColor3 = c; break;
+                case 4: OverlayColor4 = c; break;
+                case 5: OverlayColor5 = c; break;
+            }
+        }
+
+        // InSim paleta ustawia kod ^X ORAZ synchronizuje OverlayColorX tym samym kolorem
+        private void SetInSimColorSlot(int slot, string code)
+        {
+            Color c = InSimCodeToColor(code);
+            switch (slot)
+            {
+                case 1: InSimColor1 = code; OverlayColor1 = c; break;
+                case 2: InSimColor2 = code; OverlayColor2 = c; break;
+                case 3: InSimColor3 = code; OverlayColor3 = c; break;
+                case 4: InSimColor4 = code; OverlayColor4 = c; break;
+                case 5: InSimColor5 = code; OverlayColor5 = c; break;
+            }
+        }
+
+        // Podgląd na przyciskach: gdy tryb custom (overlay ON, IS_BTN HUD OFF) — pokaż OverlayColorX,
+        // w każdym innym wypadku — pokaż kolor z InSim palety
+        private void RefreshColorButtonSwatches()
+        {
+            bool useOverlayColors = _showOverlayCheck != null && _showOverlayCheck.Checked
+                                  && (_showHudCheck == null || !_showHudCheck.Checked);
+
+            if (_colorBtn1 == null) return;
+
+            SetButtonColor(_colorBtn1, useOverlayColors ? OverlayColor1 : InSimCodeToColor(InSimColor1));
+            SetButtonColor(_colorBtn2, useOverlayColors ? OverlayColor2 : InSimCodeToColor(InSimColor2));
+            SetButtonColor(_colorBtn3, useOverlayColors ? OverlayColor3 : InSimCodeToColor(InSimColor3));
+            SetButtonColor(_colorBtn4, useOverlayColors ? OverlayColor4 : InSimCodeToColor(InSimColor4));
+            SetButtonColor(_colorBtn5, useOverlayColors ? OverlayColor5 : InSimCodeToColor(InSimColor5));
+        }
+
+        private void OpenCustomColorPicker(Button targetBtn, int slot)
+        {
+            Color initial = GetOverlayColorSlot(slot);
+
+            Form overlayBg = new Form
+            {
+                FormBorderStyle = FormBorderStyle.None,
+                StartPosition = FormStartPosition.Manual,
+                ShowInTaskbar = false,
+                Bounds = this.Bounds,
+                BackColor = Color.Black,
+                Opacity = 0.5,
+                Owner = this
+            };
+
+            Form popup = new Form
+            {
+                FormBorderStyle = FormBorderStyle.None,
+                StartPosition = FormStartPosition.CenterParent,
+                ShowInTaskbar = false,
+                Size = new Size(300, 275),
+                BackColor = ApplePalette.Background
+            };
+
+            popup.Shown += (s, e) => popup.Region = CreateSmoothRoundedRegion(popup.Width, popup.Height, 20);
+
+            var card = new RoundedPanel { Dock = DockStyle.Fill };
+            popup.Controls.Add(card);
+
+            var closeButton = new Button
+            {
+                Text = "×",
+                Size = new Size(28, 28),
+                Location = new Point(popup.Width - 38, 10),
+                FlatStyle = FlatStyle.Flat,
+                BackColor = Color.Transparent,
+                ForeColor = ApplePalette.Secondary,
+                Font = new Font("Segoe UI Semibold", 12f),
+                Cursor = Cursors.Hand,
+                TabStop = false
+            };
+            closeButton.FlatAppearance.BorderSize = 0;
+            closeButton.FlatAppearance.MouseOverBackColor = Color.FromArgb(235, 235, 240);
+            closeButton.FlatAppearance.MouseDownBackColor = Color.FromArgb(220, 220, 225);
+            closeButton.Click += (s, e) => popup.Close();
+            closeButton.Region = CreateSmoothRoundedRegion(closeButton.Width, closeButton.Height, 14);
+
+            MakeLabel(card, "Custom overlay color", 20, 15, 240, 24,
+                ApplePalette.Title, new Font("Segoe UI Semibold", 11f));
+
+            // ── podgląd koloru (styl jak przyciski palety) ──
+            var preview = new Panel
+            {
+                Location = new Point(20, 55),
+                Size = new Size(56, 56),
+                BackColor = initial
+            };
+            preview.Paint += (s, e) =>
+            {
+                e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
+                using var path = RoundedPath(new Rectangle(0, 0, preview.Width - 1, preview.Height - 1), 12);
+                using var brush = new SolidBrush(preview.BackColor);
+                e.Graphics.FillPath(brush, path);
+                using var border = new Pen(ApplePalette.Border);
+                e.Graphics.DrawPath(border, path);
+            };
+            preview.Region = CreateSmoothRoundedRegion(preview.Width, preview.Height, 12);
+            card.Controls.Add(preview);
+
+            int sliderX = 92, sliderW = 175, rowY = 58, rowGap = 34;
+
+            MacSlider sliderR = null, sliderG = null, sliderB = null;
+            Label valR = null, valG = null, valB = null;
+
+            MakeLabel(card, "R", sliderX, rowY, 16, 20, ApplePalette.Text);
+            sliderR = new MacSlider { Location = new Point(sliderX + 18, rowY + 2), Size = new Size(sliderW - 30, 20), Minimum = 0, Maximum = 255, FillColor = Color.FromArgb(255, 70, 70) };
+            sliderR.SetValueSilent(initial.R);
+            valR = MakeLabel(card, initial.R.ToString(), sliderX + sliderW - 5, rowY, 30, 20, ApplePalette.Text);
+            card.Controls.Add(sliderR);
+
+            MakeLabel(card, "G", sliderX, rowY + rowGap, 16, 20, ApplePalette.Text);
+            sliderG = new MacSlider { Location = new Point(sliderX + 18, rowY + rowGap + 2), Size = new Size(sliderW - 30, 20), Minimum = 0, Maximum = 255, FillColor = Color.FromArgb(70, 220, 90) };
+            sliderG.SetValueSilent(initial.G);
+            valG = MakeLabel(card, initial.G.ToString(), sliderX + sliderW - 5, rowY + rowGap, 30, 20, ApplePalette.Text);
+            card.Controls.Add(sliderG);
+
+            MakeLabel(card, "B", sliderX, rowY + rowGap * 2, 16, 20, ApplePalette.Text);
+            sliderB = new MacSlider { Location = new Point(sliderX + 18, rowY + rowGap * 2 + 2), Size = new Size(sliderW - 30, 20), Minimum = 0, Maximum = 255, FillColor = Color.FromArgb(70, 140, 255) };
+            sliderB.SetValueSilent(initial.B);
+            valB = MakeLabel(card, initial.B.ToString(), sliderX + sliderW - 5, rowY + rowGap * 2, 30, 20, ApplePalette.Text);
+            card.Controls.Add(sliderB);
+
+            void ApplyLive()
+            {
+                Color c = Color.FromArgb(sliderR.Value, sliderG.Value, sliderB.Value);
+                preview.BackColor = c;
+                preview.Invalidate();
+                valR.Text = sliderR.Value.ToString();
+                valG.Text = sliderG.Value.ToString();
+                valB.Text = sliderB.Value.ToString();
+
+                SetOverlayColorSlot(slot, c);
+                SetButtonColor(targetBtn, c);
+
+                if (!_isDrifting && !_isSpeeding)
+                    _overlay.UpdateAccentColor(OverlayColor1);
+            }
+
+            sliderR.ValueChanged += (s, e) => ApplyLive();
+            sliderG.ValueChanged += (s, e) => ApplyLive();
+            sliderB.ValueChanged += (s, e) => ApplyLive();
+
+            // ── NOWE: rząd 5 przycisków z domyślnymi kolorami ──
+            var defaultColors = new[]
+            {
+        Color.White,
+        Color.Cyan,
+        Color.Yellow,
+        Color.Magenta,
+        Color.Red
+    };
+
+            int presetSize = 34, presetGap = 8;
+            int presetRowWidth = defaultColors.Length * presetSize + (defaultColors.Length - 1) * presetGap;
+            int presetStartX = 20 + (260 - presetRowWidth) / 2;
+            int presetY = 168;
+
+            int px = presetStartX;
+            foreach (var dc in defaultColors)
+            {
+                var swatch = new Button
+                {
+                    Size = new Size(presetSize, presetSize),
+                    Location = new Point(px, presetY),
+                    BackColor = dc,
+                    FlatStyle = FlatStyle.Flat,
+                    Cursor = Cursors.Hand,
+                    Text = ""
+                };
+                swatch.FlatAppearance.BorderSize = 0;
+                swatch.Region = CreateSmoothRoundedRegion(swatch.Width, swatch.Height, 10);
+
+                var chosen = dc; // capture
+                swatch.Click += (s, e) =>
+                {
+                    sliderR.Value = chosen.R;
+                    sliderG.Value = chosen.G;
+                    sliderB.Value = chosen.B;
+                    ApplyLive();
+                };
+
+                swatch.MouseEnter += (s, e) => swatch.Size = new Size(presetSize + 4, presetSize + 4);
+                swatch.MouseLeave += (s, e) => swatch.Size = new Size(presetSize, presetSize);
+
+                card.Controls.Add(swatch);
+                px += presetSize + presetGap;
+            }
+
+            var applyBtn = MakeButton(card, "OK", 20, 218, 260, 36, ApplePalette.Blue);
+            applyBtn.Click += (s, e) => { SaveSettings(); popup.Close(); };
+
+            popup.Paint += (s, e) =>
+            {
+                e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
+                for (int i = 30; i >= 1; i--)
+                {
+                    int alpha = (int)(22 * (1.0 - i / 30.0));
+                    Rectangle shadowRect = new Rectangle(12 - i, 12 - i, popup.Width - 24 + i * 2, popup.Height - 24 + i * 2);
+                    using (GraphicsPath p = RoundedPath(shadowRect, 20 + i))
+                    using (SolidBrush b = new SolidBrush(Color.FromArgb(alpha, 0, 0, 0)))
+                        e.Graphics.FillPath(b, p);
+                }
+            };
+
+            card.Controls.Add(closeButton);
+
+            overlayBg.Show();
+            popup.Owner = overlayBg;
+
+            try { popup.ShowDialog(overlayBg); }
+            finally { overlayBg.Close(); overlayBg.Dispose(); }
+        }
+
+        private void HandleColorButtonClick(Button btn, int slot)
+        {
+            bool overlayOn = _showOverlayCheck != null && _showOverlayCheck.Checked;
+            bool insimHudOn = _showHudCheck != null && _showHudCheck.Checked;
+
+            // custom RGB dostępny TYLKO gdy overlay ON i IS_BTN HUD OFF (IS_BTN i tak
+            // wspiera wyłącznie 10 stałych kolorów, więc custom RGB jest blokowany)
+            if (overlayOn && !insimHudOn)
+            {
+                OpenCustomColorPicker(btn, slot);
+            }
+            else
+            {
+                OpenInSimPalette(btn, code =>
+                {
+                    SetInSimColorSlot(slot, code);
+                    SaveSettings();
+                    RefreshColorButtonSwatches();
+                });
+            }
+        }
+
+
+
         private void SetButtonColor(Button btn, Color color)
         {
             btn.Tag = color;
@@ -4602,6 +4878,12 @@ namespace LFSDriftBuddy
         public string InSimColor3 { get; set; } = "^3";
         public string InSimColor4 { get; set; } = "^5";
         public string InSimColor5 { get; set; } = "^5";
+
+        public int OverlayColor1 { get; set; } = -1;   // -1 = brak zapisu, użyj domyślnego
+        public int OverlayColor2 { get; set; } = -1;
+        public int OverlayColor3 { get; set; } = -1;
+        public int OverlayColor4 { get; set; } = -1;
+        public int OverlayColor5 { get; set; } = -1;
 
         // after
         public InputBinding RevToggleBinding { get; set; } = InputBinding.None;

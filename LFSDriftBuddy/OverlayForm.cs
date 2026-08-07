@@ -501,7 +501,7 @@ namespace LFSDriftBuddy
             comboFraction = Math.Max(0, Math.Min(1, comboFraction));
 
             // ── lewy box: label, tło = progress bar (accent → czarny od prawej) ──
-            using (var labelPath = RoundedLeftRect(new RectangleF(barX, barY, labelBoxW, barH), 6))
+            using (var labelPath = RoundedLeftRect(new RectangleF(barX, barY, labelBoxW+1, barH+1), 6))
             {
                 var oldClip = g.Clip;
                 g.SetClip(labelPath, CombineMode.Replace);
