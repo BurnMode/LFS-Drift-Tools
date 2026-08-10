@@ -1,12 +1,13 @@
 using System;
 using System.Collections.Generic;
 using System.Drawing;
-using System.Drawing.Text;
-using System.IO;
 using System.Drawing.Drawing2D;
 using System.Drawing.Imaging;
+using System.Drawing.Text;
+using System.IO;
 using System.Runtime.InteropServices;
 using System.Windows.Forms;
+using static System.Formats.Asn1.AsnWriter;
 
 namespace LFSDriftBuddy
 {
@@ -28,6 +29,7 @@ namespace LFSDriftBuddy
         private Font _activeFont22;
         private Font _activeFont24;
         private Font _activeFont32;
+        private Font _activeFont42;
         private Font _activeFont20;
         private Font _activeFont17;
         private Font _activeFont15;
@@ -53,6 +55,7 @@ namespace LFSDriftBuddy
             _activeFont24 = new Font(active, 24f, FontStyle.Bold);
             _activeFont22 = new Font(active, 22f, FontStyle.Bold);
             _activeFont32 = new Font(active, 32f, FontStyle.Bold);
+            _activeFont42 = new Font(active, 42f, FontStyle.Bold);
             _activeFont20 = new Font(active, 20f, FontStyle.Bold);
             _activeFont17 = new Font(active, 17f, FontStyle.Bold);
             _activeFont15 = new Font(active, 15f, FontStyle.Bold);
@@ -138,10 +141,19 @@ namespace LFSDriftBuddy
         private int _currentRpm = 0;
 
         // ── bonus popup (przełożenie itp.) ───────────────────
-        private string _bonusText = "";
-        private DateTime _bonusStart = DateTime.MinValue;
+        private class BonusItem
+        {
+            public string Text;
+            public DateTime Start;
+            public float DispW;
+            public bool SizeInit;
+            public float DispX;     // ← NOWE
+            public bool PosInit;
+        }
+        private readonly List<BonusItem> _bonusItems = new();
         private const double BonusDurationSec = 2.0;
         private const double BonusSlideMs = 220;   // czas wjazdu/wyjazdu
+        private const float BonusBoxGap = 8f;      // odstęp między sąsiednimi boxami
 
         // ── kąt driftu / strzałki ─────────────────────────────
         private double _driftAngle = 0;
@@ -153,8 +165,18 @@ namespace LFSDriftBuddy
         private float _dispLabelBoxW = 0, _dispRunBoxW = 0, _dispBarH = 0;
         private const float SizeSmoothFactor = 0.45f; // wyższe = szybsza reakcja
 
-        private bool _bonusSizeInit = false;
-        private float _dispBonusBoxW = 0, _dispBonusBoxH = 0;
+        private bool _lapResultVisible = false;
+        private long _lapResultScore = 0;
+        private DateTime _lapResultStart = DateTime.MinValue;
+        private const double LapResultDurationSec = 5.0;
+        private const double LapResultSlideMs = 260;
+
+        public void ShowLapResult(long score)
+        {
+            _lapResultScore = score;
+            _lapResultStart = DateTime.Now;
+            _lapResultVisible = true;
+        }
 
         public OverlayForm()
         {
@@ -200,7 +222,8 @@ namespace LFSDriftBuddy
 
         /// <summary>RPM z OutGauge — na razie używane tylko do ew. przyszłych animacji reaktywnych na obroty.</summary>
         public void UpdateRpm(int rpm) => _currentRpm = rpm;
-
+        private long _lastLapScoreDisplay = 0;    // ← NOWE
+        public void UpdateLastLapScore(long score) => _lastLapScoreDisplay = score;   // ← NOWE
         public void UpdateScore(long total) => _targetScore = total;
         public void UpdateRun(long run) => _targetRun = run;
         public void UpdateLapScore(long lapScore) => _targetLapScore = lapScore;
@@ -272,9 +295,13 @@ namespace LFSDriftBuddy
         public void ShowBonus(string bonusText)
         {
             if (string.IsNullOrWhiteSpace(bonusText)) return;
-            _bonusText = bonusText;
-            _bonusStart = DateTime.Now;
-            _bonusSizeInit = false; // nowy tekst = rozmiar ma się ustawić od razu, bez "doganiania" starego
+
+            // nowy komunikat dokłada się z prawej strony, obok trwających — nie zastępuje ich
+            _bonusItems.Add(new BonusItem
+            {
+                Text = bonusText,
+                Start = DateTime.Now
+            });
         }
 
         public void SetDriftAngle(double angle, bool drifting, bool sideRight)
@@ -282,6 +309,143 @@ namespace LFSDriftBuddy
             _driftAngle = angle;
             _isDrifting = drifting;
             _sideRight = sideRight;
+        }
+
+        private void DrawLapResultPopup(Graphics g)
+        {
+            if (!_lapResultVisible) return;
+
+            var now = DateTime.Now;
+            double elapsed = (now - _lapResultStart).TotalSeconds;
+            if (elapsed > LapResultDurationSec)
+            {
+                _lapResultVisible = false;
+                return;
+            }
+
+            double slideInSec = LapResultSlideMs / 1000.0;
+            double slideOutStart = LapResultDurationSec - slideInSec;
+
+            double alpha, offsetX;
+
+            if (elapsed < slideInSec)
+            {
+                double bt = elapsed / slideInSec;
+                double eased = 1.0 - Math.Pow(1 - bt, 3);
+                alpha = eased;
+                offsetX = (1.0 - eased) * 240; // wjazd z prawej
+            }
+            else if (elapsed > slideOutStart)
+            {
+                double bt = (elapsed - slideOutStart) / slideInSec;
+                double eased = Math.Pow(bt, 2);
+                alpha = 1.0 - eased;
+                offsetX = -eased * 240; // wyjazd w lewo
+            }
+            else
+            {
+                alpha = 1.0;
+                offsetX = 0;
+            }
+
+            if (alpha <= 0.01) return;
+
+            var titleFont = _activeFont20;
+            var valueFont = _activeFont42;
+
+            string title = Localization.T("hud.lastlapscore");
+            string valueText = _lapResultScore.ToString("N0");
+
+            var titleSize = g.MeasureString(title, titleFont);
+            var valueSize = g.MeasureString(valueText, valueFont);
+
+            float padV = 0;
+            float centerX = Width / 2f + (float)offsetX;
+            float boxY = 350;
+
+            // ── wyśrodkowanie obu linii wokół wspólnej osi ──
+            float titleX = centerX - titleSize.Width / 2f;
+            float titleY = boxY + titleSize.Height / 2;
+
+            float valueX = centerX - valueSize.Width / 2f;
+            float valueY = boxY + titleSize.Height + padV;
+
+
+            if (_lapResultScore >= 250)
+            {
+                // ── tytuł: statyczny, wyśrodkowany ──
+                DrawOutlinedText(g, title, titleFont, titleX, titleY,
+                    WithAlpha(Color.White, alpha * 0.85), WithAlpha(Color.Black, alpha), outline: false);
+
+                // ── wartość: wyśrodkowana, z przesuwającym się blaskiem w kształcie cyfr ──
+                DrawShimmerText(g, valueText, valueFont, valueX, valueY, alpha, elapsed, Color.White, Color.Gray);
+            }
+            else
+            {
+                valueSize = g.MeasureString("START", valueFont);
+                valueX = centerX - valueSize.Width / 2f;
+                DrawShimmerText(g, "START", valueFont, valueX, valueY, alpha, elapsed, Color.Yellow, Color.Gray);
+            }
+        }
+
+        // ── tekst wypełniony akcentem + suwający się "shine" zamaskowany kształtem liter,
+        //    dokładnie jak pasek postępu w Windows 7 ──
+        private void DrawShimmerText(Graphics g, string text, Font font, float x, float y, double alpha, double elapsedSec, Color color, Color colorBack)
+        {
+            if (string.IsNullOrEmpty(text)) return;
+
+            // AddString wymaga rozmiaru czcionki w tych samych jednostkach co Graphics (domyślnie piksele),
+            // a Font.Size jest w punktach — konwertujemy przez DPI, żeby wyszło identycznie jak DrawString.
+            float emPx = font.Size * g.DpiY / 72f;
+
+            using var path = new GraphicsPath();
+            path.AddString(text, font.FontFamily, (int)font.Style, emPx, new PointF(x, y), StringFormat.GenericTypographic);
+
+            var bounds = path.GetBounds();
+            if (bounds.Width <= 0 || bounds.Height <= 0) return;
+
+            // cień pod spodem — dla czytelności na jasnym/ciemnym tle
+            using (var shadowMatrix = new Matrix())
+            {
+                shadowMatrix.Translate(1.5f, 1.5f);
+                using var shadowPath = (GraphicsPath)path.Clone();
+                shadowPath.Transform(shadowMatrix);
+                using var shadowBrush = new SolidBrush(WithAlpha(colorBack, alpha));
+                g.FillPath(shadowBrush, shadowPath);
+            }
+
+            // bazowe, stałe wypełnienie liter kolorem akcentu
+            using (var baseBrush = new SolidBrush(WithAlpha(color, alpha * 0.7f)))
+                g.FillPath(baseBrush, path);
+
+            // maska = dokładny kształt cyfr — w niej suwa się jasne pasmo
+            var oldClip = g.Clip;
+            g.SetClip(path, CombineMode.Replace);
+
+            const double sweepCycleSec = 0.7;
+            double sweepT = (elapsedSec % sweepCycleSec) / sweepCycleSec;
+            float sweepWidth = bounds.Width * 0.65f;
+            float sweepCenter = bounds.X - sweepWidth + (float)(sweepT * (bounds.Width + sweepWidth * 2));
+
+            using (var sweepBrush = new LinearGradientBrush(
+                new RectangleF(sweepCenter - sweepWidth, bounds.Y - 4, sweepWidth * 2, bounds.Height + 8),
+                Color.Transparent, Color.Transparent, LinearGradientMode.Horizontal))
+            {
+                var blend = new ColorBlend(3)
+                {
+                    Colors = new[]
+                    {
+                WithAlpha(Color.White, 0),
+                WithAlpha(Color.White, alpha * 0.7),
+                WithAlpha(Color.White, 0)
+            },
+                    Positions = new float[] { 0f, 0.5f, 1f }
+                };
+                sweepBrush.InterpolationColors = blend;
+                g.FillRectangle(sweepBrush, sweepCenter - sweepWidth, bounds.Y - 4, sweepWidth * 2, bounds.Height + 8);
+            }
+
+            g.Clip = oldClip;
         }
 
         // ── śledzenie okna LFS ──────────────────────────────
@@ -384,20 +548,22 @@ namespace LFSDriftBuddy
 
                 float centerX = Width / 2f;
 
-                DrawIdleScore(g, centerX);
+                DrawIdleScore(g, centerX, out float idlebarY);
                 DrawActiveHud(g, centerX, out float barX, out float barY, out float barW, out float barH);
-                DrawBonusBox(g, centerX, barY, barH);
+                DrawBonusBox(g, centerX, barY + idlebarY, barH);
                 DrawLapScoreBox(g);   // ← NOWE
+                DrawLapResultPopup(g);
             }
 
             SetBitmap(_buffer);
         }
 
         // ── góra: sam total score, znika w lewo z fade gdy aktywny HUD wjeżdża ──
-        private void DrawIdleScore(Graphics g, float centerX)
+        private void DrawIdleScore(Graphics g, float centerX, out float idlebarY)
         {
+            
             double alpha = 0.75 - _activeBlend;
-            if (alpha <= 0.01) return;
+            
 
             float slideX = (float)(-_activeBlend * 160);
             if (_isActiveNow) { slideX = (float)(-_activeBlend * 160); } else { slideX = (float)-(-_activeBlend * 160); }
@@ -407,6 +573,8 @@ namespace LFSDriftBuddy
             string text = ((long)Math.Round(_displayedScore)).ToString("N0");
             var font = _idleFont32;
             var size = g.MeasureString(text, font);
+            idlebarY = size.Height;
+            if (alpha <= 0.01) return;
             float x = centerX - size.Width / 2f + slideX;
             DrawRevCutGlow(g, new RectangleF(x, 5, size.Width, size.Height), alpha * 0.55);
 
@@ -446,6 +614,10 @@ namespace LFSDriftBuddy
             float totalH = scoreSize.Height;
 
             float startX = centerX - totalW / 2f + slideX;
+
+
+            //DrawShimmerText(g, scoreText, scoreFont, startX, 5, alpha, 0, _accentColor, _accentColorBack);
+
 
             DrawOutlinedText(g, scoreText, scoreFont, startX, 5, WithAlpha(_accentColor, alpha), WithAlpha(_accentColorBack, alpha), outline: false);
 
@@ -573,12 +745,16 @@ namespace LFSDriftBuddy
             }
             DrawOutlinedText(g, labelText, labelFont, barX + padH, barY + padV ,
                 WithAlpha(LabelTextColor, alpha), WithAlpha(Color.Black, alpha), outline: false);
+            
 
-            DrawOutlinedText(g, runText, runFont, barX + labelBoxW + padH - 2, barY + padV ,
-                WithAlpha(LabelTextColor, alpha), WithAlpha(Color.Black, alpha), outline: false);
+           
+
+
+            DrawOutlinedText(g, runText, runFont, barX + labelBoxW + padH - 2, barY + padV ,WithAlpha(LabelTextColor, alpha), WithAlpha(Color.Black, alpha), outline: false);
 
             if (_isDrifting)
                 DrawAngleArrows(g, startX, 5, scoreSize.Width, scoreSize.Height, alpha);
+            barY = (barY - labelSize.Height - 8);
 
         }
 
@@ -680,74 +856,120 @@ namespace LFSDriftBuddy
 
                 posX += w;
             }
+            
         }
 
         // ── osobna ramka pod labelem: bonus (przełożenie itp.), wjazd z prawej / wyjazd w lewo ──
+        // ── osobna ramka pod labelem: bonusy (przełożenie itp.), stackowane obok siebie ──
         private void DrawBonusBox(Graphics g, float centerX, float labelBarY, float labelBarH)
         {
-            double alphaset = 1.0;
             double alphacut = 0.5;
-            if (string.IsNullOrEmpty(_bonusText)) return;
+            var now = DateTime.Now;
 
-            double elapsed = (DateTime.Now - _bonusStart).TotalSeconds;
-            if (elapsed < 0 || elapsed > BonusDurationSec) return;
+            _bonusItems.RemoveAll(it => (now - it.Start).TotalSeconds > BonusDurationSec);
+            if (_bonusItems.Count == 0) return;
 
-            double alpha, offsetX;
+            var font = _activeFont15;
+            const float padH = 7, padV = 4;
             double slideInSec = BonusSlideMs / 1000.0;
             double slideOutStart = BonusDurationSec - slideInSec;
 
-            if (elapsed < slideInSec)
+            var widths = new float[_bonusItems.Count];
+            var heights = new float[_bonusItems.Count];
+            var alphas = new double[_bonusItems.Count];
+            var slideOffsets = new double[_bonusItems.Count];
+
+            float totalW = 0;
+            for (int i = 0; i < _bonusItems.Count; i++)
             {
-                double bt = elapsed / slideInSec;
-                double eased = alphaset - Math.Pow(1 - bt, 3);
-                alpha = eased;
-                offsetX = (alphaset - eased) * 140; // wjazd z prawej
-            }
-            else if (elapsed > slideOutStart)
-            {
-                double bt = (elapsed - slideOutStart) / slideInSec;
-                double eased = Math.Pow(bt, 2);
-                alpha = alphaset - eased;
-                offsetX = -eased * 140; // wyjazd w lewo
-            }
-            else
-            {
-                alpha = alphaset;
-                offsetX = 0;
+                var item = _bonusItems[i];
+                var sz = g.MeasureString(item.Text, font);
+                float targetW = sz.Width + padH * 2;
+                float targetH = sz.Height + padV * 2 - 1;
+
+                if (!item.SizeInit)
+                {
+                    item.DispW = targetW;
+                    item.SizeInit = true;
+                }
+                else
+                {
+                    item.DispW += (targetW - item.DispW) * SizeSmoothFactor;
+                }
+
+                double elapsed = (now - item.Start).TotalSeconds;
+                double alpha, slideOffset;
+
+                if (elapsed < slideInSec)
+                {
+                    double bt = elapsed / slideInSec;
+                    double eased = 1.0 - Math.Pow(1 - bt, 3);
+                    alpha = eased;
+                    slideOffset = (1.0 - eased) * 140;
+                }
+                else if (elapsed > slideOutStart)
+                {
+                    double bt = (elapsed - slideOutStart) / slideInSec;
+                    double eased = Math.Pow(bt, 2);
+                    alpha = 1.0 - eased;
+                    slideOffset = -eased * 140;
+                }
+                else
+                {
+                    alpha = 1.0;
+                    slideOffset = 0;
+                }
+
+                widths[i] = item.DispW;
+                heights[i] = targetH;
+                alphas[i] = alpha;
+                slideOffsets[i] = slideOffset;
+
+                totalW += item.DispW;
+                if (i > 0) totalW += BonusBoxGap;
             }
 
-            if (alpha <= 0.01) return;
-
-            var font = _activeFont15;
-            var size = g.MeasureString(_bonusText, font);
-
-            float padH = 7, padV = 4;
-            float targetBoxW = size.Width + padH * 2;
-            float targetBoxH = size.Height + (padV * 2) - 1;
-
-            if (!_bonusSizeInit)
-            {
-                _dispBonusBoxW = targetBoxW;
-                _dispBonusBoxH = targetBoxH;
-                _bonusSizeInit = true;
-            }
-            else
-            {
-                _dispBonusBoxW += (targetBoxW - _dispBonusBoxW) * SizeSmoothFactor;
-                _dispBonusBoxH += (targetBoxH - _dispBonusBoxH) * SizeSmoothFactor;
-            }
-
-            float boxW = _dispBonusBoxW;
-            float boxH = _dispBonusBoxH;
-            float boxX = centerX - boxW / 2f + (float)offsetX;
             float boxY = labelBarY + labelBarH + 8;
-            //DrawRevCutGlow(g, new RectangleF(boxX, boxY, boxW, boxH), alpha);
-            using (var path = RoundedRect(new RectangleF(boxX, boxY, boxW, boxH), 6))
-            using (var bgBrush = new SolidBrush(WithAlpha(_accentColor, alpha - alphacut)))
-                g.FillPath(bgBrush, path);
 
-            DrawOutlinedText(g, _bonusText, font, boxX + padH, boxY + padV,
-                WithAlpha(LabelTextColor, alpha), WithAlpha(Color.Black, alpha), outline: false);
+            // ── docelowe (bazowe, bez slide) pozycje X — wyśrodkowana grupa ──
+            float baseX = centerX - totalW / 2f;
+            float accum = baseX;
+            for (int i = 0; i < _bonusItems.Count; i++)
+            {
+                var item = _bonusItems[i];
+                float targetX = accum;
+
+                if (!item.PosInit)
+                {
+                    item.DispX = targetX;
+                    item.PosInit = true;
+                }
+                else
+                {
+                    item.DispX += (targetX - item.DispX) * SizeSmoothFactor;
+                }
+
+                accum += widths[i] + BonusBoxGap;
+            }
+
+            for (int i = 0; i < _bonusItems.Count; i++)
+            {
+                float w = widths[i];
+                float h = heights[i];
+                double alpha = alphas[i];
+
+                if (alpha > 0.01)
+                {
+                    float boxX = _bonusItems[i].DispX + (float)slideOffsets[i];
+
+                    using (var path = RoundedRect(new RectangleF(boxX, boxY, w, h), 6))
+                    using (var bgBrush = new SolidBrush(WithAlpha(_accentColor, alpha - alphacut)))
+                        g.FillPath(bgBrush, path);
+
+                    DrawOutlinedText(g, _bonusItems[i].Text, font, boxX + padH, boxY + padV,
+                        WithAlpha(LabelTextColor, alpha), WithAlpha(Color.Black, alpha), outline: false);
+                }
+            }
         }
 
 
@@ -760,32 +982,38 @@ namespace LFSDriftBuddy
 
             var titleFont = _activeFont15;
             var valueFont = _activeFont24;
-            var contextFont = _activeFont11;   // ← NOWE
+            var contextFont = _activeFont11;
 
-            string lapLabel = Localization.T("hud.lapscore");        // ← zamiast "LAP SCORE"
+            string lapLabel = Localization.T("hud.lapscore");
             string lapValue = ((long)Math.Round(_displayedLapScore)).ToString("N0");
-            string bestLabel = Localization.T("hud.bestlapscore");    // ← zamiast "BEST LAP SCORE"
+            string lastLapLabel = Localization.T("hud.lastlapscore");       // ← NOWE (dodaj klucz w Localization.cs)
+            string lastLapValue = _lastLapScoreDisplay.ToString("N0");      // ← NOWE
+            string bestLabel = Localization.T("hud.bestlapscore");
             string bestValue = _bestLapScore.ToString("N0");
             string contextLabel = _lapContextLabel;
 
             var lapLabelSize = g.MeasureString(lapLabel, titleFont);
             var lapValueSize = g.MeasureString(lapValue, valueFont);
+            var lastLapLabelSize = g.MeasureString(lastLapLabel, titleFont);     // ← NOWE
+            var lastLapValueSize = g.MeasureString(lastLapValue, valueFont);     // ← NOWE
             var bestLabelSize = g.MeasureString(bestLabel, titleFont);
             var bestValueSize = g.MeasureString(bestValue, valueFont);
             var contextSize = string.IsNullOrEmpty(contextLabel)
-                ? SizeF.Empty : g.MeasureString(contextLabel, contextFont);   // ← NOWE
+                ? SizeF.Empty : g.MeasureString(contextLabel, contextFont);
 
             float boxW = Math.Max(
-                Math.Max(lapLabelSize.Width, lapValueSize.Width),
+                Math.Max(Math.Max(lapLabelSize.Width, lapValueSize.Width),
+                         Math.Max(lastLapLabelSize.Width, lastLapValueSize.Width)),
                 Math.Max(Math.Max(bestLabelSize.Width, bestValueSize.Width), contextSize.Width)) + 28;
 
             float rowGap = 1;
-            float contextExtra = contextSize.Height > 0 ? contextSize.Height + 8 : 0;   // ← NOWE
+            float contextExtra = contextSize.Height > 0 ? contextSize.Height + 8 : 0;
 
             float boxH = lapLabelSize.Height + lapValueSize.Height
+                       + lastLapLabelSize.Height + lastLapValueSize.Height     // ← NOWE
                        + bestLabelSize.Height + bestValueSize.Height
                        + contextExtra
-                       + rowGap * 3 + 20;
+                       + rowGap * 5 + 20;   // ← było rowGap * 3
 
             float boxX = 24 + slideX;
             float boxY = (Height - boxH) / 2f;
@@ -805,6 +1033,16 @@ namespace LFSDriftBuddy
                 WithAlpha(_accentColor, alpha), WithAlpha(_accentColorBack, alpha), outline: false);
             y += lapValueSize.Height + rowGap;
 
+            // ← NOWY BLOK: ostatnie okrążenie
+            DrawOutlinedText(g, lastLapLabel, titleFont, textX, y,
+                WithAlpha(Color.White, alpha * 0.82), WithAlpha(Color.Black, alpha), outline: false);
+            y += lastLapLabelSize.Height + rowGap;
+
+            DrawOutlinedText(g, lastLapValue, valueFont, textX, y,
+                WithAlpha(Color.FromArgb(120, 200, 255), alpha), WithAlpha(Color.Black, alpha), outline: false);
+            y += lastLapValueSize.Height + rowGap;
+            // ← KONIEC NOWEGO BLOKU
+
             DrawOutlinedText(g, bestLabel, titleFont, textX, y,
                 WithAlpha(Color.White, alpha * 0.82), WithAlpha(Color.Black, alpha), outline: false);
             y += bestLabelSize.Height + rowGap;
@@ -813,7 +1051,7 @@ namespace LFSDriftBuddy
                 WithAlpha(Color.FromArgb(255, 215, 0), alpha), WithAlpha(Color.Black, alpha), outline: false);
             y += bestValueSize.Height;
 
-            if (!string.IsNullOrEmpty(contextLabel))   // ← NOWE
+            if (!string.IsNullOrEmpty(contextLabel))
             {
                 y += 8;
                 DrawOutlinedText(g, contextLabel, contextFont, textX, y,
@@ -998,6 +1236,7 @@ namespace LFSDriftBuddy
                 _activeFont24?.Dispose();
                 _activeFont22?.Dispose();
                 _activeFont32?.Dispose();
+                _activeFont42?.Dispose();
                 _activeFont20?.Dispose();
                 _activeFont17?.Dispose();
                 _activeFont15?.Dispose();

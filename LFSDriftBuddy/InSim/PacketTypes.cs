@@ -113,24 +113,25 @@ namespace LFSDriftBuddy.InSim
     }
 
     [System.Flags]
+    
     public enum StateFlags : ushort
     {
-        ISS_GAME = 1,    // w grze (nie w menu głównym)
-        ISS_REPLAY = 2,    // oglądamy powtórkę
-        ISS_PAUSED = 4,    // pauza
-        ISS_SEND_STATS = 8,    // nieużywane tu
-        ISS_IN_MENU = 16,   // w menu
-        ISS_SHIFTU = 32,   // ShiftU jest otwarte
-        ISS_DIALOG = 64,   // dialog otwarty
-        ISS_SHIFTU_FOLLOW = 128,
-        ISS_SHIFTU_NO_OPT = 256,
-        ISS_SHOW_2D = 512,
-        ISS_FRONT_END = 1024, // w front-endzie (menu główne)
-        ISS_MULTI = 2048, // sesja multiplayer
-        ISS_MPSPEEDUP = 4096,
-        ISS_WINDOWED = 8192,
-        ISS_SOUND_MUTE = 16384,
-        ISS_VIEW_OVERRIDE = 32768,
+        ISS_GAME = 1,      // w grze (lub MPR)
+        ISS_REPLAY = 2,      // w SPR (powtórka jednoosobowa)
+        ISS_PAUSED = 4,      // pauza
+        ISS_SHIFTU = 8,      // tryb wolnej kamery
+        ISS_DIALOG = 16,     // otwarty dialog
+        ISS_SHIFTU_FOLLOW = 32,
+        ISS_SHIFTU_NO_OPT = 64,
+        ISS_SHOW_2D = 128,
+        ISS_FRONT_END = 256,    // ekran startowy / menu główne
+        ISS_MULTI = 512,
+        ISS_MPSPEEDUP = 1024,
+        ISS_WINDOWED = 2048,
+        ISS_SOUND_MUTE = 4096,
+        ISS_VIEW_OVERRIDE = 8192,
+        ISS_VISIBLE = 16384,  // przyciski InSim widoczne
+        ISS_TEXT_ENTRY = 32768,
     }
 
     /// <summary>

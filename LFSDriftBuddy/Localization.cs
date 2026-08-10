@@ -790,6 +790,14 @@ namespace LFSDriftBuddy
                     [AppLanguage.German] = "Kein aktiver XInput-Controller gefunden.",
                     [AppLanguage.Spanish] = "No se encontró ningún mando XInput activo.",
                 },
+                ["hud.lastlapscore"] = new()
+                {
+                    [AppLanguage.English] = "LAST LAP SCORE",
+                    [AppLanguage.Polish] = "OSTATNIE OKRĄŻENIE",
+                    [AppLanguage.Turkish] = "SON TUR PUANI",
+                    [AppLanguage.German] = "LETZTE RUNDE",
+                    [AppLanguage.Spanish] = "ÚLTIMA VUELTA",
+                },
             };
     }
 }

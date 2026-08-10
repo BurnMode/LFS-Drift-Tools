@@ -1,7 +1,9 @@
 using System;
+using System.Collections.Generic;
+using System.Linq;
 using System.Net.Sockets;
-using System.Threading;
 using System.Text;
+using System.Threading;
 
 namespace LFSDriftBuddy.InSim
 {
@@ -28,6 +30,15 @@ namespace LFSDriftBuddy.InSim
         public byte PLID { get; set; }
     }
 
+    
+
+    public class CheckpointCrossedEventArgs : PlidEventArgs
+    {
+        /// <summary>0 = meta, 1 = pierwszy punkt kontrolny, 2 = drugi, 3 = trzeci (wg edytora layoutu LFS)</summary>
+        public int CheckpointIndex { get; set; }
+        public bool Forward { get; set; }
+    }
+
     /// <summary>
     /// Manages the TCP connection to LFS InSim, sends/receives packets.
     /// </summary>
@@ -46,6 +57,11 @@ namespace LFSDriftBuddy.InSim
         public event EventHandler<PlidEventArgs> PitLaneEntered;  // ← NOWE: IS_PLA, Fact=1
         public event EventHandler<PlidEventArgs> PitLaneExited;   // ← NOWE: IS_PLA, Fact=0
         public event EventHandler<PlidEventArgs> PlayerPitted;
+        public event EventHandler<CheckpointCrossedEventArgs> CheckpointCrossed;   // ← NOWE: IS_UCO
+        public event EventHandler<PlidEventArgs> RestrictedAreaEntered;            // ← NOWE: IS_PEN (zła trasa / zakazany obszar)
+        public event EventHandler<PlidEventArgs> PostHit;
+        public event EventHandler<PlidEventArgs> TyreStackHit;
+        public event EventHandler<byte[]> RawObjectHitDebug;
         // ── State ─────────────────────────────────────────────
         private TcpClient   _client;
         private NetworkStream _stream;
@@ -58,6 +74,15 @@ namespace LFSDriftBuddy.InSim
         public byte ViewPLID { get; private set; } = 0;
         public string CurrentTrack { get; private set; } = "";
         public string CurrentLayout { get; private set; } = "";   // ← NOWE, "" = brak customowego layoutu (.lyt)
+
+        private const byte AXO_POST = 136;
+        private const byte AXO_TYRE_STACK2_BIG = 53;   // ← NOWE
+        private const byte AXO_TYRE_STACK3_BIG = 54;   // ← NOWE
+        private const byte AXO_TYRE_STACK4_BIG = 55;   // ← NOWE
+
+
+
+
         public bool IsConnected => _client?.Connected == true && _running;
 
         // ─────────────────────────────────────────────────────
@@ -85,16 +110,18 @@ namespace LFSDriftBuddy.InSim
 
                 // Send IS_ISI – request MCI packets every mciInterval ms
                 var isi = Packets.BuildISI(
-                    udpPort:  0,
-                    flags: ISFlags.ISF_MCI | ISFlags.ISF_LOCAL,
-                    prefix:   33,               // '!'
-                    interval: mciInterval,
-                    admin:    adminPassword,
-                    iname:    "-Drift Tools-"
-                );
+                     udpPort: 0,
+                     flags: ISFlags.ISF_MCI | ISFlags.ISF_LOCAL | ISFlags.ISF_OBH,   // ← tylko OBH, bez AXM
+                     prefix: 33,               // '!'
+                     interval: mciInterval,
+                     admin: adminPassword,
+                     iname: "-Drift Tools-"
+                 );
                 Send(isi);
+
                 Send(Packets.BuildTiny(4, TinyType.TINY_SST));
                 Send(Packets.BuildTiny(5, TinyType.TINY_AXI));
+
                 RaiseStatus("Połączono z LFS na " + host + ":" + port);
                 Connected?.Invoke(this, EventArgs.Empty);
                 Send(Packets.BuildTiny(4, TinyType.TINY_SST));
@@ -161,10 +188,9 @@ namespace LFSDriftBuddy.InSim
         }
 
         public bool IsRaceNow =>
-        (_gameState & StateFlags.ISS_GAME) == 0;
-        //(_gameState & StateFlags.ISS_REPLAY) == 2 ||
-       // (_gameState & StateFlags.ISS_FRONT_END) == 0 ||
-        //(_gameState & StateFlags.ISS_PAUSED) == 0;
+        (_gameState & StateFlags.ISS_GAME) != 0        // musi być ustawiony bit "w grze"
+        && (_gameState & StateFlags.ISS_REPLAY) == 0   // ale nie w powtórce (SPR)
+        && (_gameState & StateFlags.ISS_FRONT_END) == 0; // i nie w menu głównym
 
         public event EventHandler<bool>? RaceStateChanged; // true = wszedł do wyścigu
 
@@ -245,6 +271,9 @@ namespace LFSDriftBuddy.InSim
         {
             if (packet.Length < 4) return;
 
+            if (packet[1] == 51)
+                RawObjectHitDebug?.Invoke(this, packet);
+
             PacketType type = (PacketType)packet[1];
 
             switch (type)
@@ -274,26 +303,104 @@ namespace LFSDriftBuddy.InSim
                 case PacketType.ISP_LAP:
                     HandleLap(packet);
                     break;
-                case PacketType.ISP_AXI:            // ← NOWE
+                case PacketType.ISP_AXI:        
                     HandleAxi(packet);
                     break;
-                case PacketType.ISP_CRS:            // ← NOWE
+                case PacketType.ISP_CRS:          
                     HandleCrs(packet);
                     break;
 
-                case PacketType.ISP_RST:            // ← NOWE
+                case PacketType.ISP_RST:         
                     HandleRst(packet);
                     break;
 
-                case PacketType.ISP_PLA:            // ← NOWE
+                case PacketType.ISP_PLA:         
                     HandlePla(packet);
                     break;
 
-                case PacketType.ISP_PLP:            // ← NOWE
+                case PacketType.ISP_PLP:        
                     HandlePlp(packet);
+                    break;
+
+                case PacketType.ISP_UCO:          
+                    HandleUco(packet);
+                    break;
+
+                case PacketType.ISP_PEN:           
+                    HandlePen(packet);
+                    break;
+
+                
+
+                case PacketType.ISP_OBH:            // ← NOWE
+                    HandleObh(packet);
                     break;
             }
         }
+
+
+
+
+        private void HandleObh(byte[] p)
+        {
+            // IS_OBH: w aktualnej wersji LFS pakiet ma 28 bajtów (potwierdzone empirycznie zrzutami hex),
+            // Index leży na offsecie 26, OBHFlags na offsecie 27.
+            if (p.Length < 28) return;
+
+            byte plid = p[3];
+            byte index = p[26];
+            byte obhFlags = p[27];
+
+            if (index == AXO_POST)
+            {
+                PostHit?.Invoke(this, new PlidEventArgs { PLID = plid });
+                return;
+            }
+
+            if (index == AXO_TYRE_STACK2_BIG || index == AXO_TYRE_STACK3_BIG || index == AXO_TYRE_STACK4_BIG)
+            {
+                TyreStackHit?.Invoke(this, new PlidEventArgs { PLID = plid });
+                return;
+            }
+        }
+
+        private void HandleUco(byte[] p)
+        {
+            // IS_UCO: Size=28 — zgłasza przejazd przez punkt kontrolny InSim lub wjazd/wyjazd z okręgu InSim
+            // ObjectInfo (Index/Flags identyfikujące obiekt) leży na offsecie 20: X(short) Y(short) Zbyte Flags Index Heading
+            if (p.Length < 28) return;
+
+            byte plid = p[3];
+            byte ucoAction = p[5];   // UCO_CIRCLE_ENTER=0 / UCO_CIRCLE_LEAVE=1 / UCO_CP_FWD=2 / UCO_CP_REV=3
+
+            byte flags = p[25];
+            byte index = p[26];
+
+            if (index != 252) return;   // 252 = punkt kontrolny InSim (253 to okrąg InSim — na razie nieobsługiwany)
+
+            int checkpointNumber = flags & 0x03;   // 00=meta / 01=1.punkt / 10=2.punkt / 11=3.punkt
+
+            CheckpointCrossed?.Invoke(this, new CheckpointCrossedEventArgs
+            {
+                PLID = plid,
+                CheckpointIndex = checkpointNumber,
+                Forward = ucoAction == 2   // UCO_CP_FWD
+            });
+        }
+
+        private void HandlePen(byte[] p)
+        {
+            // IS_PEN: Size=8 — kara nadana/zdjęta. LFS wysyła Reason=PENR_WRONG_WAY (2)
+            // zarówno dla złej trasy, jak i wjazdu na zakazany obszar (Restricted area) w layoucie.
+            if (p.Length < 8) return;
+
+            byte plid = p[3];
+            byte reason = p[6];
+
+            if (reason == 2)   // PENR_WRONG_WAY
+                RestrictedAreaEntered?.Invoke(this, new PlidEventArgs { PLID = plid });
+        }
+
         private void HandlePlp(byte[] p)
         {
             // IS_PLP: Size=4, Type=ISP_PLP, ReqI, PLID
@@ -412,6 +519,7 @@ namespace LFSDriftBuddy.InSim
                 CurrentLayout = "";
                 LayoutChanged?.Invoke(this, "");
             }
+            
         }
         private void HandleLap(byte[] p)
         {

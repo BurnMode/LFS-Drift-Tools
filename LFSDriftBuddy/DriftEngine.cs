@@ -44,6 +44,13 @@ namespace LFSDriftBuddy
         public long CurrentRunPoints { get; private set; }
         public long LapScore { get; private set; }       // ← NOWE
         public long BestLapScore { get; private set; }    // ← NOWE
+        public long LastLapScore { get; private set; }   // ← NOWE
+
+        private readonly string _lastLapRecordsFile = Path.Combine(
+            AppDomain.CurrentDomain.BaseDirectory,
+            "driver_lastlap_records.json");
+
+        private Dictionary<string, Dictionary<string, Dictionary<string, long>>> _driverLastLapRecords = new();
         public long TotalScore { get; private set; }
         public double ComboMultiplier { get; private set; } = 1;
         public long BestRunScore { get; private set; }
@@ -95,6 +102,7 @@ namespace LFSDriftBuddy
         {
             LoadStats();
             LoadLapRecords();
+            LoadLastLapRecords();
         }
 
 
@@ -118,6 +126,7 @@ namespace LFSDriftBuddy
             BestDeepDriftDurationMs = stats.BestDeepDriftDurationMs;
 
             BestLapScore = GetBestLapForDriver(CurrentDriver, _currentTrackCode, _currentLayoutName);   // ← poprawione
+            LastLapScore = GetLastLapForDriver(CurrentDriver, _currentTrackCode, _currentLayoutName);
         }
         private static string CombineTrackKey(string track, string layout)
         {
@@ -147,6 +156,7 @@ namespace LFSDriftBuddy
             MigrateDefaultLapRecordIfNeeded(); 
 
             BestLapScore = GetBestLapForDriver(CurrentDriver, _currentTrackCode, _currentLayoutName);
+            LastLapScore = GetLastLapForDriver(CurrentDriver, _currentTrackCode, _currentLayoutName);
             LapScore = 0;
             HasActiveLapContext = false;
         }
@@ -167,6 +177,8 @@ namespace LFSDriftBuddy
 
         public void OnLapCompleted()
         {
+            LastLapScore = LapScore;    // ← NOWE
+            SaveLastLapRecord();
             if (!string.IsNullOrEmpty(_currentTrackKey) && LapScore > BestLapScore)
             {
                 BestLapScore = LapScore;
@@ -217,9 +229,13 @@ namespace LFSDriftBuddy
 
             // ── FAST DRIVE SCORING ─────────────────────────────
 
-            if (_isHandBrakeON) { 
-                eBrakeCount += 1;
+            if (_isHandBrakeON && SpeedKmh >= 35) { 
+                eBrakeCount += 2;
                 eDriftActive = true;
+            }
+            if (SpeedKmh <= 25) { 
+                eBrakeCount = 0;
+                eDriftActive = false;
             }
 
             if (!speeding && !drifting) 
@@ -448,23 +464,23 @@ namespace LFSDriftBuddy
                     if (driftTimeMultipler == 5) 
                     {
                         LastAwardedText = $"{bonusText} - {Math.Round((double)500 * driftTimeMultipler / 1000, 1)}s";
-                        ComboMultiplier = Math.Round(Math.Min(ComboMultiplier + (0.10 * angleScore), 10.0), 2);
+                        ComboMultiplier = Math.Round(Math.Min(ComboMultiplier + (0.15 * angleScore), 10.0), 2);
                         
                     }
                     else if (driftTimeMultipler == 10)
                     {
                         LastAwardedText = $"{bonusText} - {Math.Round((double)500 * driftTimeMultipler / 1000, 1)}s";
-                        ComboMultiplier = Math.Round(Math.Min(ComboMultiplier + (0.20 * angleScore), 10.0), 2);
+                        ComboMultiplier = Math.Round(Math.Min(ComboMultiplier + (0.25 * angleScore), 10.0), 2);
                     }
                     else if (driftTimeMultipler == 15)
                     {
                         LastAwardedText = $"{bonusText} - {Math.Round((double)500 * driftTimeMultipler / 1000, 1)}s";
-                        ComboMultiplier = Math.Round(Math.Min(ComboMultiplier + (0.30 * angleScore), 10.0), 2);
+                        ComboMultiplier = Math.Round(Math.Min(ComboMultiplier + (0.35 * angleScore), 10.0), 2);
                     }
                     else if (driftTimeMultipler == 20)
                     {
                         LastAwardedText = $"{bonusText} - {Math.Round((double)500 * driftTimeMultipler / 1000, 1)}s";
-                        ComboMultiplier = Math.Round(Math.Min(ComboMultiplier + (0.40 * angleScore), 10.0), 2);
+                        ComboMultiplier = Math.Round(Math.Min(ComboMultiplier + (0.45 * angleScore), 10.0), 2);
                     }
 
                     labelKindT = DriftLabelKind.DeepLongDrift;
@@ -480,7 +496,7 @@ namespace LFSDriftBuddy
                         TotalScore = TotalScore + (50 * deepAngleCount);
                         LapScore = LapScore + (50 * deepAngleCount);
                         LastAwardedText = $"{bonusText} - {Math.Round((double)500 * driftTimeMultipler / 1000, 1)}s + {50 * deepAngleCount}";
-                        ComboMultiplier = Math.Round(Math.Min(ComboMultiplier + (0.10 * angleScore), 10.0), 2);
+                        ComboMultiplier = Math.Round(Math.Min(ComboMultiplier + (0.35 * angleScore), 10.0), 2);
 
                     }
                     else if (deepAngleCount == 8) 
@@ -488,21 +504,21 @@ namespace LFSDriftBuddy
                         TotalScore = TotalScore + (50 * deepAngleCount);
                         LapScore = LapScore + (50 * deepAngleCount);
                         LastAwardedText = $"{bonusText} - {Math.Round((double)500 * driftTimeMultipler / 1000, 1)}s + {50 * deepAngleCount}";
-                        ComboMultiplier = Math.Round(Math.Min(ComboMultiplier + (0.20 * angleScore), 10.0), 2);
+                        ComboMultiplier = Math.Round(Math.Min(ComboMultiplier + (0.45 * angleScore), 10.0), 2);
                     }
                     else if (deepAngleCount == 12) 
                     {
                         TotalScore = TotalScore + (50 * deepAngleCount);
                         LapScore = LapScore + (50 * deepAngleCount);
                         LastAwardedText = $"{bonusText} - {Math.Round((double)500 * driftTimeMultipler / 1000, 1)}s + {50 * deepAngleCount}";
-                        ComboMultiplier = Math.Round(Math.Min(ComboMultiplier + (0.30 * angleScore), 10.0), 2);
+                        ComboMultiplier = Math.Round(Math.Min(ComboMultiplier + (0.55 * angleScore), 10.0), 2);
                     }
                     else if (deepAngleCount == 16) 
                     {
                         TotalScore = TotalScore + (50 * deepAngleCount);
                         LapScore = LapScore + (50 * deepAngleCount);
                         LastAwardedText = $"{bonusText} - {Math.Round((double)500 * driftTimeMultipler / 1000, 1)}s + {50 * deepAngleCount}";
-                        ComboMultiplier = Math.Round(Math.Min(ComboMultiplier + (0.40 * angleScore), 10.0), 2);
+                        ComboMultiplier = Math.Round(Math.Min(ComboMultiplier + (0.65 * angleScore), 10.0), 2);
                     }
 
 
@@ -638,7 +654,85 @@ namespace LFSDriftBuddy
                 _driverScores = new Dictionary<string, DriverStats>();
             }
         }
+        private long GetLastLapForDriver(string driver, string track, string layout)
+        {
+            string layoutKey = string.IsNullOrWhiteSpace(layout) ? "default" : layout;
 
+            if (_driverLastLapRecords.TryGetValue(driver, out var trackMap) &&
+                trackMap.TryGetValue(track, out var layoutMap) &&
+                layoutMap.TryGetValue(layoutKey, out var last))
+                return last;
+
+            return 0;
+        }
+
+        private void LoadLastLapRecords()
+        {
+            try
+            {
+                if (!File.Exists(_lastLapRecordsFile))
+                {
+                    _driverLastLapRecords = new Dictionary<string, Dictionary<string, Dictionary<string, long>>>();
+                    return;
+                }
+
+                string json = File.ReadAllText(_lastLapRecordsFile);
+                _driverLastLapRecords = JsonSerializer.Deserialize<Dictionary<string, Dictionary<string, Dictionary<string, long>>>>(json)
+                                         ?? new Dictionary<string, Dictionary<string, Dictionary<string, long>>>();
+            }
+            catch
+            {
+                _driverLastLapRecords = new Dictionary<string, Dictionary<string, Dictionary<string, long>>>();
+            }
+        }
+
+        private void MigrateDefaultLastLapRecordIfNeeded()
+        {
+            if (string.IsNullOrWhiteSpace(_currentLayoutName)) return;
+            if (!_driverLastLapRecords.TryGetValue(CurrentDriver, out var trackMap)) return;
+            if (!trackMap.TryGetValue(_currentTrackCode, out var layoutMap)) return;
+            if (!layoutMap.TryGetValue("default", out var defaultScore)) return;
+            if (layoutMap.ContainsKey(_currentLayoutName)) return;
+
+            layoutMap[_currentLayoutName] = defaultScore;
+            layoutMap.Remove("default");
+            SaveLastLapRecordsRaw();
+        }
+
+        private void SaveLastLapRecord()
+        {
+            string layoutKey = string.IsNullOrWhiteSpace(_currentLayoutName) ? "default" : _currentLayoutName;
+
+            if (!_driverLastLapRecords.TryGetValue(CurrentDriver, out var trackMap))
+            {
+                trackMap = new Dictionary<string, Dictionary<string, long>>();
+                _driverLastLapRecords[CurrentDriver] = trackMap;
+            }
+
+            if (!trackMap.TryGetValue(_currentTrackCode, out var layoutMap))
+            {
+                layoutMap = new Dictionary<string, long>();
+                trackMap[_currentTrackCode] = layoutMap;
+            }
+
+            layoutMap[layoutKey] = LastLapScore;
+            SaveLastLapRecordsRaw();
+        }
+
+        private void SaveLastLapRecordsRaw()
+        {
+            try
+            {
+                string json = JsonSerializer.Serialize(
+                    _driverLastLapRecords,
+                    new JsonSerializerOptions { WriteIndented = true });
+
+                File.WriteAllText(_lastLapRecordsFile, json);
+            }
+            catch
+            {
+            }
+        }
         private long GetBestLapForDriver(string driver, string track, string layout)
         {
             string layoutKey = string.IsNullOrWhiteSpace(layout) ? "default" : layout;
@@ -749,6 +843,15 @@ namespace LFSDriftBuddy
             }
         }
 
+        /// <summary>Dodaje/odejmuje punkty za uderzenie w post (bonus/kara). Nie wpływa na CurrentRunPoints ani combo.</summary>
+        public void ApplyPostPoints(long delta, string awardLabel)
+        {
+            TotalScore += delta;
+            LapScore += delta;
+            if(ComboMultiplier > 0) ComboMultiplier += 0.1;
+             LastAwardedText = awardLabel;
+            SaveCurrentDriver();
+        }
         private void FinalizeDriftSession(DateTime now)
         {
             if (_driftSessionStart == DateTime.MinValue) return;
@@ -961,6 +1064,25 @@ namespace LFSDriftBuddy
         public void ResetLapScore()
         {
             LapScore = 0;
+        }
+
+        /// <summary>Aktywuje liczenie punktów okrążenia po przejeździe przez pierwszy punkt kontrolny InSim.
+        /// Jeśli liczenie jest już aktywne — ignoruje wywołanie i zwraca false.</summary>
+        public bool ActivateLapCounting()
+        {
+            if (HasActiveLapContext) return false;
+
+            LapScore = 0;
+            HasActiveLapContext = true;
+            return true;
+        }
+
+        /// <summary>Wjazd na zakazany obszar — resetuje i dezaktywuje liczenie punktów okrążenia
+        /// do czasu kolejnego przejazdu przez pierwszy punkt kontrolny.</summary>
+        public void DeactivateLapCounting()
+        {
+            LapScore = 0;
+            HasActiveLapContext = false;
         }
 
         /// <summary>Restart wyścigu — zeruje LapScore i chowa ramkę HUD do czasu 1. zaliczonego okrążenia.</summary>

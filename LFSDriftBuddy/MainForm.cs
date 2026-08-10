@@ -197,7 +197,12 @@ namespace LFSDriftBuddy
                 if (inRace)
                     InitInGameHUD();      // pojawiają się przyciski
                 else
+                {
                     _insim.DeleteAllButtons(); // znikają w menu/powtórce
+                    _drift.DeactivateLapCounting();     // ← NOWE: koniec okrążenia przy wyjściu do menu
+                    _overlay.UpdateLapScore(_drift.LapScore);
+                    _overlay.SetLapBoxVisible(false);   // ← NOWE: chowa ramkę HUD okrążenia
+                }
             }));
 
             _insim.LapCompleted += (s, e) => BeginInvoke((Action)(() =>
@@ -206,7 +211,11 @@ namespace LFSDriftBuddy
                 {
                     _drift.OnLapCompleted();
                     _overlay.UpdateBestLapScore(_drift.BestLapScore);
-                    _overlay.SetLapBoxVisible(true);   // pierwsze zaliczone okrążenie = pokaż ramkę
+                    if (_drift.LastLapScore >= 250)
+                    { _overlay.UpdateLastLapScore(_drift.LastLapScore); }
+                    
+                    _overlay.ShowLapResult(_drift.LastLapScore);   
+                    _overlay.SetLapBoxVisible(true);
                 }
             }));
 
@@ -214,16 +223,18 @@ namespace LFSDriftBuddy
             {
                 _drift.SetTrack(track);
                 _overlay.UpdateBestLapScore(_drift.BestLapScore);
+                //_overlay.UpdateLastLapScore(_drift.LastLapScore);   // ← NOWE
                 _overlay.SetLapBoxVisible(_drift.HasActiveLapContext);
-                UpdateLapContextLabel();   // ← NOWE
+                UpdateLapContextLabel();
             }));
 
             _insim.LayoutChanged += (s, layout) => BeginInvoke((Action)(() =>
             {
                 _drift.SetLayout(layout);
                 _overlay.UpdateBestLapScore(_drift.BestLapScore);
+               // _overlay.UpdateLastLapScore(_drift.LastLapScore);   // ← NOWE
                 _overlay.SetLapBoxVisible(_drift.HasActiveLapContext);
-                UpdateLapContextLabel();   // ← NOWE
+                UpdateLapContextLabel();
             }));
             _insim.CarReset += (s, e) => BeginInvoke((Action)(() =>
             {
@@ -271,6 +282,55 @@ namespace LFSDriftBuddy
                     _overlay.SetLapBoxVisible(false);
                 }
             }));
+
+            _insim.CheckpointCrossed += (s, e) => BeginInvoke((Action)(() =>
+            {
+                if (e.PLID != _lastKnownPlayerPLID) return;
+                if (e.CheckpointIndex != 1) return;   // tylko "Pierwszy punkt kontrolny"
+
+                if (_drift.ActivateLapCounting())
+                {
+                    _overlay.UpdateLapScore(_drift.LapScore);
+                    _overlay.SetLapBoxVisible(true);
+                    UpdateLapContextLabel();
+                }
+                // jeśli liczenie/HUD już aktywne — przejazd przez 1. punkt kontrolny jest ignorowany
+            }));
+
+            _insim.RestrictedAreaEntered += (s, e) => BeginInvoke((Action)(() =>
+            {
+                if (e.PLID != _lastKnownPlayerPLID) return;
+
+                _drift.DeactivateLapCounting();
+                _overlay.UpdateLapScore(_drift.LapScore);
+                _overlay.SetLapBoxVisible(false);
+            }));
+
+            _insim.PostHit += (s, e) => BeginInvoke((Action)(() =>
+            {
+                if (e.PLID != _lastKnownPlayerPLID) return;
+                HandlePostHit();
+            }));
+
+            _insim.TyreStackHit += (s, e) => BeginInvoke((Action)(() =>   // ← NOWE
+            {
+                if (e.PLID != _lastKnownPlayerPLID) return;
+                HandleTyreStackHit();
+            }));
+            /*
+            _insim.RawObjectHitDebug += (s, packet) => BeginInvoke((Action)(() =>
+            {
+                MessageBox.Show(
+                    this,
+                    $"IS_OBH odebrany! ({packet.Length} bajtów)\n\n" +
+                    BitConverter.ToString(packet) + "\n\n" +
+                    $"Index (offset 26) = {(packet.Length > 22 ? packet[22].ToString() : "?")}\n" +
+                    $"OBHFlags (offset 27) = {(packet.Length > 23 ? packet[23].ToString() : "?")}",
+                    "DEBUG: RAW IS_OBH",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Information);
+            }));
+            */
 
             _drift.SetDriver(Environment.UserName);
             _revLimiter.DataReceived += OnRevData;
@@ -2724,6 +2784,84 @@ namespace LFSDriftBuddy
             }));
         }
         private string _lastOverlayBonusText = "";
+        private DateTime _lastPostHitTime = DateTime.MinValue;    // ← NOWE
+        private DateTime _lastTyreHitTime = DateTime.MinValue;    // ← NOWE
+        private static readonly TimeSpan ObjectHitCooldown = TimeSpan.FromMilliseconds(500);   // ← NOWE
+
+        private void HandlePostHit()
+        {
+            var now = DateTime.UtcNow;
+            if (now - _lastPostHitTime < ObjectHitCooldown) return;   // debounce — 1 efekt na pachołek
+            _lastPostHitTime = now;
+
+            if (_drift.IsDrifting)
+            {
+                long bonus = (long)Math.Round(100 * _drift.ComboMultiplier);
+                _drift.ApplyPostPoints(bonus, $"POST KISS! +{bonus}");
+            }
+            else
+            {
+                _drift.ApplyPostPoints(-100, "POST HIT -100");
+            }
+
+            UpdateScoreLabels();
+            _overlay.UpdateScore(_drift.TotalScore);
+            _overlay.ShowBonus(_drift.LastAwardedText);
+            if (_showHudCheck.Checked) ShowInGameAward(_drift.LastAwardedText);
+        }
+
+        private void HandleTyreStackHit()
+        {
+            var buforspeed = _speedKmh;
+            var buforangle = _driftAngle;
+            var now = DateTime.UtcNow;
+            if (now - _lastTyreHitTime < ObjectHitCooldown) return;   // debounce — 1 efekt na uderzenie
+            _lastTyreHitTime = now;
+
+            if (!_drift.IsDrifting)
+            {
+                // uderzenie poza driftem — natychmiastowa kara
+                _drift.ApplyPostPoints(-100, "TYRE STACK HIT -100");
+                UpdateScoreLabels();
+                _overlay.UpdateScore(_drift.TotalScore);
+                _overlay.ShowBonus(_drift.LastAwardedText);
+                if (_showHudCheck.Checked) ShowInGameAward(_drift.LastAwardedText);
+                return;
+            }
+
+            // uderzenie podczas driftu — czekamy 2s i sprawdzamy, czy drift nadal trwa
+            var delayTimer = new System.Windows.Forms.Timer { Interval = 1000 };
+            delayTimer.Tick += (s, e) =>
+            {
+                double anglegap = 0;
+                if (buforangle > _driftAngle) { anglegap = buforangle - _driftAngle; }
+                if (buforangle < _driftAngle) { anglegap = _driftAngle - buforangle; }
+                delayTimer.Stop();
+                delayTimer.Dispose();
+                if (_speedKmh >= 15 || _speedKmh >= buforspeed / 1.5 || anglegap <= 25) { 
+                    if (_drift.IsDrifting)
+                    {
+                        long bonus = (long)Math.Round(250 * _drift.ComboMultiplier);
+                        _drift.ApplyPostPoints(bonus, $"TYRE STACK KISS! +{bonus}");
+                    }
+                    else
+                    {
+                        _drift.ApplyPostPoints(-250, "TYRE STACK HIT -250");
+                    }
+                } else
+                {
+                    _drift.ApplyPostPoints(-250, "TYRE STACK HIT -250");
+                }
+
+                UpdateScoreLabels();
+                _overlay.UpdateScore(_drift.TotalScore);
+                _overlay.ShowBonus(_drift.LastAwardedText);
+                if (_showHudCheck.Checked) ShowInGameAward(_drift.LastAwardedText);
+            };
+            delayTimer.Start();
+        }
+
+
         private void OnDriftEnded(long runPts)
         {
             this.BeginInvoke((Action)(() =>
