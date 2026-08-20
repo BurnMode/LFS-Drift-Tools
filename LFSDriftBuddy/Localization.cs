@@ -164,6 +164,38 @@ namespace LFSDriftBuddy
                     [AppLanguage.German] = "km/h",
                     [AppLanguage.Spanish] = "km/h",
                 },
+                ["speedometer.showhud"] = new()
+                {
+                    [AppLanguage.English] = "Show Speedo+Tacho HUD",
+                    [AppLanguage.Polish] = "Pokaż HUD prędkościomierz+obrotomierz",
+                    [AppLanguage.Turkish] = "Hız+Devir HUD'unu göster",
+                    [AppLanguage.German] = "Tacho+Drehzahl-HUD anzeigen",
+                    [AppLanguage.Spanish] = "Mostrar HUD de velocímetro+tacómetro",
+                },
+                ["speedometer.offsetx"] = new()
+                {
+                    [AppLanguage.English] = "X:",
+                    [AppLanguage.Polish] = "X:",
+                    [AppLanguage.Turkish] = "X:",
+                    [AppLanguage.German] = "X:",
+                    [AppLanguage.Spanish] = "X:",
+                },
+                ["speedometer.offsety"] = new()
+                {
+                    [AppLanguage.English] = "Y:",
+                    [AppLanguage.Polish] = "Y:",
+                    [AppLanguage.Turkish] = "Y:",
+                    [AppLanguage.German] = "Y:",
+                    [AppLanguage.Spanish] = "Y:",
+                },
+                ["speedometer.scale"] = new()
+                {
+                    [AppLanguage.English] = "Scale:",
+                    [AppLanguage.Polish] = "Skala:",
+                    [AppLanguage.Turkish] = "Ölçek:",
+                    [AppLanguage.German] = "Skalierung:",
+                    [AppLanguage.Spanish] = "Escala:",
+                },
                 ["score.title"] = new()
                 {
                     [AppLanguage.English] = "Drift Score",
@@ -669,6 +701,86 @@ namespace LFSDriftBuddy
                     [AppLanguage.Turkish] = "E-BRAKE DRİFT",
                     [AppLanguage.German] = "HANDBREMSDRIFT",
                     [AppLanguage.Spanish] = "DERRAPE CON FRENO DE MANO",
+                },
+                ["drift.label.burnout_good"] = new()
+                {
+                    [AppLanguage.English] = "BURNOUT",
+                    [AppLanguage.Polish] = "BURNOUT",
+                    [AppLanguage.Turkish] = "LASTİK YAKMA",
+                    [AppLanguage.German] = "BURNOUT",
+                    [AppLanguage.Spanish] = "QUEMA DE NEUMÁTICOS",
+                },
+                ["drift.label.burnout_high"] = new()
+                {
+                    [AppLanguage.English] = "GREAT BURNOUT!",
+                    [AppLanguage.Polish] = "DOBRY BURNOUT!",
+                    [AppLanguage.Turkish] = "HARİKA LASTİK YAKMA!",
+                    [AppLanguage.German] = "STARKER BURNOUT!",
+                    [AppLanguage.Spanish] = "¡GRAN QUEMA DE NEUMÁTICOS!",
+                },
+                ["drift.label.burnout_extreme"] = new()
+                {
+                    [AppLanguage.English] = "EXTREME BURNOUT!",
+                    [AppLanguage.Polish] = "DOKURWIONY BURNOUT!",
+                    [AppLanguage.Turkish] = "AŞIRI LASTİK YAKMA!",
+                    [AppLanguage.German] = "EXTREMER BURNOUT!",
+                    [AppLanguage.Spanish] = "¡QUEMA DE NEUMÁTICOS EXTREMA!",
+                },
+                ["drift.label.burnout_insane"] = new()
+                {
+                    [AppLanguage.English] = "INSANE BURNOUT!",
+                    [AppLanguage.Polish] = "DOSPERMIONY BURNOUT!",
+                    [AppLanguage.Turkish] = "ÇILGIN LASTİK YAKMA!",
+                    [AppLanguage.German] = "WAHNSINNIGER BURNOUT!",
+                    [AppLanguage.Spanish] = "¡QUEMA DE NEUMÁTICOS INSANA!",
+                },
+                ["drift.label.burnout_spin"] = new()
+                {
+                    [AppLanguage.English] = "360° SPIN!",
+                    [AppLanguage.Polish] = "BĄCZEK 360°!",
+                    [AppLanguage.Turkish] = "360° DÖNÜŞ!",
+                    [AppLanguage.German] = "360°-DREH!",
+                    [AppLanguage.Spanish] = "¡GIRO DE 360°!",
+                },
+                ["drift.label.entry_good"] = new()
+                {
+                    [AppLanguage.English] = "GOOD ENTRY",
+                    [AppLanguage.Polish] = "DOBRE WEJŚCIE",
+                    [AppLanguage.Turkish] = "İYİ GİRİŞ",
+                    [AppLanguage.German] = "GUTER EINSTIEG",
+                    [AppLanguage.Spanish] = "BUENA ENTRADA",
+                },
+                ["drift.label.entry_high"] = new()
+                {
+                    [AppLanguage.English] = "HIGH ENTRY",
+                    [AppLanguage.Polish] = "WYSOKIE WEJŚCIE",
+                    [AppLanguage.Turkish] = "YÜKSEK GİRİŞ",
+                    [AppLanguage.German] = "HOHER EINSTIEG",
+                    [AppLanguage.Spanish] = "ENTRADA ALTA",
+                },
+                ["drift.label.entry_extreme"] = new()
+                {
+                    [AppLanguage.English] = "EXTREME ENTRY",
+                    [AppLanguage.Polish] = "EKSTREMALNE WEJŚCIE",
+                    [AppLanguage.Turkish] = "AŞIRI GİRİŞ",
+                    [AppLanguage.German] = "EXTREMER EINSTIEG",
+                    [AppLanguage.Spanish] = "ENTRADA EXTREMA",
+                },
+                ["drift.label.entry_ultraextreme"] = new()
+                {
+                    [AppLanguage.English] = "ULTRA EXTREME ENTRY",
+                    [AppLanguage.Polish] = "ULTRA EKSTREMALNE WEJŚCIE",
+                    [AppLanguage.Turkish] = "ULTRA AŞIRI GİRİŞ",
+                    [AppLanguage.German] = "ULTRA-EXTREMER EINSTIEG",
+                    [AppLanguage.Spanish] = "ENTRADA ULTRA EXTREMA",
+                },
+                ["drift.label.entry_backward"] = new()
+                {
+                    [AppLanguage.English] = "BACKWARD ENTRY",
+                    [AppLanguage.Polish] = "WEJŚCIE TYŁEM",
+                    [AppLanguage.Turkish] = "GERİYE GİRİŞ",
+                    [AppLanguage.German] = "RÜCKWÄRTS-EINSTIEG",
+                    [AppLanguage.Spanish] = "ENTRADA HACIA ATRÁS",
                 },
                 ["wheelconfig.title"] = new()
                 {

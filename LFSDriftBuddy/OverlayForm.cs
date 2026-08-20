@@ -69,7 +69,8 @@ namespace LFSDriftBuddy
         // ── dynamiczny kolor (InSimColor1..5 wg kąta driftu) ────
         private Color _accentColor = Color.FromArgb(255, 235, 30);
         private Color _accentColorBack = Color.FromArgb(225, 205, 0);
-        public void UpdateAccentColor(Color c) {
+        public void UpdateAccentColor(Color c)
+        {
             _accentColor = c;
             _accentColorBack = Color.FromArgb(
                 c.A,
@@ -112,7 +113,32 @@ namespace LFSDriftBuddy
         private DateTime _lapBoxBlendStart = DateTime.MinValue;
         private const int LapBoxBlendMs = 260;// ← NOWE
 
+        // ── obecność danych OutGauge (RPM/bieg/itd.) ────────────────────────────
+        // OutGauge to OSOBNY strumień UDP od InSim/MCI — LFS wysyła go WYŁĄCZNIE gdy
+        // gracz faktycznie siedzi w aucie na torze, nie w menu/garażu/powtórce bez
+        // auta. Świeżość liczona z ostatniego wywołania NotifyOutGaugeData (patrz
+        // MainForm.OnRevData — jeden telefon na każdy odebrany pakiet) względem
+        // progu poniżej; brak świeżych danych blokuje: (1) prędkościomierz+obrotomierz
+        // (patrz DrawSpeedoTacho — po prostu nie ma czego pokazać) i (2) przełączanie
+        // HUD-u wyniku na "active" (patrz Tick — _isActiveNow liczone tu, nie ustawiane
+        // wprost przez SetActive), bo drift/speeding liczą się z InSim MCI, który MOŻE
+        // działać nawet bez OutGauge — bez tej blokady HUD punktacji przełączałby się
+        // na "active" przy zerowych danych z silnika.
+        private DateTime _lastOutGaugeDataUtc = DateTime.MinValue;
+        private static readonly TimeSpan OutGaugeStaleThreshold = TimeSpan.FromMilliseconds(1500);
+
+        public void NotifyOutGaugeData() => _lastOutGaugeDataUtc = DateTime.UtcNow;
+
+        /// <summary>Wywołaj przy rozłączeniu z LFS, żeby stan nie "dogrywał" się jeszcze
+        /// przez OutGaugeStaleThreshold po AttachTo() przy kolejnym połączeniu.</summary>
+        public void ResetOutGaugeData() => _lastOutGaugeDataUtc = DateTime.MinValue;
+
+        private bool HasFreshOutGaugeData => (DateTime.UtcNow - _lastOutGaugeDataUtc) < OutGaugeStaleThreshold;
+
         // ── aktywność (drift/speeding) + countdown combo ────
+        // _isActiveNow to WYPADKOWA tego, co zgłasza SetActive (_activeRequested) ORAZ
+        // świeżości danych OutGauge (patrz wyżej) — przeliczana co klatkę w Tick().
+        private bool _activeRequested = false;
         private bool _isActiveNow = false;
         private double _comboRemainingSec = 0;
         private double _activeBlend = 0;
@@ -139,6 +165,42 @@ namespace LFSDriftBuddy
 
         // RPM z OutGauge — na razie tylko przechowywane, docelowo może zasilać kolejne animacje
         private int _currentRpm = 0;
+
+        // ── Speedometer + Tachometer (Forza-style, prawy dolny róg) ─────────────────────
+        // Ustawienia sterowane z UI (speedometerPanel w MainForm) — patrz odpowiednie property.
+        public bool SpeedoTachoEnabled { get; set; } = true;
+        public float SpeedoTachoOffsetX { get; set; } = 0f;
+        public float SpeedoTachoOffsetY { get; set; } = 0f;
+        public float SpeedoTachoScale { get; set; } = 1.0f;
+        public Color RedlineColor { get; set; } = Color.Red;
+
+        // Przełącznik jednostek prędkości (KM/H domyślnie / MPH) — sterowany z UI (mały
+        // MacToggleSwitch w speedometerPanel). Wpływa TYLKO na cyfrową prędkość i etykietę
+        // jednostki w tym HUD-zie — obrotomierz (RPM) jest niezależny od tego ustawienia.
+        public bool SpeedoTachoUseMph { get; set; } = false;
+        private const double KmhToMph = 0.621371;
+
+        // ── Kolory elementów HUD-u prędkościomierz+obrotomierz — każdy z własnym RGB+A,
+        // ustawiane z UI przez podmenu "HUD Colors" (patrz MainForm.ShowHudColorsMenu).
+        public Color SpeedoTachoTextColor { get; set; } = Color.White;
+        public Color SpeedoTachoIndicatorColor { get; set; } = Color.FromArgb(255, 225, 225, 230);
+        public Color SpeedoTachoTickColor { get; set; } = Color.FromArgb(255, 215, 215, 218);
+        public Color SpeedoTachoBackgroundColor { get; set; } = Color.FromArgb(50, 15, 15, 20);
+
+        // Wartość "surowa", zasilana bezpośrednio z pakietów InSim (patrz UpdateSpeedGauge)
+        // — przychodzi skokowo, w tempie telemetrii, więc NIE rysujemy jej wprost. Zamiast
+        // tego to tylko cel ("target"), do którego w każdej klatce (patrz Tick()) płynnie
+        // dogania się osobna wartość "wyświetlana" (_displayedSpeedKmh) — ten sam wzorzec
+        // wygładzania co _displayedAngle/_displayedScore powyżej, żeby cyfry na HUD-zie nie
+        // "skakały" między pakietami.
+        private double _targetSpeedKmh = 0;
+        private double _displayedSpeedKmh = 0;
+        private int _currentGear = 0;          // OutGauge: 0=wsteczny, 1=jałowy, 2=1.bieg...
+        private int _calibratedMaxRpm = 0;     // 0 = jeszcze nieznane -> domyślny zakres 0-10000
+
+        public void UpdateSpeedGauge(double speedKmh) => _targetSpeedKmh = Math.Max(0, speedKmh);
+        public void UpdateGear(int gear) => _currentGear = gear;
+        public void UpdateMaxRpm(int maxRpm) => _calibratedMaxRpm = Math.Max(0, maxRpm);
 
         // ── bonus popup (przełożenie itp.) ───────────────────
         private class BonusItem
@@ -230,8 +292,33 @@ namespace LFSDriftBuddy
         public void UpdateBestLapScore(long bestLapScore) => _bestLapScore = bestLapScore;
 
         public void UpdateLapContextLabel(string label) => _lapContextLabel = label ?? "";
+
+        // Blokuje pokazywanie ramki wyniku okrążenia, gdy gracz jest w menu głównym gry
+        // (przy IS_STA -> ISS_FRONT_END). Wywoływane z MainForm przy RaceStateChanged(false/true).
+        private bool _inMenu = false;
+
+        /// <summary>
+        /// Ustawia tryb "w menu gry". Wejście w tryb menu natychmiast (bez 260ms animacji
+        /// wygaszania) chowa ramkę wyniku okrążenia i blokuje jej ponowne pokazanie przez
+        /// SetLapBoxVisible(true), dopóki tryb menu nie zostanie wyłączony — chroni to przed
+        /// sytuacją, w której inne zdarzenie (np. TrackChanged) odpalone tuż przy przejściu
+        /// do menu z powrotem pokazałoby ramkę zanim stan drifta zdąży się zaktualizować.
+        /// </summary>
+        public void SetMenuMode(bool inMenu)
+        {
+            _inMenu = inMenu;
+            if (inMenu)
+            {
+                _lapBoxVisible = false;
+                _lapBoxBlend = 0;
+                _lapBoxBlendFrom = 0;
+                _lapBoxBlendTo = 0;
+            }
+        }
+
         public void SetLapBoxVisible(bool visible)
         {
+            if (_inMenu && visible) return;   // w menu nic nie pokazujemy, dopóki SetMenuMode(false)
             if (_lapBoxVisible == visible) return;
             _lapBoxVisible = visible;
             _lapBoxBlendFrom = _lapBoxBlend;
@@ -289,8 +376,10 @@ namespace LFSDriftBuddy
         }
         public void UpdateLabel(string label) => _driftLabelText = label ?? "";
 
-        /// <summary>Wywoływane co klatkę telemetrii: czy TERAZ trwa drift/szybka jazda.</summary>
-        public void SetActive(bool active) => _isActiveNow = active;
+        /// <summary>Wywoływane co klatkę telemetrii: czy TERAZ trwa drift/szybka jazda.
+        /// Efektywny stan (_isActiveNow) dodatkowo wymaga świeżych danych OutGauge —
+        /// patrz HasFreshOutGaugeData i Tick().</summary>
+        public void SetActive(bool active) => _activeRequested = active;
 
         public void ShowBonus(string bonusText)
         {
@@ -475,6 +564,11 @@ namespace LFSDriftBuddy
             if (dt > 0.25) dt = 0.25;
             _lastTickTime = now;
 
+            // Bez świeżych danych OutGauge HUD wyniku jest zablokowany w trybie idle
+            // (tylko łączny wynik) niezależnie od tego, co zgłasza SetActive — patrz
+            // komentarz przy _activeRequested/HasFreshOutGaugeData powyżej.
+            _isActiveNow = _activeRequested && HasFreshOutGaugeData;
+
             _displayedScore += (_targetScore - _displayedScore) * 0.18;
             if (Math.Abs(_targetScore - _displayedScore) < 1) _displayedScore = _targetScore;
 
@@ -487,13 +581,20 @@ namespace LFSDriftBuddy
             _displayedAngle += (_driftAngle - _displayedAngle) * 0.25;
             if (Math.Abs(_driftAngle - _displayedAngle) < 0.1) _displayedAngle = _driftAngle;
 
+            // ── prędkościomierz: płynne dogonienie ostatniej wartości z telemetrii ──
+            // Współczynnik dobrany tak, by przy 60 FPS (Interval=16ms) doganianie skoku
+            // trwało ok. 150–200ms — wystarczająco płynnie, żeby ukryć nierówne tempo
+            // pakietów OutGauge, ale bez zauważalnego opóźnienia względem rzeczywistej jazdy.
+            _displayedSpeedKmh += (_targetSpeedKmh - _displayedSpeedKmh) * 0.3;
+            if (Math.Abs(_targetSpeedKmh - _displayedSpeedKmh) < 0.05) _displayedSpeedKmh = _targetSpeedKmh;
+
             // ── countdown combo: pełny podczas aktywności, zlicza w dół gdy nie ──
             if (_isActiveNow)
                 _comboRemainingSec = ComboTimeoutSec;
             else
                 _comboRemainingSec = Math.Max(0, _comboRemainingSec - dt);
 
-            
+
             bool angleVisible = _displayedAngle > 15.0 && _displayedAngle < 160.0 && _isDrifting;
 
             if (angleVisible != _angleVisTargetVisible)
@@ -553,6 +654,7 @@ namespace LFSDriftBuddy
                 DrawBonusBox(g, centerX, barY + idlebarY, barH);
                 DrawLapScoreBox(g);   // ← NOWE
                 DrawLapResultPopup(g);
+                DrawSpeedoTacho(g);   // ← NOWE: prędkościomierz + obrotomierz w stylu Forza
             }
 
             SetBitmap(_buffer);
@@ -561,9 +663,9 @@ namespace LFSDriftBuddy
         // ── góra: sam total score, znika w lewo z fade gdy aktywny HUD wjeżdża ──
         private void DrawIdleScore(Graphics g, float centerX, out float idlebarY)
         {
-            
+
             double alpha = 0.75 - _activeBlend;
-            
+
 
             float slideX = (float)(-_activeBlend * 160);
             if (_isActiveNow) { slideX = (float)(-_activeBlend * 160); } else { slideX = (float)-(-_activeBlend * 160); }
@@ -597,7 +699,7 @@ namespace LFSDriftBuddy
             float slideX = (float)((1.0 - _activeBlend) * 220);
             if (_isActiveNow) { slideX = (float)((1.0 - _activeBlend) * 220); } else { slideX = (float)(-(1.0 - _activeBlend) * 220); }
 
-            
+
             // ── total score + combo (ta sama pozycja co idle score) ──
             string scoreText = ((long)Math.Round(_displayedScore)).ToString("N0");
             var scoreFont = _activeFont32;
@@ -639,7 +741,7 @@ namespace LFSDriftBuddy
             float targetBarH = Math.Max(labelSize.Height, runSize.Height) + (padV * 2) - 1;
 
 
-           
+
 
 
 
@@ -666,14 +768,14 @@ namespace LFSDriftBuddy
 
             float glowLeft = Math.Min(startX, barX);
             float glowRight = Math.Max(startX + totalW, barX + barW + comboSize.Width + 10);
-            
+
 
 
             double comboFraction = ComboTimeoutSec > 0 ? _comboRemainingSec / ComboTimeoutSec : 1.0;
             comboFraction = Math.Max(0, Math.Min(1, comboFraction));
 
             // ── lewy box: label, tło = progress bar (accent → czarny od prawej) ──
-            using (var labelPath = RoundedLeftRect(new RectangleF(barX, barY, labelBoxW+1, barH+1), 6))
+            using (var labelPath = RoundedLeftRect(new RectangleF(barX, barY, labelBoxW + 1, barH + 1), 6))
             {
                 var oldClip = g.Clip;
                 g.SetClip(labelPath, CombineMode.Replace);
@@ -732,25 +834,25 @@ namespace LFSDriftBuddy
                 var angleSize = g.MeasureString(angleText, angleFont);
                 float angleW = angleSize.Width;
                 float angleH = angleSize.Height;
-               
+
                 DrawOutlinedText(
                    g,
                    angleText,
                    angleFont,
-                   barX - angleW - 2 + ((float)angleOffsetX/2),
+                   barX - angleW - 2 + ((float)angleOffsetX / 2),
                    barY + (barH / 2) - (angleH / 2),
                    WithAlpha(_accentColor, alpha * angleAlpha),
                    WithAlpha(_accentColorBack, alpha * angleAlpha),
                    outline: false);
             }
-            DrawOutlinedText(g, labelText, labelFont, barX + padH, barY + padV ,
+            DrawOutlinedText(g, labelText, labelFont, barX + padH, barY + padV,
                 WithAlpha(LabelTextColor, alpha), WithAlpha(Color.Black, alpha), outline: false);
-            
-
-           
 
 
-            DrawOutlinedText(g, runText, runFont, barX + labelBoxW + padH - 2, barY + padV ,WithAlpha(LabelTextColor, alpha), WithAlpha(Color.Black, alpha), outline: false);
+
+
+
+            DrawOutlinedText(g, runText, runFont, barX + labelBoxW + padH - 2, barY + padV, WithAlpha(LabelTextColor, alpha), WithAlpha(Color.Black, alpha), outline: false);
 
             if (_isDrifting)
                 DrawAngleArrows(g, startX, 5, scoreSize.Width, scoreSize.Height, alpha);
@@ -856,7 +958,7 @@ namespace LFSDriftBuddy
 
                 posX += w;
             }
-            
+
         }
 
         // ── osobna ramka pod labelem: bonus (przełożenie itp.), wjazd z prawej / wyjazd w lewo ──
@@ -975,7 +1077,7 @@ namespace LFSDriftBuddy
 
         private void DrawLapScoreBox(Graphics g)
         {
-            if (_lapBoxBlend <= 0.01) return;
+            if (_inMenu || _lapBoxBlend <= 0.01) return;
 
             double alpha = _lapBoxBlend;
             float slideX = (float)((1.0 - _lapBoxBlend) * -30);
@@ -1106,6 +1208,221 @@ namespace LFSDriftBuddy
             }
         }
 
+        // ── Speedometer + Tachometer (Forza-style) ────────────────────────────
+        //
+        // Rysowane w lokalnym układzie współrzędnych (transform: translate + scale), żeby
+        // SpeedoTachoScale skalował WSZYSTKO (geometrię, czcionki, grubości linii) jednym
+        // spójnym mnożnikiem, zamiast ręcznie przeliczać każdy wymiar osobno.
+        private const float SpeedoTachoDesignSize = 300f;
+
+        /// <summary>
+        /// Górna granica skali obrotomierza — domyślnie 10000 (dopóki nie znamy jeszcze
+        /// CalibratedMAXRPM), a po kalibracji: MAXRPM + margines ~15% (zaokrąglony do pełnego
+        /// tysiąca), tak jak w prawdziwym aucie redline zaczyna się przed samym końcem skali,
+        /// a nie dokładnie na jej granicy.
+        /// </summary>
+        private float ComputeGaugeMaxRpm()
+        {
+            if (_calibratedMaxRpm <= 0) return 10000f;
+
+            float withMargin = _calibratedMaxRpm * 1.15f;
+            float rounded = (float)(Math.Ceiling(withMargin / 1000.0) * 1000.0);
+            return Math.Max(rounded, _calibratedMaxRpm + 1000f);
+        }
+
+        private static string GearToDisplayText(int gear)
+        {
+            if (gear <= 0) return "R";
+            if (gear == 1) return "N";
+            return (gear - 1).ToString();
+        }
+
+        // Kolor igły obrotomierza zależny od stanu silnika — NIE dotyczy koloru tekstu biegu
+        // na środku (ten zawsze zostaje SpeedoTachoTextColor, patrz DrawSpeedoTachoContent):
+        //  • cięcie zapłonu (rev limiter) LUB RPM >= redline → kolor redline (ustawiany w UI)
+        //  • RPM w strefie 1000–100 przed redline ("gotowy do zmiany biegu") → pastelowa zieleń
+        //  • w pozostałych przypadkach → SpeedoTachoIndicatorColor (ustawiany w UI)
+        private Color GetTachoStateColor()
+        {
+            if (_revCutActive || (_calibratedMaxRpm > 0 && _currentRpm >= _calibratedMaxRpm))
+                return RedlineColor;
+
+            if (_calibratedMaxRpm > 0)
+            {
+                float lower = _calibratedMaxRpm - 1000;
+                float upper = _calibratedMaxRpm - 100;
+                if (_currentRpm >= lower && _currentRpm < upper)
+                    return Color.FromArgb(255, 150, 230, 170);   // pastelowa zieleń
+            }
+
+            return SpeedoTachoIndicatorColor;
+        }
+
+        private void DrawSpeedoTacho(Graphics g)
+        {
+            if (!SpeedoTachoEnabled) return;
+
+            // Brak świeżych danych OutGauge (menu/garaż/poza autem) = nie ma RPM/biegu/
+            // prędkości do pokazania — HUD po prostu nie istnieje, zamiast pokazywać
+            // zamrożone/zerowe wartości.
+            if (!HasFreshOutGaugeData) return;
+
+            float scale = Math.Max(0.3f, SpeedoTachoScale);
+            float scaledSize = SpeedoTachoDesignSize * scale;
+
+            // domyślna lokalizacja: prawy dolny róg ekranu, z marginesem + przesunięcie z ustawień
+            const float marginX = 24f, marginY = 24f;
+            float anchorRight = Width - marginX + SpeedoTachoOffsetX;
+            float anchorBottom = Height - marginY + SpeedoTachoOffsetY;
+
+            float originX = anchorRight - scaledSize;
+            float originY = anchorBottom - scaledSize;
+
+            var savedState = g.Save();
+            g.TranslateTransform(originX, originY);
+            g.ScaleTransform(scale, scale);
+
+            try
+            {
+                DrawSpeedoTachoContent(g);
+            }
+            finally
+            {
+                g.Restore(savedState);
+            }
+        }
+
+        // Rysuje w lokalnym układzie "designu" (jednostki niezależne od SpeedoTachoScale —
+        // przeskalowanie już zostało zaaplikowane przez transform w DrawSpeedoTacho).
+        private void DrawSpeedoTachoContent(Graphics g)
+        {
+            const float cx = 140f, cy = 118f, radius = 102f;
+            const float startAngle = 135f, sweepAngle = 270f;   // klasyczny łuk 270°, otwarty u dołu
+
+            float gaugeMaxRpm = ComputeGaugeMaxRpm();
+            int majorTicks = Math.Max(1, (int)Math.Round(gaugeMaxRpm / 1000.0));
+            Color stateColor = GetTachoStateColor();
+
+            var dialRect = new RectangleF(cx - radius, cy - radius, radius * 2, radius * 2);
+
+            // ── tło tarczy — kolor konfigurowalny z UI ──
+            using (var bgBrush = new SolidBrush(SpeedoTachoBackgroundColor))
+                g.FillEllipse(bgBrush, dialRect);
+
+            // ── łuk redline: od poziomu MAXRPM do górnej granicy skali ──
+            if (_calibratedMaxRpm > 0 && _calibratedMaxRpm < gaugeMaxRpm)
+            {
+                float redlineStartFrac = _calibratedMaxRpm / gaugeMaxRpm;
+                float redlineStartAngle = startAngle + redlineStartFrac * sweepAngle;
+                float redlineSweep = sweepAngle - redlineStartFrac * sweepAngle;
+
+                using var redlinePen = new Pen(WithAlpha(RedlineColor, 0.9), 6f)
+                { StartCap = LineCap.Round, EndCap = LineCap.Round };
+                g.DrawArc(redlinePen, dialRect, redlineStartAngle, redlineSweep);
+            }
+
+            // ── ticki (główne co 1000 RPM + numer, pomocnicze w połowie odcinka) — kolor konfigurowalny ──
+            using var tickFont = new Font(_activeFont11.FontFamily, 12f, FontStyle.Bold);
+            for (int i = 0; i <= majorTicks; i++)
+            {
+                float frac = (float)i / majorTicks;
+                float angleDeg = startAngle + frac * sweepAngle;
+                double angleRad = angleDeg * Math.PI / 180.0;
+
+                bool inRedline = _calibratedMaxRpm > 0 && (i * 1000f) >= _calibratedMaxRpm;
+                Color tickColor = inRedline ? RedlineColor : SpeedoTachoTickColor;
+
+                float outerR = radius;
+                float innerR = radius - 14;
+                float x1 = cx + (float)Math.Cos(angleRad) * outerR;
+                float y1 = cy + (float)Math.Sin(angleRad) * outerR;
+                float x2 = cx + (float)Math.Cos(angleRad) * innerR;
+                float y2 = cy + (float)Math.Sin(angleRad) * innerR;
+
+                using (var tickPen = new Pen(tickColor, 2.8f) { StartCap = LineCap.Round, EndCap = LineCap.Round })
+                    g.DrawLine(tickPen, x1, y1, x2, y2);
+
+                string label = i.ToString();
+                var labelSize = g.MeasureString(label, tickFont);
+                float labelR = innerR - 15;
+                float lx = cx + (float)Math.Cos(angleRad) * labelR - labelSize.Width / 2f;
+                float ly = cy + (float)Math.Sin(angleRad) * labelR - labelSize.Height / 2f;
+                using (var labelBrush = new SolidBrush(WithAlpha(SpeedoTachoTextColor, (double)SpeedoTachoTextColor.A / 255.0 * 0.85)))
+                    g.DrawString(label, tickFont, labelBrush, lx, ly);
+
+                if (i < majorTicks)
+                {
+                    float midFrac = (i + 0.5f) / majorTicks;
+                    float midAngleDeg = startAngle + midFrac * sweepAngle;
+                    double midAngleRad = midAngleDeg * Math.PI / 180.0;
+                    float mInnerR = radius - 8;
+                    float mx1 = cx + (float)Math.Cos(midAngleRad) * outerR;
+                    float my1 = cy + (float)Math.Sin(midAngleRad) * outerR;
+                    float mx2 = cx + (float)Math.Cos(midAngleRad) * mInnerR;
+                    float my2 = cy + (float)Math.Sin(midAngleRad) * mInnerR;
+                    using var minorPen = new Pen(WithAlpha(SpeedoTachoTickColor, 0.65), 1.4f);
+                    g.DrawLine(minorPen, mx1, my1, mx2, my2);
+                }
+            }
+
+            // ── igła obrotomierza ──
+            float rpmFrac = Math.Clamp(_currentRpm / gaugeMaxRpm, 0f, 1f);
+            float needleAngleDeg = startAngle + rpmFrac * sweepAngle;
+            double needleAngleRad = needleAngleDeg * Math.PI / 180.0;
+            float needleLen = radius - 5;
+            float nx = cx + (float)Math.Cos(needleAngleRad) * needleLen;
+            float ny = cy + (float)Math.Sin(needleAngleRad) * needleLen;
+
+            using (var needlePen = new Pen(stateColor, 4f) { StartCap = LineCap.Round, EndCap = LineCap.Round })
+                g.DrawLine(needlePen, cx, cy, nx, ny);
+
+            // ── centralny krążek z aktualnym biegiem ──
+            // Tło krążka (hub) zmienia się na kolor redline podczas cięcia zapłonu — zachowując
+            // ten sam poziom przezroczystości co skonfigurowany SpeedoTachoBackgroundColor,
+            // tylko z podmienionym RGB na RedlineColor.
+            const float gearRadius = 32f;
+            using (var ringPen = new Pen(WithAlpha(stateColor, 0.0), 2f))
+                g.DrawEllipse(ringPen, cx - gearRadius, cy - gearRadius, gearRadius * 2, gearRadius * 2);
+
+            Color hubColor = _revCutActive
+                ? WithAlpha(RedlineColor, SpeedoTachoBackgroundColor.A / 255.0)
+                : SpeedoTachoBackgroundColor;
+            using (var hubBrush = new SolidBrush(hubColor))
+                g.FillEllipse(hubBrush, cx - gearRadius + 3, cy - gearRadius + 3,
+                    (gearRadius - 3) * 2, (gearRadius - 3) * 2);
+
+            using var gearFont = new Font(_activeFont32.FontFamily, 26f, FontStyle.Bold);
+            string gearText = GearToDisplayText(_currentGear);
+            var gearSize = g.MeasureString(gearText, gearFont);
+            DrawOutlinedText(g, gearText, gearFont, (cx - 2) - gearSize.Width / 2f, cy - gearSize.Height / 2f,
+                SpeedoTachoTextColor, Color.FromArgb(200, 0, 0, 0), outline: false);
+
+            // ── cyfrowa prędkość: WYŁĄCZNIE rzeczywista prędkość auta (z InSim MCI).
+            //    (Wcześniej była tu też druga, estymowana "prędkość z wału" z RPM/OutSim —
+            //    usunięta, bo obie próby jej wyliczenia (z RPM+przełożenia, potem z OutSim
+            //    AngVel) okazały się niewiarygodne w praktyce. Zostaje jedna, pewna liczba.)
+            //    Konwersja na MPH (jeśli włączona) dotyczy WYŁĄCZNIE tej liczby — obrotomierz
+            //    (RPM) jest od tego niezależny.
+            using var speedFont = new Font(_activeFont42.FontFamily, 40f, FontStyle.Bold);
+            using var unitFont = new Font(_activeFont11.FontFamily, 11f, FontStyle.Bold);
+
+            double displaySpeed = SpeedoTachoUseMph ? _displayedSpeedKmh * KmhToMph : _displayedSpeedKmh;
+
+            string speedText = ((int)Math.Round(displaySpeed)).ToString("D3");
+            var speedSize = g.MeasureString(speedText, speedFont);
+            float speedX = cx - speedSize.Width / 2f;
+            float speedY = cy + gearRadius + 10;
+
+            DrawOutlinedText(g, speedText, speedFont, speedX, speedY,
+                SpeedoTachoTextColor, Color.FromArgb(200, 0, 0, 0), outline: false);
+
+            string unitText = SpeedoTachoUseMph ? "MPH" : "KM/H";
+            var unitSize = g.MeasureString(unitText, unitFont);
+            DrawOutlinedText(g, unitText, unitFont,
+                cx + speedSize.Width / 2.5f - unitSize.Width, speedY,
+                WithAlpha(SpeedoTachoTextColor, (double)SpeedoTachoTextColor.A / 255.0 * 0.8), Color.FromArgb(180, 0, 0, 0), outline: false);
+        }
+
         // ── helpers ──────────────────────────────────────────
 
         private double GetRevCutGlowIntensity()
@@ -1229,7 +1546,7 @@ namespace LFSDriftBuddy
             if (disposing)
             {
                 _idleFont24?.Dispose();
-            
+
                 _idleFont26?.Dispose();
                 _idleFont32?.Dispose();
                 _activeFont11?.Dispose();

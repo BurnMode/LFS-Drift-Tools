@@ -14,23 +14,29 @@ using System.Windows.Forms;
 using static LFSDriftBuddy.DriftEngine;
 using static LFSDriftBuddy.IndicatorManager;
 using static System.Net.Mime.MediaTypeNames;
-using SharpDX.DirectInput;
 using System.Reflection;
 
 namespace LFSDriftBuddy
 {
     public partial class MainForm : Form
     {
-        
+
 
         private readonly string SettingsFile =
         Path.Combine(System.Windows.Forms.Application.StartupPath, "settings.json");
 
-        private readonly SoundPlayer _indicatorClick =
-        new SoundPlayer(Path.Combine(System.Windows.Forms.Application.StartupPath, "Sounds", "indicator_click.wav"));
+        private readonly SoundPlayer _indicatorClickOn =
+        new SoundPlayer(Path.Combine(System.Windows.Forms.Application.StartupPath, "Sounds", "indicator_click_on.wav"));
+
+        private readonly SoundPlayer _indicatorClickOff =
+        new SoundPlayer(Path.Combine(System.Windows.Forms.Application.StartupPath, "Sounds", "indicator_click_off.wav"));
 
         private readonly SoundPlayer _indicatorCancel =
             new SoundPlayer(Path.Combine(System.Windows.Forms.Application.StartupPath, "Sounds", "indicator_cancel.wav"));
+
+        // Ustawiane w konstruktorze (przed BuildUI, gdy _statusLabel jeszcze nie istnieje),
+        // wyświetlane w statusie zaraz po zbudowaniu UI — patrz koniec konstruktora.
+        private string _missingIndicatorSoundsWarning = null;
 
         private OverlayForm _overlay;
 
@@ -49,6 +55,7 @@ namespace LFSDriftBuddy
         private double _combo = 1;
         private bool _isDrifting = false;
         private bool _isSpeeding = false;
+        private bool _isBurnout = false;
         private string _driftLabel = "";
         private string _indicatorLabelR = "";
         private string _indicatorLabelL = "";
@@ -58,7 +65,14 @@ namespace LFSDriftBuddy
         public int SavedMSCUT = 40;
         public bool calibrationON = false;
 
-        
+        // ── Ustawienia rev limitera per pojazd ──────────────────────────────────
+        // Klucz = krótki kod auta z OutGauge (np. "XFG"). Wczytywane/zapisywane razem
+        // z resztą AppSettings — patrz LoadSettings/SaveSettings, LoadVehicleRevSettings,
+        // SaveVehicleRevSettings.
+        private Dictionary<string, VehicleRevSettings> _vehicleRevSettings = new();
+        private string _currentCarName = "";
+
+
 
         private const int TitleBarHeight = 40;
         private Panel _titleBar;
@@ -74,22 +88,8 @@ namespace LFSDriftBuddy
 
         private MacProgressBar _rpmBar = null!;
 
-        // ── LFS button IDs ────────────────────────────────────
-        private const byte BTN_SCORE = 1;   // total score top-center
-        private const byte BTN_RUN = 2;   // current run points
-        private const byte BTN_COMBO = 3;   // combo multiplier
-        private const byte BTN_LABEL = 4;   // drift label text
-        private const byte BTN_AWARD = 5;   // flash on drift endu
-
-        private const byte BTN_RIGHTIND = 6;   // flash on drift end
-        private const byte BTN_LEFTIND = 7;   // flash on drift end
-        private const byte BTN_RPMLIMIT = 8;   // revlimitter value
-        private const byte BTN_RPMLIMITSTATUS = 9;   // revlimitter status
-        private const byte BTN_RPMLIMITINFO = 10;   // revlimitter info
-
-        // ── Timer for award flash ─────────────────────────────
-        private System.Windows.Forms.Timer _awardTimer;
-        private int _awardTick = 0;
+        // In-game IS_BTN HUD (score/run/combo/labels/rpm readout) — moved to InGameHudManager.
+        private InGameHudManager _hud;
 
         // ── UI Controls ───────────────────────────────────────
         private SpeedometerControl _speedometer;
@@ -113,6 +113,21 @@ namespace LFSDriftBuddy
         private MacCheckBox _showRPMHudCheck;
         private MacCheckBox _showOverlayCheck;
 
+        // ── Speedometer + Tachometer HUD (Forza-style, overlay) ────────────────
+        private MacToggleSwitch _speedoTachoEnabledCheck;
+        private NumericUpDown _speedoTachoOffsetXNumeric;
+        private NumericUpDown _speedoTachoOffsetYNumeric;
+        private NumericUpDown _speedoTachoScaleNumeric;
+        private MacToggleSwitch _speedUnitToggle;
+        private Label _speedUnitToggleLabel;
+        private bool _useMph = false;
+
+        private Color _speedoTachoRedlineColor = Color.Red;
+        private Color _speedoTachoTextColor = Color.White;
+        private Color _speedoTachoIndicatorColor = Color.FromArgb(255, 225, 225, 230);
+        private Color _speedoTachoTickColor = Color.FromArgb(255, 215, 215, 218);
+        private Color _speedoTachoBackgroundColor = Color.FromArgb(50, 15, 15, 20);
+
 
         // ── UI Colors ─────────────────────────────────────────
 
@@ -128,8 +143,6 @@ namespace LFSDriftBuddy
         private Color OverlayColor4 = Color.Magenta;
         private Color OverlayColor5 = Color.Red;
 
-        private string colorCurrentMain = "^7";
-
         private Button _colorBtn1;
         private Button _colorBtn2;
         private Button _colorBtn3;
@@ -138,8 +151,6 @@ namespace LFSDriftBuddy
         private Button _calibrateBtn1;
         private Button revBindingsBtn;
         private Button _langBtn;
-
-        // ── Kierunkowskazy ────────────────────────────────────
         private Label _indicatorStatusLabel;
         private MacCheckBox _indicatorSoundsCheck;
         private MacCheckBox _indicatorAutoCancelCheck;
@@ -149,7 +160,7 @@ namespace LFSDriftBuddy
 
         private Button _bindLeftBtn, _bindRightBtn, _bindHazardBtn, _bindLightBtn;
         private CheckBox _autoReturnCheck;
-        
+
         private Label _tireStatusLabel;
         private Button _tirePatchBtn;
         private NumericUpDown _steeringThresholdBox;
@@ -181,9 +192,9 @@ namespace LFSDriftBuddy
         // np. na końcu BuildUI() albo w konstruktorze po InitializeComponent()
 
 
-       
 
-    public MainForm()
+
+        public MainForm()
         {
 
             _insim = new InSimConnection();
@@ -192,15 +203,21 @@ namespace LFSDriftBuddy
             _insim.StatusChanged += OnStatus;
             _insim.Connected += OnConnected;
             _insim.Disconnected += OnDisconnected;
+            _insim.ConnectFailed += OnConnectFailed;
             _insim.RaceStateChanged += (s, inRace) => BeginInvoke((Action)(() =>
             {
                 if (inRace)
-                    InitInGameHUD();      // pojawiają się przyciski
+                {
+                    _overlay.SetMenuMode(false);   // wraca do gry/powtórki — odblokuj ramkę okrążenia
+                    _hud.InitInGameHUD();      // pojawiają się przyciski
+                }
                 else
                 {
                     _insim.DeleteAllButtons(); // znikają w menu/powtórce
+                    _hud.InvalidateCache();
                     _drift.DeactivateLapCounting();     // ← NOWE: koniec okrążenia przy wyjściu do menu
                     _overlay.UpdateLapScore(_drift.LapScore);
+                    _overlay.SetMenuMode(true);   // natychmiast (bez animacji) chowa ramkę i blokuje jej powrót
                     _overlay.SetLapBoxVisible(false);   // ← NOWE: chowa ramkę HUD okrążenia
                 }
             }));
@@ -213,8 +230,8 @@ namespace LFSDriftBuddy
                     _overlay.UpdateBestLapScore(_drift.BestLapScore);
                     if (_drift.LastLapScore >= 250)
                     { _overlay.UpdateLastLapScore(_drift.LastLapScore); }
-                    
-                    _overlay.ShowLapResult(_drift.LastLapScore);   
+
+                    _overlay.ShowLapResult(_drift.LastLapScore);
                     _overlay.SetLapBoxVisible(true);
                 }
             }));
@@ -232,7 +249,7 @@ namespace LFSDriftBuddy
             {
                 _drift.SetLayout(layout);
                 _overlay.UpdateBestLapScore(_drift.BestLapScore);
-               // _overlay.UpdateLastLapScore(_drift.LastLapScore);   // ← NOWE
+                // _overlay.UpdateLastLapScore(_drift.LastLapScore);   // ← NOWE
                 _overlay.SetLapBoxVisible(_drift.HasActiveLapContext);
                 UpdateLapContextLabel();
             }));
@@ -242,6 +259,7 @@ namespace LFSDriftBuddy
                 {
                     _drift.ResetLapScore();
                     _overlay.UpdateLapScore(_drift.LapScore);
+                    LoadVehicleRevSettings(_currentCarName);   // reset samochodu — przeładuj zapisane ustawienia
                 }
             }));
 
@@ -262,6 +280,7 @@ namespace LFSDriftBuddy
                     _drift.ResetLapScore();
                     _overlay.UpdateLapScore(_drift.LapScore);
                     _overlay.SetLapBoxVisible(true);
+                    LoadVehicleRevSettings(_currentCarName);   // auto "przywrócone" na tor — przeładuj ustawienia
                 }
             }));
 
@@ -273,7 +292,7 @@ namespace LFSDriftBuddy
                 //_overlay.SetLapBoxVisible(_drift.HasActiveLapContext);   // schowaj do 1. okrążenia nowego wyścigu
             }));
 
-            _insim.PlayerPitted += (s, e) => BeginInvoke((Action)(() =>  
+            _insim.PlayerPitted += (s, e) => BeginInvoke((Action)(() =>
             {
                 if (e.PLID == _lastKnownPlayerPLID)
                 {
@@ -306,16 +325,10 @@ namespace LFSDriftBuddy
                 _overlay.SetLapBoxVisible(false);
             }));
 
-            _insim.PostHit += (s, e) => BeginInvoke((Action)(() =>
+            _insim.ObjectHit += (s, e) => BeginInvoke((Action)(() =>
             {
                 if (e.PLID != _lastKnownPlayerPLID) return;
-                HandlePostHit();
-            }));
-
-            _insim.TyreStackHit += (s, e) => BeginInvoke((Action)(() =>   // ← NOWE
-            {
-                if (e.PLID != _lastKnownPlayerPLID) return;
-                HandleTyreStackHit();
+                HandleObjectHit(e.ObjectName);
             }));
             /*
             _insim.RawObjectHitDebug += (s, packet) => BeginInvoke((Action)(() =>
@@ -349,13 +362,28 @@ namespace LFSDriftBuddy
             _revLimiter.Error += msg => BeginInvoke((Action)(() => _statusLabel.Text = msg));
 
             // ── Tire Temperature Limiter ──────────────────────────────
-           // _tireTemperatureLimiter.Log += msg => BeginInvoke((Action)(() => _statusLabel.Text = msg));
-           // _tireTemperatureLimiter.PatchStatusChanged += status =>
-           //     BeginInvoke((Action)(() => UpdateTireLimiterUI(status)));
+            // _tireTemperatureLimiter.Log += msg => BeginInvoke((Action)(() => _statusLabel.Text = msg));
+            // _tireTemperatureLimiter.PatchStatusChanged += status =>
+            //     BeginInvoke((Action)(() => UpdateTireLimiterUI(status)));
             try
             {
-                _indicatorClick.LoadAsync();
+                _indicatorClickOn.LoadAsync();
+                _indicatorClickOff.LoadAsync();
                 _indicatorCancel.LoadAsync();
+
+                // Weryfikacja obecności plików — bez tego brakujący plik po prostu "milczy"
+                // (SoundPlayer.Play/PlayLooping łyka wyjątek w naszym własnym try/catch niżej),
+                // więc użytkownik nie ma jak się dowiedzieć CO konkretnie jest nie tak.
+                string soundsDir = Path.Combine(System.Windows.Forms.Application.StartupPath, "Sounds");
+                var missingSoundFiles = new List<string>();
+                foreach (var fileName in new[] { "indicator_click_on.wav", "indicator_click_off.wav", "indicator_cancel.wav" })
+                {
+                    if (!File.Exists(Path.Combine(soundsDir, fileName)))
+                        missingSoundFiles.Add(fileName);
+                }
+
+                if (missingSoundFiles.Count > 0)
+                    _missingIndicatorSoundsWarning = "Brak plików dźwiękowych w folderze Sounds: " + string.Join(", ", missingSoundFiles);
             }
             catch { }
 
@@ -364,9 +392,9 @@ namespace LFSDriftBuddy
             _drift.DriftEnded += OnDriftEnded;
 
             _indicators.StateChanged += OnIndicatorStateChanged;
-
-            _awardTimer = new System.Windows.Forms.Timer { Interval = 120 };
-            _awardTimer.Tick += AwardTimer_Tick;
+            // Dźwięki kierunkowskazów są sterowane REALNYM stanem kontrolki z OutGauge
+            // (ShowLights), nie naszą wewnętrzną intencją CurrentState — patrz OnIndicatorLampStateChanged.
+            _indicators.LampStateChanged += OnIndicatorLampStateChanged;
 
             InitializeComponent();
 
@@ -375,7 +403,7 @@ namespace LFSDriftBuddy
             ControlStyles.UserPaint |
             ControlStyles.OptimizedDoubleBuffer,
             true);
-       
+
             _shadow = new WindowShadow(this); // <-- no Owner = this
 
             this.Load += (s, e) => _shadow.Reposition();
@@ -390,7 +418,7 @@ namespace LFSDriftBuddy
                     //EnableLayeredWindowMode();
                     //this.Region = CreateSmoothRoundedRegion(Width, Height, 20);
                 }
-                    
+
             };
             //this.Region = CreateSmoothRoundedRegion(this.Width, this.Height, 20);
             _overlay = new OverlayForm();
@@ -399,9 +427,24 @@ namespace LFSDriftBuddy
 
             BuildUI();
 
+            _hud = new InGameHudManager(
+                _insim, _drift, _revLimiter,
+                _showHudCheck, _showRPMHudCheck,
+                _revLimiterNumeric, _angleValueLabel);
+
             LoadSettings();
 
             UpdateBestStatsLabels();
+
+            // Dopiero teraz _statusLabel istnieje (utworzony w BuildUI) — pokaż ostrzeżenie
+            // o brakujących plikach dźwiękowych kierunkowskazów, jeśli wykryto je wcześniej.
+            if (!string.IsNullOrEmpty(_missingIndicatorSoundsWarning))
+                _statusLabel.Text = _missingIndicatorSoundsWarning;
+
+            // Pokaż diagnostykę OutGauge od razu ("BRAK DANYCH" dopóki nie przyjdzie
+            // pierwszy pakiet) — bez tego panel Kierunkowskazów byłby pusty do momentu
+            // połączenia z LFS i pierwszej ramki OutGauge.
+            UpdateIndicatorDiagnosticsLabel();
 
         }
 
@@ -424,6 +467,26 @@ namespace LFSDriftBuddy
                 : Localization.T("status.disconnected");
             _langBtn.Text = Localization.LanguageDisplayName(Localization.CurrentLanguage);
             _statusLabel.Text = Localization.T("status.hint");
+
+            // "MPH" celowo NIE jest tłumaczone (uniwersalny skrót) — dlatego etykiety jednostki
+            // prędkości nie są w generycznym rejestrze _localizedControls powyżej (inaczej zmiana
+            // języka nadpisywałaby wybrane MPH z powrotem na przetłumaczone "km/h"). Odświeżamy
+            // je ręcznie, respektując aktualny stan przełącznika _useMph.
+            UpdateSpeedUnitLabels();
+        }
+
+        /// <summary>
+        /// Odświeża etykiety jednostki prędkości (mały tekst pod cyfrą w panelu Speedometer +
+        /// etykieta obok przełącznika km/h↔mph) zgodnie z aktualnym stanem _useMph. "MPH" jest
+        /// uniwersalne (bez tłumaczenia), "km/h" korzysta z lokalizowanego klucza speedometer.unit.
+        /// Wołane przy starcie, przy zmianie przełącznika i przy zmianie języka aplikacji.
+        /// </summary>
+        private void UpdateSpeedUnitLabels()
+        {
+            string unitText = _useMph ? "MPH" : Localization.T("speedometer.unit");
+
+            if (_speedUnitLabel != null) _speedUnitLabel.Text = unitText;
+            if (_speedUnitToggleLabel != null) _speedUnitToggleLabel.Text = unitText;
         }
 
         // Buduje Region z antyaliasowanej maski (supersampling), dzięki czemu krawędzie
@@ -521,7 +584,16 @@ namespace LFSDriftBuddy
                     _indicatorVolumeValueLabel.Text = $"{_indicatorSoundsVolume}%";
                     _indicatorSoundsCheck.Checked = true;
                     _indicatorAutoCancelCheck.Checked = true;
+
+                    _overlay.RedlineColor = _speedoTachoRedlineColor;
+                    _overlay.SpeedoTachoTextColor = _speedoTachoTextColor;
+                    _overlay.SpeedoTachoIndicatorColor = _speedoTachoIndicatorColor;
+                    _overlay.SpeedoTachoTickColor = _speedoTachoTickColor;
+                    _overlay.SpeedoTachoBackgroundColor = _speedoTachoBackgroundColor;
+                    UpdateSpeedUnitLabels();   // domyślnie km/h (_useMph = false)
+
                     RefreshColorButtonSwatches();
+                    SyncHudColors();
 
                     return;
                 }
@@ -540,11 +612,14 @@ namespace LFSDriftBuddy
                 _revLimiter.RpmLimit = settings.CalibratedMAXRPM;
                 _revLimiterNumeric.Value = CalibratedMAXRPM;
 
+                _vehicleRevSettings = settings.VehicleRevLimiterSettings ?? new Dictionary<string, VehicleRevSettings>();
+
                 InSimColor1 = settings.InSimColor1;
                 InSimColor2 = settings.InSimColor2;
                 InSimColor3 = settings.InSimColor3;
                 InSimColor4 = settings.InSimColor4;
                 InSimColor5 = settings.InSimColor5;
+                SyncHudColors();
 
                 if (settings.OverlayColor1 != -1) OverlayColor1 = Color.FromArgb(settings.OverlayColor1);
                 if (settings.OverlayColor2 != -1) OverlayColor2 = Color.FromArgb(settings.OverlayColor2);
@@ -601,19 +676,49 @@ namespace LFSDriftBuddy
                         _savedWheelAxis = savedAxis;
                         _wheelInput.ConnectToDevice(savedGuid, savedAxis);
                     }
-                    try 
-                    {
-                        _indicatorSoundsVolume = Math.Clamp(settings.IndicatorSoundsVolume, 0, 100);
-                        _indicatorVolumeSlider.SetValueSilent(_indicatorSoundsVolume);
-                        _indicatorVolumeValueLabel.Text = $"{_indicatorSoundsVolume}%";
-                        _indicatorSoundsCheck.Checked = settings.IndicatorSoundsEnabled;
-                        _indicatorAutoCancelCheck.Checked = settings.IndicatorAutoCancelOnCenter;
-
-                    } catch { }
-                    
-
                 }
-                
+
+                // Głośność/auto-cancel kierunkowskazów wczytujemy zawsze, niezależnie
+                // od tego czy zapisana jest skonfigurowana kierownica (wcześniej ten blok
+                // był zagnieżdżony w if() powyżej, więc bez kierownicy nigdy się nie ładował).
+                try
+                {
+                    _indicatorSoundsVolume = Math.Clamp(settings.IndicatorSoundsVolume, 0, 100);
+                    _indicatorVolumeSlider.SetValueSilent(_indicatorSoundsVolume);
+                    _indicatorVolumeValueLabel.Text = $"{_indicatorSoundsVolume}%";
+                    _indicatorSoundsCheck.Checked = settings.IndicatorSoundsEnabled;
+                    _indicatorAutoCancelCheck.Checked = settings.IndicatorAutoCancelOnCenter;
+
+                    _speedoTachoEnabledCheck.Checked = settings.SpeedoTachoEnabled;
+                    _speedoTachoOffsetXNumeric.Value = Math.Clamp((decimal)settings.SpeedoTachoOffsetX,
+                        _speedoTachoOffsetXNumeric.Minimum, _speedoTachoOffsetXNumeric.Maximum);
+                    _speedoTachoOffsetYNumeric.Value = Math.Clamp((decimal)settings.SpeedoTachoOffsetY,
+                        _speedoTachoOffsetYNumeric.Minimum, _speedoTachoOffsetYNumeric.Maximum);
+                    _speedoTachoScaleNumeric.Value = Math.Clamp((decimal)settings.SpeedoTachoScale,
+                        _speedoTachoScaleNumeric.Minimum, _speedoTachoScaleNumeric.Maximum);
+                    _speedoTachoRedlineColor = Color.FromArgb(settings.SpeedoTachoRedlineColor);
+                    _speedoTachoTextColor = Color.FromArgb(settings.SpeedoTachoTextColor);
+                    _speedoTachoIndicatorColor = Color.FromArgb(settings.SpeedoTachoIndicatorColor);
+                    _speedoTachoTickColor = Color.FromArgb(settings.SpeedoTachoTickColor);
+                    _speedoTachoBackgroundColor = Color.FromArgb(settings.SpeedoTachoBackgroundColor);
+
+                    _overlay.SpeedoTachoEnabled = settings.SpeedoTachoEnabled;
+                    _overlay.SpeedoTachoOffsetX = settings.SpeedoTachoOffsetX;
+                    _overlay.SpeedoTachoOffsetY = settings.SpeedoTachoOffsetY;
+                    _overlay.SpeedoTachoScale = settings.SpeedoTachoScale;
+                    _overlay.RedlineColor = _speedoTachoRedlineColor;
+                    _overlay.SpeedoTachoTextColor = _speedoTachoTextColor;
+                    _overlay.SpeedoTachoIndicatorColor = _speedoTachoIndicatorColor;
+                    _overlay.SpeedoTachoTickColor = _speedoTachoTickColor;
+                    _overlay.SpeedoTachoBackgroundColor = _speedoTachoBackgroundColor;
+
+                    _useMph = settings.SpeedoTachoUseMph;
+                    _overlay.SpeedoTachoUseMph = _useMph;
+                    if (_speedUnitToggle != null) _speedUnitToggle.SetCheckedSilent(_useMph);
+                    UpdateSpeedUnitLabels();
+                }
+                catch { }
+
             }
             catch
             {
@@ -669,6 +774,19 @@ namespace LFSDriftBuddy
                     IndicatorSoundsVolume = _indicatorVolumeSlider.Value,
                     IndicatorAutoCancelOnCenter = _indicatorAutoCancelCheck.Checked,
 
+                    SpeedoTachoEnabled = _speedoTachoEnabledCheck.Checked,
+                    SpeedoTachoOffsetX = (float)_speedoTachoOffsetXNumeric.Value,
+                    SpeedoTachoOffsetY = (float)_speedoTachoOffsetYNumeric.Value,
+                    SpeedoTachoScale = (float)_speedoTachoScaleNumeric.Value,
+                    SpeedoTachoRedlineColor = _speedoTachoRedlineColor.ToArgb(),
+                    SpeedoTachoTextColor = _speedoTachoTextColor.ToArgb(),
+                    SpeedoTachoIndicatorColor = _speedoTachoIndicatorColor.ToArgb(),
+                    SpeedoTachoTickColor = _speedoTachoTickColor.ToArgb(),
+                    SpeedoTachoBackgroundColor = _speedoTachoBackgroundColor.ToArgb(),
+                    SpeedoTachoUseMph = _useMph,
+
+                    VehicleRevLimiterSettings = _vehicleRevSettings,
+
                 };
 
                 string json = JsonSerializer.Serialize(settings, new JsonSerializerOptions()
@@ -683,15 +801,85 @@ namespace LFSDriftBuddy
             }
         }
 
+        // Domyślne wartości stosowane, gdy dla danego auta nie ma jeszcze żadnych zapisanych
+        // ustawień rev limitera — celowo niskie/bezpieczne (3000 RPM startowo jest poniżej
+        // biegu jałowego większości aut w LFS, więc ogranicznik faktycznie zadziała dopiero po
+        // ręcznym podniesieniu przez użytkownika/przycisk CALIBRATE), żeby nowe/nieznane auto
+        // nigdy nie dziedziczyło przypadkowo wysokiej wartości z poprzedniego pojazdu.
+        private const int DefaultVehicleMaxRpm = 3000;
+        private const int DefaultVehicleCutMs = 25;
+
+        /// <summary>
+        /// Wczytuje zapisane wcześniej ustawienia rev limitera (max RPM + cut ms) dla danego auta,
+        /// jeśli takie istnieją. Wywoływane przy zmianie pojazdu (patrz OnRevData), przy resecie
+        /// samochodu (IS_CRS) i przy wyjeździe z pit lane. Jeśli dla tego auta nic nie zapisano
+        /// jeszcze — stosowane są wartości domyślne (DefaultVehicleMaxRpm/DefaultVehicleCutMs).
+        /// </summary>
+        private void LoadVehicleRevSettings(string carName)
+        {
+            if (string.IsNullOrWhiteSpace(carName)) return;
+
+            if (_vehicleRevSettings.TryGetValue(carName, out var vs))
+            {
+                ApplyVehicleRevValues(vs.MaxRpm, vs.CutMs,
+                    $"Wczytano ustawienia rev limitera dla {carName}: {vs.MaxRpm} RPM / {vs.CutMs} ms");
+                return;
+            }
+
+            // brak zapisanych ustawień dla tego auta — wartości domyślne, do ręcznej korekty
+            // przez pole numeryczne albo przycisk CALIBRATE
+            ApplyVehicleRevValues(DefaultVehicleMaxRpm, DefaultVehicleCutMs,
+                $"{carName}: brak zapisanych ustawień rev limitera — użyto domyślnych {DefaultVehicleMaxRpm} RPM / {DefaultVehicleCutMs} ms");
+        }
+
+        private void ApplyVehicleRevValues(int maxRpm, int cutMs, string statusMessage)
+        {
+            CalibratedMAXRPM = maxRpm;
+            SavedMSCUT = cutMs;
+
+            _revLimiterNumeric.Value = Math.Clamp((decimal)maxRpm, _revLimiterNumeric.Minimum, _revLimiterNumeric.Maximum);
+            _revCutMS.Value = Math.Clamp((decimal)cutMs, _revCutMS.Minimum, _revCutMS.Maximum);
+
+            _revLimiter.RpmLimit = maxRpm;
+            _revLimiter.CutMs = cutMs;
+
+            if (!string.IsNullOrEmpty(statusMessage) && _statusLabel != null)
+                _statusLabel.Text = statusMessage;
+        }
+
+        /// <summary>
+        /// Zapamiętuje AKTUALNE wartości pól max RPM / cut ms jako ustawienia konkretnego auta —
+        /// wołane przy każdej ręcznej zmianie tych pól (patrz onValueChanged w BuildUI) oraz tuż
+        /// przed przełączeniem na inny pojazd, żeby nie zgubić tego, co użytkownik ustawił.
+        /// </summary>
+        private void SaveVehicleRevSettings(string carName)
+        {
+            if (string.IsNullOrWhiteSpace(carName)) return;
+
+            _vehicleRevSettings[carName] = new VehicleRevSettings
+            {
+                MaxRpm = (int)_revLimiterNumeric.Value,
+                CutMs = (int)_revCutMS.Value
+            };
+
+            SaveSettings();
+        }
+
         private void OnRevData(OutGaugeData data)
         {
             BeginInvoke((Action)(() =>
             {
+                // Sygnalizuj overlayowi "żyjące" dane OutGauge — steruje widocznością
+                // prędkościomierza+obrotomierza i blokadą HUD-u wyniku w trybie idle,
+                // gdy dane milkną (menu/garaż/poza autem). Patrz OverlayForm.NotifyOutGaugeData.
+                _overlay.NotifyOutGaugeData();
+
                 _drift.SetHandbrakeActive(data.HandbrakeOn);
                 _rpmLabel.Text = ((int)data.RPM).ToString("N0");
                 _overlay.UpdateRpm((int)data.RPM);
+                _overlay.UpdateGear((int)data.Gear);   // ← NOWE: zasila obrotomierz aktualnym biegiem
                 _rpmBar.Value = (int)Math.Min(data.RPM, _rpmBar.Maximum);
-               
+
 
                 // Podświetl czerwono gdy blisko limitu
                 _rpmLabel.ForeColor = data.RPM >= _revLimiter.RpmLimit * 0.95
@@ -702,10 +890,49 @@ namespace LFSDriftBuddy
                 {
                     if (data.RPM > CalibratedMAXRPM) { CalibratedMAXRPM = (int)data.RPM; } else { }
                 }
+
+                // ── Ustawienia rev limitera per pojazd ──────────────────────────────────
+                // OutGauge niesie krótki kod auta w KAŻDYM pakiecie (data.Car), więc to
+                // najprostsze i najbardziej wiarygodne źródło wykrywania zmiany pojazdu —
+                // nie trzeba osobno podpinać się pod IS_NPL/IS_SLC z InSim. Zmiana wykryta →
+                // zapisz ustawienia poprzedniego auta (jeśli jakieś śledziliśmy), wczytaj
+                // zapisane wcześniej dla nowego (jeśli istnieją), inaczej wartości domyślne.
+                if (!string.IsNullOrEmpty(data.Car) && data.Car != _currentCarName)
+                {
+                    if (!string.IsNullOrEmpty(_currentCarName))
+                        SaveVehicleRevSettings(_currentCarName);
+
+                    _currentCarName = data.Car;
+                    LoadVehicleRevSettings(_currentCarName);
+                }
+
                 //_revLimiterNumeric.Value = CalibratedMAXRPM;
-                ShowInGameRPMLimitter(_revLimiterNumeric.Value.ToString());
+                _hud.ShowInGameRPMLimitter(_revLimiterNumeric.Value.ToString());
 
+                // ── Telemetria silnika dla wykrywania burnoutu (patrz DriftEngine.UpdateBurnout) ──
+                // Próby estymowania prędkości kół (z RPM+przełożenia, potem z OutSim AngVel)
+                // okazały się niewiarygodne w praktyce — usunięte. Burnout wykrywamy teraz
+                // wprost z RPM/gazu/biegu z OutGauge, bez pośredniej estymacji.
+                _drift.UpdateEngineTelemetry(data.RPM, data.Throttle, (int)data.Gear);
 
+                // ── Weryfikacja kontrolek kierunkowskazów z OutGauge ──────────────
+                // Realny stan lampki na desce rozdzielczej LFS (nie nasza intencja
+                // przełącznika) — na tej podstawie synchronizowane są dźwięki
+                // indicator_click_on.wav / indicator_click_off.wav / indicator_cancel.wav,
+                // patrz OnIndicatorLampStateChanged.
+                _indicators.UpdateFromOutGauge(data.LeftSignalOn, data.RightSignalOn, data.AnySignalOn);
+
+                // Diagnostyka widoczna w panelu Kierunkowskazów (patrz UpdateIndicatorDiagnosticsLabel) —
+                // licznik pakietów rosnący na oczach użytkownika to najprostszy dowód, że OutGauge
+                // w ogóle dociera do aplikacji. Throttlowane do ~5x/s, żeby nie zamulać UI (OutGauge
+                // potrafi wysyłać dane znacznie częściej niż trzeba to odświeżać na ekranie).
+                _outGaugePacketCount++;
+                _lastShowLightsRaw = data.ShowLights;
+                if ((DateTime.UtcNow - _lastIndicatorDiagUpdate).TotalMilliseconds >= 200)
+                {
+                    _lastIndicatorDiagUpdate = DateTime.UtcNow;
+                    UpdateIndicatorDiagnosticsLabel();
+                }
 
             }));
         }
@@ -718,7 +945,7 @@ namespace LFSDriftBuddy
             ApplePalette.SetDark(dark);
 
             this.BackColor = ApplePalette.Background;
-           
+
 
             ApplyThemeRecursive(this);
 
@@ -822,7 +1049,7 @@ namespace LFSDriftBuddy
 
             string appVersion = $"v.{version?.Split('+')[0] ?? "Unknown"}.alpha";
 
-        int marginTop = 40;
+            int marginTop = 40;
 
 
             SuspendLayout();
@@ -845,22 +1072,22 @@ namespace LFSDriftBuddy
 
             //Region = CreateSmoothRoundedRegion(Width, Height, 20);
 
-      
+
 
 
             _wheelInput = new SteeringWheelInput(
                 this.Handle,
-                (0, () => BeginInvoke((Action)(() => { ShowInGameAward("0"); }))),
-                (1, () => BeginInvoke((Action)(() => { ShowInGameAward("1"); }))),
-                (2, () => BeginInvoke((Action)(() => { ShowInGameAward("2"); }))),
-                (3, () => BeginInvoke((Action)(() => { ShowInGameAward("3"); }))),
-                (4, () => BeginInvoke((Action)(() => { ShowInGameAward("4"); }))),
-                (5, () => BeginInvoke((Action)(() => { ShowInGameAward("5"); }))),
-                (6, () => BeginInvoke((Action)(() => { ShowInGameAward("6"); }))),
-                (7, () => BeginInvoke((Action)(() => { ShowInGameAward("7"); }))),
-                (8, () => BeginInvoke((Action)(() => { ShowInGameAward("8"); }))),
-                (9, () => BeginInvoke((Action)(() => { ShowInGameAward("9"); }))),
-                (10, () => BeginInvoke((Action)(() => 
+                (0, () => BeginInvoke((Action)(() => { _hud.ShowInGameAward("0"); }))),
+                (1, () => BeginInvoke((Action)(() => { _hud.ShowInGameAward("1"); }))),
+                (2, () => BeginInvoke((Action)(() => { _hud.ShowInGameAward("2"); }))),
+                (3, () => BeginInvoke((Action)(() => { _hud.ShowInGameAward("3"); }))),
+                (4, () => BeginInvoke((Action)(() => { _hud.ShowInGameAward("4"); }))),
+                (5, () => BeginInvoke((Action)(() => { _hud.ShowInGameAward("5"); }))),
+                (6, () => BeginInvoke((Action)(() => { _hud.ShowInGameAward("6"); }))),
+                (7, () => BeginInvoke((Action)(() => { _hud.ShowInGameAward("7"); }))),
+                (8, () => BeginInvoke((Action)(() => { _hud.ShowInGameAward("8"); }))),
+                (9, () => BeginInvoke((Action)(() => { _hud.ShowInGameAward("9"); }))),
+                (10, () => BeginInvoke((Action)(() =>
                 {
                     if (!_connectionSwitch.Checked)
                     {
@@ -868,12 +1095,12 @@ namespace LFSDriftBuddy
                     }
 
                 }))),
-                (11, () => BeginInvoke((Action)(() => { ShowInGameAward("11"); }))),
-                (12, () => BeginInvoke((Action)(() => { ShowInGameAward("12"); }))),
-                (13, () => BeginInvoke((Action)(() => { ShowInGameAward("13"); }))),
-                (14, () => BeginInvoke((Action)(() => { ShowInGameAward("14"); }))),
-                (15, () => BeginInvoke((Action)(() => { ShowInGameAward("15"); }))),
-                (16, () => BeginInvoke((Action)(() => { ShowInGameAward("16"); })))
+                (11, () => BeginInvoke((Action)(() => { _hud.ShowInGameAward("11"); }))),
+                (12, () => BeginInvoke((Action)(() => { _hud.ShowInGameAward("12"); }))),
+                (13, () => BeginInvoke((Action)(() => { _hud.ShowInGameAward("13"); }))),
+                (14, () => BeginInvoke((Action)(() => { _hud.ShowInGameAward("14"); }))),
+                (15, () => BeginInvoke((Action)(() => { _hud.ShowInGameAward("15"); }))),
+                (16, () => BeginInvoke((Action)(() => { _hud.ShowInGameAward("16"); })))
 
             );
 
@@ -901,7 +1128,7 @@ namespace LFSDriftBuddy
             MakeLabel(headerPanel, "COLORS", 300, 14, 55, 22,
             Color.FromArgb(60, 60, 60), null, ContentAlignment.MiddleRight, locKey: "header.theme");
 
-            
+
             _themeSwitch = new MacToggleSwitch
             {
                 Location = new Point(360, 10),
@@ -937,7 +1164,18 @@ namespace LFSDriftBuddy
             {
                 if (_connectionSwitch.Checked)
                 {
-                    _insim.Connect(_hostBox.Text.Trim(), (int)_portBox.Value, _adminBox.Text);
+                    // Zablokuj przełącznik na czas próby połączenia — jeśli się nie uda
+                    // (zły host/port, LFS bez otwartego /insim, timeout), sam wróci do
+                    // OFF (patrz OnConnectFailed) zamiast zostać widocznie "włączony"
+                    // mimo braku realnego połączenia z grą. Connect() leci w tle, bo
+                    // nawet z ograniczonym timeoutem (patrz InSimConnection) to wciąż
+                    // blokujące wywołanie sieciowe — nie chcemy zamrażać UI na ten czas.
+                    _connectionSwitch.Enabled = false;
+
+                    string host = _hostBox.Text.Trim();
+                    int port = (int)_portBox.Value;
+                    string admin = _adminBox.Text;
+                    Task.Run(() => _insim.Connect(host, port, admin));
                 }
                 else
                 {
@@ -948,6 +1186,7 @@ namespace LFSDriftBuddy
                     Task.Run(() =>
                     {
                         _insim.DeleteAllButtons();
+                        BeginInvoke((Action)(() => _hud.InvalidateCache()));
                         System.Threading.Thread.Sleep(80);
                         _insim.Disconnect();
 
@@ -993,14 +1232,78 @@ namespace LFSDriftBuddy
             _speedometer = new SpeedometerControl
             {
                 Location = new Point(140, 55),
-                Size = new Size(280, 130),
+                Size = new Size(240, 130),
                 BackColor = Color.White
             };
             // speedometerPanel.Controls.Add(_speedometer);
 
             _speedLabel = MakeLabel(speedometerPanel, "0", 20, 85, 70, 25, Color.FromArgb(255, 200, 50), new Font("Segoe UI", 24f, FontStyle.Bold));
-            _speedUnitLabel = MakeLabel(speedometerPanel, "km/h", 20, 120, 50, 20, ApplePalette.Text);
-            MakeLabel(speedometerPanel, "SPEED", 20, 60, 100, 20, ApplePalette.Text, new Font("Segoe UI", 7.5f, FontStyle.Bold), locKey: "speedometer.speed");
+            _speedUnitLabel = MakeLabel(speedometerPanel, Localization.T("speedometer.unit"), 20, 120, 50, 20, ApplePalette.Text);
+            MakeLabel(speedometerPanel, "SPEED", 20, 60, 70, 20, ApplePalette.Text, new Font("Segoe UI", 7.5f, FontStyle.Bold), locKey: "speedometer.speed");
+
+            // ── Ustawienia HUD-u prędkościomierz+obrotomierz (overlay, styl Forza) ──────
+            _speedoTachoEnabledCheck = new MacToggleSwitch
+            {
+                //Text = Localization.T("speedometer.showhud"),
+                Location = new Point(180, 10),
+                //Size = new Size(200, 20),
+                BackColor = Color.Transparent,
+                Checked = true
+            };
+            _speedoTachoEnabledCheck.CheckedChanged += (s, e) =>
+            {
+                _overlay.SpeedoTachoEnabled = _speedoTachoEnabledCheck.Checked;
+                SaveSettings();
+            };
+            speedometerPanel.Controls.Add(_speedoTachoEnabledCheck);
+            _localizedControls.Add((_speedoTachoEnabledCheck, "speedometer.showhud"));
+
+            MakeLabel(speedometerPanel, "X:", 90, 140 - 80, 16, 22, ApplePalette.Text, locKey: "speedometer.offsetx");
+            _speedoTachoOffsetXNumeric = MakeNumericUpDown(
+                speedometerPanel, 140, 140 - 82, 75, 28, -500, 500, 0, 5,
+                v => { _overlay.SpeedoTachoOffsetX = (float)v; SaveSettings(); });
+
+            MakeLabel(speedometerPanel, "Y:", 90, 180 - 80, 16, 22, ApplePalette.Text, locKey: "speedometer.offsety");
+            _speedoTachoOffsetYNumeric = MakeNumericUpDown(
+                speedometerPanel, 140, 180 - 82, 75, 28, -500, 500, 0, 5,
+                v => { _overlay.SpeedoTachoOffsetY = (float)v; SaveSettings(); });
+
+            MakeLabel(speedometerPanel, "Scale:", 90, 220 - 80, 45, 22, ApplePalette.Text, locKey: "speedometer.scale");
+            _speedoTachoScaleNumeric = MakeNumericUpDown(
+                speedometerPanel, 140, 220 - 82, 75, 28, 0.3m, 2.5m, 1.0m, 0.05m,
+                v => { _overlay.SpeedoTachoScale = (float)v; SaveSettings(); });
+            _speedoTachoScaleNumeric.DecimalPlaces = 2;
+
+            // ── Przełącznik jednostki prędkości (km/h ↔ mph) — pomniejszony MacToggleSwitch,
+            // wpasowany w wolną przestrzeń pod blokiem SPEED (lewa kolumna, x=15-88), nad
+            // checkboxem "Show Speedo+Tacho HUD". Wpływa zarówno na overlay HUD (prędkościomierz+
+            // obrotomierz), jak i na zwykłą etykietę prędkości w tym panelu — jedna, spójna
+            // jednostka w całej aplikacji. MPH nie jest tłumaczone (uniwersalny skrót), dlatego
+            // etykieta jest odświeżana ręcznie (UpdateSpeedUnitLabels), nie przez generyczny
+            // mechanizm _localizedControls, żeby zmiana języka nie nadpisała wybranego MPH z powrotem na km/h.
+            _speedUnitToggle = new MacToggleSwitch
+            {
+                Location = new Point(15, 145),
+                Size = new Size(34, 20),   // pomniejszony (domyślnie 51x30)
+                Checked = false            // false = km/h, true = mph
+            };
+            speedometerPanel.Controls.Add(_speedUnitToggle);
+
+            _speedUnitToggleLabel = MakeLabel(speedometerPanel, "", 54, 145, 34, 20,
+                ApplePalette.Text, new Font("Segoe UI", 7.5f, FontStyle.Bold), ContentAlignment.MiddleLeft);
+
+            _speedUnitToggle.CheckedChanged += (s, e) =>
+            {
+                _useMph = _speedUnitToggle.Checked;
+                _overlay.SpeedoTachoUseMph = _useMph;
+                UpdateSpeedUnitLabels();
+                SaveSettings();
+            };
+            UpdateSpeedUnitLabels();   // ustaw początkowy tekst etykiet (km/h)
+
+            var hudColorsBtn = MakeButton(speedometerPanel, Localization.T("hud.colors"), 15, 215, 210, 30, ApplePalette.Blue);
+            hudColorsBtn.Click += (s, e) => ShowHudColorsMenu();
+            _localizedControls.Add((hudColorsBtn, "hud.colors"));
 
             var marginSide = 10;
 
@@ -1096,9 +1399,10 @@ namespace LFSDriftBuddy
                     {
                         _overlay.UpdateScore(_drift.TotalScore);
                         _overlay.UpdateAccentColor(OverlayColor1);   // ← zmienione z InSimCodeToColor(InSimColor1)
+                        _overlay.UpdateMaxRpm(CalibratedMAXRPM);   // ← NOWE: startowa kalibracja obrotomierza
                         _overlay.AttachTo(lfsHwnd);
                         //_showRPMHudCheck.Checked = false;
-                       
+
                     }
                     _showHudCheck.Checked = false;
                 }
@@ -1129,18 +1433,13 @@ namespace LFSDriftBuddy
             {
                 if (!_showHudCheck.Checked)
                 {
-                    _insim.ShowButton(BTN_SCORE, "", l: xPos, t: 0, w: 1, h: 1, bStyle: 5);
-                    _insim.ShowButton(BTN_AWARD, "", l: xPos, t: 0, w: 1, h: 1, bStyle: 5);
-                    _insim.ShowButton(BTN_COMBO, "", l: xPos, t: 0, w: 1, h: 1, bStyle: 5);
-                    _insim.ShowButton(BTN_RUN, "", l: xPos, t: 0, w: 1, h: 1, bStyle: 5);
-                    _insim.ShowButton(BTN_LABEL, "", l: xPos, t: 0, w: 1, h: 1, bStyle: 2);
-                    _insim.ShowButton(BTN_RIGHTIND, "", l: xPos, t: 0, w: 1, h: 1, bStyle: 2);
-                    _insim.ShowButton(BTN_LEFTIND, "", l: xPos, t: 0, w: 1, h: 1, bStyle: 2);
+                    _hud.ClearAllButtons();
                 }
-                else { 
-                    _showOverlayCheck.Checked = false; 
+                else
+                {
+                    _showOverlayCheck.Checked = false;
                 }
-                RefreshColorButtonSwatches(); 
+                RefreshColorButtonSwatches();
             };
 
 
@@ -1156,14 +1455,12 @@ namespace LFSDriftBuddy
                 420,
                 180, locKey: "rev.title");
 
-            
-
             revBindingsBtn = MakeButton(revLimiterPanel, "⚙", 255, 5, 40, 40);
             revBindingsBtn.Click += (s, e) => OpenRevLimiterBindings();
             MakeLabel(revLimiterPanel, "Bind functions using the gear icon.", 15, 55, 270, 18,
                       Color.FromArgb(140, 140, 170), null, ContentAlignment.MiddleLeft, locKey: "rev.calibratehint");
 
-            
+
 
             _calibrateBtn1 = MakeButton(revLimiterPanel, "CALIBRATE", 300, 70, 110, 30, locKey: "rev.calibrate");
 
@@ -1205,9 +1502,15 @@ namespace LFSDriftBuddy
                 20000,
                 CalibratedMAXRPM,
                 100,
-                v => _revLimiter.RpmLimit = (int)v
+                v =>
+                {
+                    _revLimiter.RpmLimit = (int)v;
+                    _rpmBar.Maximum = (int)v;   // pasek RPM ma zawsze skalę do aktualnego limitu
+                    _overlay.UpdateMaxRpm((int)v);   // ← NOWE: obrotomierz przekalibrowuje się na bieżąco
+                    SaveVehicleRevSettings(_currentCarName);
+                }
             );
-            //ShowInGameRPMLimitter((_revLimiterNumeric.Value).ToString());
+            //_hud.ShowInGameRPMLimitter((_revLimiterNumeric.Value).ToString());
             MakeLabel(revLimiterPanel, "Cut time [ms]:", 195, marginTop + 105, 80, 22, ApplePalette.Text, locKey: "rev.cutms");
             _revCutMS = MakeNumericUpDown(
                 revLimiterPanel,
@@ -1219,13 +1522,17 @@ namespace LFSDriftBuddy
                 500,
                 SavedMSCUT,
                 5,
-                v => _revLimiter.CutMs = (int)v
+                v =>
+                {
+                    _revLimiter.CutMs = (int)v;
+                    SaveVehicleRevSettings(_currentCarName);
+                }
             );
 
             var revEnableLabel = MakeLabel(revLimiterPanel, "STATUS", 300, 14, 55, 22,
             Color.FromArgb(60, 60, 60), null, ContentAlignment.MiddleRight, locKey: "connection.status");
 
-            
+
 
             _revEnableSwitch = new MacToggleSwitch
             {
@@ -1269,7 +1576,10 @@ namespace LFSDriftBuddy
 
                 IndicatorManager.IndicatorState newState = _indicators.CurrentState;
 
-                if (_indicatorAutoCancelCheck != null && _indicatorAutoCancelCheck.Checked)
+                // Auto-cancel steruje realnym stanem kierunkowskazów (i finalnie wysyła klawisz
+                // do LFS w OnIndicatorStateChanged) — bez połączenia z InSim nie ma to sensu
+                // i mogłoby rozjechać lokalny stan IndicatorManager z tym co "myśli" gra.
+                if (_insim.IsConnected && _indicatorAutoCancelCheck != null && _indicatorAutoCancelCheck.Checked)
                 {
                     if (indClickONOFF == true && pct < 5 && newState == IndicatorState.Right || indClickONOFF == true && pct > -5 && newState == IndicatorState.Left)
                     {
@@ -1314,7 +1624,7 @@ namespace LFSDriftBuddy
             _bindLeftBtn.Click += (s, e) => BindKey("LEFT TURN SIGNAL", b =>
             {
 
-                
+
                 ApplyIndicatorBinding(
                     b,
                     code => _indicators.LeftKeyCode = code,
@@ -1357,7 +1667,7 @@ namespace LFSDriftBuddy
             _indicatorSoundsCheck = new MacCheckBox
             {
                 Text = Localization.T("indicators.soundscheck"),
-               
+
                 Location = new Point(15, 175),
                 Size = new Size(270, 20),
                 BackColor = Color.Transparent,
@@ -1366,7 +1676,11 @@ namespace LFSDriftBuddy
             _indicatorSoundsCheck.CheckedChanged += (s, e) =>
             {
                 if (!_indicatorSoundsCheck.Checked)
-                    _indicatorClick.Stop();
+                {
+                    _indicatorClickOn.Stop();
+                    _indicatorClickOff.Stop();
+                    _indicatorCancel.Stop();
+                }
                 SaveSettings();
             };
             indicatorPanel.Controls.Add(_indicatorSoundsCheck);
@@ -1408,7 +1722,7 @@ namespace LFSDriftBuddy
 
             _localizedControls.Add((_indicatorAutoCancelCheck, "indicators.centeroff"));
             _localizedControls.Add((_indicatorSoundsCheck, "indicators.soundscheck"));
-           
+
 
             statusPanel = CreateCard(
                 "",
@@ -1419,7 +1733,7 @@ namespace LFSDriftBuddy
 
             _statusLabel = MakeLabel(statusPanel, "Type /insim 29999 w LFS, and click CONNECT.", 20, 16, 620, 18, ApplePalette.Text, new Font("Segoe UI", 8f), locKey: "status.hint");
 
-            
+
             ResumeLayout();
 
             StartPosition = FormStartPosition.CenterScreen;
@@ -1428,7 +1742,7 @@ namespace LFSDriftBuddy
 
             BuildTitleBar();
 
-           
+
             this.Paint += MainForm_Paint;
             /*
             // ────────────────────────────────────────────────────────
@@ -1497,7 +1811,7 @@ namespace LFSDriftBuddy
 
         protected override void OnPaintBackground(PaintEventArgs e)
         {
-            
+
         }
         private void MainForm_Paint(object sender, PaintEventArgs e)
         {
@@ -1628,7 +1942,7 @@ namespace LFSDriftBuddy
             }
 
             closeButton.Region = CreateSmoothRoundedRegion(closeButton.Width, closeButton.Height, 14);
-           
+
 
 
             popup.Paint += (s, e) =>
@@ -1682,13 +1996,19 @@ namespace LFSDriftBuddy
         private InputBinding _hazardIndBinding = InputBinding.None;
         private InputBinding _lightToggleBinding = InputBinding.None;
 
+        // Bindowania (klawisz/kierownica) sterujące rev limiterem i światłami mają działać
+        // tylko gdy program jest połączony z grą — bez tego kalibracja/przełączanie i tak
+        // nie ma żadnego efektu w LFS, a mogłoby np. przypadkowo nadpisać CalibratedMAXRPM
+        // przez ExecuteRevIncrease/Decrease bez faktycznej sesji jazdy.
         private void ExecuteRevToggle()
         {
+            if (!_insim.IsConnected) return;
             BeginInvoke((Action)(() => { _revEnableSwitch.Checked = !_revEnableSwitch.Checked; }));
         }
 
         private void ExecuteRevCalibrate()
         {
+            if (!_insim.IsConnected) return;
             BeginInvoke((Action)(() =>
             {
                 if (!calibrationON)
@@ -1698,21 +2018,23 @@ namespace LFSDriftBuddy
 
         private void ExecuteRevDecrease()
         {
+            if (!_insim.IsConnected) return;
             BeginInvoke((Action)(() =>
             {
                 CalibratedMAXRPM = (int)_revLimiterNumeric.Value - 100;
                 _revLimiterNumeric.Value = CalibratedMAXRPM;
-                ShowInGameRPMLimitter(CalibratedMAXRPM.ToString());
+                _hud.ShowInGameRPMLimitter(CalibratedMAXRPM.ToString());
             }));
         }
 
         private void ExecuteRevIncrease()
         {
+            if (!_insim.IsConnected) return;
             BeginInvoke((Action)(() =>
             {
                 CalibratedMAXRPM = (int)_revLimiterNumeric.Value + 100;
                 _revLimiterNumeric.Value = CalibratedMAXRPM;
-                ShowInGameRPMLimitter(CalibratedMAXRPM.ToString());
+                _hud.ShowInGameRPMLimitter(CalibratedMAXRPM.ToString());
             }));
         }
 
@@ -1744,7 +2066,17 @@ namespace LFSDriftBuddy
             else if (newBinding.Kind == InputKind.WheelButton)
             {
                 setWheelButton(newBinding.WheelButton);
-                _wheelInput.SetBinding(newBinding.WheelButton, wheelAction);
+
+                // Bindowanie kierownicy dla kierunkowskazów ma działać TYLKO gdy program
+                // jest połączony z grą przez InSim — bez połączenia przełączanie i tak
+                // niczego by nie wysłało do LFS, a mogłoby zostawić niespójny stan
+                // IndicatorManager po (re)connect. Blokada na poziomie samego wywołania,
+                // nie na poziomie wskaźnika w UI, żeby zadziałało niezależnie od tego,
+                // skąd akcja została zarejestrowana.
+                _wheelInput.SetBinding(newBinding.WheelButton, () =>
+                {
+                    if (_insim.IsConnected) wheelAction();
+                });
             }
         }
         // usuwa poprzednie bindowanie (klawiatura lub kierownica) i rejestruje nowe
@@ -1774,7 +2106,7 @@ namespace LFSDriftBuddy
             _revLimiter.Enabled = false;
             _revEnableSwitch.SetCheckedSilent(false);
 
-            ShowInGameAward("REV LIMITTER CALIBRATION - SELECT NEUTRAL AND HOLD FULL THROTTLE!!!");
+            _hud.ShowInGameAward("REV LIMITTER CALIBRATION - SELECT NEUTRAL AND HOLD FULL THROTTLE!!!");
 
             _revLimitLabel.Text = "CALIBRATION... ";
             //PressWKey(true);
@@ -1792,20 +2124,20 @@ namespace LFSDriftBuddy
 
             _revLimiter.Enabled = wasEnabledBeforeCalibration;
             _revEnableSwitch.SetCheckedSilent(wasEnabledBeforeCalibration);
-            ShowInGameAward($"RPM LIMIT: {CalibratedMAXRPM}");
-            ShowInGameRPMLimitter(CalibratedMAXRPM.ToString());
+            _hud.ShowInGameAward($"RPM LIMIT: {CalibratedMAXRPM}");
+            _hud.ShowInGameRPMLimitter(CalibratedMAXRPM.ToString());
             await Task.Delay(1000);
 
-            ShowInGameAward("REV LIMITTER CALIBRATION DONE!!!");
+            _hud.ShowInGameAward("REV LIMITTER CALIBRATION DONE!!!");
             await Task.Delay(1000);
-            ShowInGameAward($"RPM LIMIT: {CalibratedMAXRPM}");
+            _hud.ShowInGameAward($"RPM LIMIT: {CalibratedMAXRPM}");
             await Task.Delay(1000);
-            ShowInGameAward("REV LIMITTER CALIBRATION DONE!!!");
+            _hud.ShowInGameAward("REV LIMITTER CALIBRATION DONE!!!");
 
 
             //PressWKey(false);
             await Task.Delay(3000);
-            ShowInGameAward($"");
+            _hud.ShowInGameAward($"");
             _revLimitLabel.Text = "RPM LIMIT: ";
             SaveSettings();
         }
@@ -2164,13 +2496,13 @@ namespace LFSDriftBuddy
         // ────────────────────────────────────────────────────────
         // Niestandardowy dialog do bindowania klawiszy
         // ────────────────────────────────────────────────────────
-       
+
         public class KeyBindingForm : Form
         {
             public InputBinding Result { get; private set; } = InputBinding.None;
             private Label _instructionLabel;
             private readonly SteeringWheelInput _wheelInput;
-            
+
             public KeyBindingForm(string keyName, SteeringWheelInput wheelInput = null)
             {
                 _wheelInput = wheelInput;
@@ -2261,6 +2593,101 @@ namespace LFSDriftBuddy
         (Color.Gray,       "^8"),
         (Color.LightBlue,  "^9"),
     };
+
+        /// <summary>
+        /// Podmenu "HUD Colors" — lista wszystkich konfigurowalnych kolorów prędkościomierza+
+        /// obrotomierza (redline, tekst, wskaźnik/igła, kreski/ticki, tło). Każdy wiersz otwiera
+        /// ten sam picker RGB+A (OpenCustomColorPicker z includeAlpha:true) dla danego elementu.
+        /// </summary>
+        private void ShowHudColorsMenu()
+        {
+            Form overlayBg = new Form
+            {
+                FormBorderStyle = FormBorderStyle.None,
+                StartPosition = FormStartPosition.Manual,
+                ShowInTaskbar = false,
+                Bounds = this.Bounds,
+                BackColor = Color.Black,
+                Opacity = 0.5,
+                Owner = this
+            };
+
+            Form popup = new Form
+            {
+                FormBorderStyle = FormBorderStyle.None,
+                StartPosition = FormStartPosition.CenterParent,
+                ShowInTaskbar = false,
+                Size = new Size(300, 310),
+                BackColor = ApplePalette.Background
+            };
+
+            popup.Shown += (s, e) => popup.Region = CreateSmoothRoundedRegion(popup.Width, popup.Height, 20);
+
+            var card = new RoundedPanel { Dock = DockStyle.Fill };
+            popup.Controls.Add(card);
+
+            var closeButton = new Button
+            {
+                Text = "×",
+                Size = new Size(28, 28),
+                Location = new Point(popup.Width - 38, 10),
+                FlatStyle = FlatStyle.Flat,
+                BackColor = Color.Transparent,
+                ForeColor = ApplePalette.Secondary,
+                Font = new Font("Segoe UI Semibold", 12f),
+                Cursor = Cursors.Hand,
+                TabStop = false
+            };
+            closeButton.FlatAppearance.BorderSize = 0;
+            closeButton.FlatAppearance.MouseOverBackColor = Color.FromArgb(235, 235, 240);
+            closeButton.FlatAppearance.MouseDownBackColor = Color.FromArgb(220, 220, 225);
+            closeButton.Click += (s, e) => popup.Close();
+            closeButton.Region = CreateSmoothRoundedRegion(closeButton.Width, closeButton.Height, 14);
+
+            MakeLabel(card, "HUD Colors", 20, 15, 200, 24,
+                ApplePalette.Title, new Font("Segoe UI Semibold", 11f));
+            MakeLabel(card, "Speedo+Tacho — RGB i przezroczystość", 20, 40, 250, 16,
+                Color.FromArgb(140, 140, 170), new Font("Segoe UI", 7.5f));
+
+            int y = 66;
+            void AddRow(string label, Func<Color> getColor, Action<Color> setColor)
+            {
+                MakeLabel(card, label, 20, y + 6, 150, 20, ApplePalette.Text);
+
+                var swatch = MakeButton(card, "", 195, y, 65, 30, getColor());
+                swatch.Click += (s, e) => OpenCustomColorPicker(swatch, getColor(), label, setColor, includeAlpha: true);
+                card.Controls.Add(swatch);
+
+                y += 40;
+            }
+
+            AddRow("Redline", () => _speedoTachoRedlineColor, c => { _speedoTachoRedlineColor = c; _overlay.RedlineColor = c; });
+            AddRow("Text", () => _speedoTachoTextColor, c => { _speedoTachoTextColor = c; _overlay.SpeedoTachoTextColor = c; });
+            AddRow("Indicator", () => _speedoTachoIndicatorColor, c => { _speedoTachoIndicatorColor = c; _overlay.SpeedoTachoIndicatorColor = c; });
+            AddRow("Ticks", () => _speedoTachoTickColor, c => { _speedoTachoTickColor = c; _overlay.SpeedoTachoTickColor = c; });
+            AddRow("Background", () => _speedoTachoBackgroundColor, c => { _speedoTachoBackgroundColor = c; _overlay.SpeedoTachoBackgroundColor = c; });
+
+            popup.Paint += (s, e) =>
+            {
+                e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
+                for (int i = 30; i >= 1; i--)
+                {
+                    int alpha = (int)(22 * (1.0 - i / 30.0));
+                    Rectangle shadowRect = new Rectangle(12 - i, 12 - i, popup.Width - 24 + i * 2, popup.Height - 24 + i * 2);
+                    using (GraphicsPath p = RoundedPath(shadowRect, 20 + i))
+                    using (SolidBrush b = new SolidBrush(Color.FromArgb(alpha, 0, 0, 0)))
+                        e.Graphics.FillPath(b, p);
+                }
+            };
+
+            card.Controls.Add(closeButton);
+
+            overlayBg.Show();
+            popup.Owner = overlayBg;
+
+            try { popup.ShowDialog(overlayBg); }
+            finally { overlayBg.Close(); overlayBg.Dispose(); }
+        }
 
         private void OpenRevLimiterBindings()
         {
@@ -2609,6 +3036,7 @@ namespace LFSDriftBuddy
 
         private void ExecuteLightToggle()
         {
+            if (!_insim.IsConnected) return;
             System.Threading.ThreadPool.QueueUserWorkItem(_ =>
             {
                 IntPtr hwnd = FindLfsWindow();
@@ -2627,8 +3055,8 @@ namespace LFSDriftBuddy
                 PostMessage(hwnd, WM_KEYUP, (IntPtr)VK_SHIFT, (IntPtr)0xC02A0001);
             });
         }
-       
-       
+
+
         private static IntPtr FindLfsWindow()
         {
             // LFS używa różnych tytułów zależnie od wersji i trybu
@@ -2657,13 +3085,15 @@ namespace LFSDriftBuddy
                 _lastKnownPlayerPLID = viewPlid;
             else if (_lastKnownPlayerPLID == 0)
                 return;  // jeszcze nie wiadomo, które auto jest nasze
-            if (!_showHudCheck.Checked) 
-            
-            {
-                ShowInGameAward($"");
 
-            }
-            
+            // NOTE: odczyt _showHudCheck.Checked i wywołanie na kontrolce InSim musi wejść
+            // na wątek UI — CarDataReceived odpala się z wątku InSim, nie z wątku formularza.
+            this.BeginInvoke((Action)(() =>
+            {
+                if (!_showHudCheck.Checked)
+                    _hud.ShowInGameAward("");
+            }));
+
             // Liczenie TYLKO dla gracza!
             if (e.Car.PLID != _lastKnownPlayerPLID)
                 return;  // ← WYJDŹ jeśli to nie gracz
@@ -2681,13 +3111,20 @@ namespace LFSDriftBuddy
                 _driftAngle = _drift.DriftAngleDeg;
                 _isDrifting = _drift.IsDrifting;
                 _isSpeeding = _drift.IsSpeeding;
+                _isBurnout = _drift.IsBurnout;
                 _overlay.SetDriftAngle(_driftAngle, _isDrifting, _drift.DriftSideRight);
-                _overlay.SetActive(_isDrifting || _isSpeeding);
+                _overlay.UpdateSpeedGauge(_speedKmh);   // ← NOWE: zasila prędkościomierz w overlay
+                // Burnout ma pokazywać ten sam aktywny pasek HUD (etykieta/run/combo) co drift
+                // i speeding — bez tego overlay zostawał w stanie "idle" mimo że DriftScored
+                // faktycznie strzelał z tekstami burnoutu (patrz UpdateLabel niżej).
+                _overlay.SetActive(_isDrifting || _isSpeeding || _isBurnout);
                 _overlay.UpdateLapScore(_drift.LapScore);
 
-                if (!_isDrifting && !_isSpeeding)
+                if (!_isDrifting && !_isSpeeding && !_isBurnout)
                     _overlay.UpdateAccentColor(OverlayColor1);
-                _speedLabel.Text = ((int)speed).ToString();
+                _speedLabel.Text = _useMph
+                    ? ((int)(speed * 0.621371)).ToString()
+                    : ((int)speed).ToString();
                 _angleValueLabel.Text = ((int)_driftAngle).ToString() + "°";
                 _angleValueLabel.ForeColor = _isDrifting
                     ? Color.FromArgb(255, 80, 80) : Color.FromArgb(60, 180, 255);
@@ -2696,6 +3133,13 @@ namespace LFSDriftBuddy
                 _speedometer.DriftAngle = _driftAngle;
                 _speedometer.IsDrifting = _isDrifting;
                 _speedometer.Invalidate();
+
+                // Odświeżanie HUD-a IS_BTN na KAŻDYM ticku telemetrii, nie tylko przy zdarzeniu
+                // DriftScored (które strzela wyłącznie podczas aktywnego driftu/przyspieszenia).
+                // Bez tego licznik wyniku znikał przez większość czasu i pojawiał się tylko
+                // sporadycznie na chwilę — patrz komentarz w InGameHudManager.UpdateInGameHUD().
+                if (_showHudCheck.Checked && _insim.IsConnected && _insim.IsRaceNow)
+                    _hud.UpdateInGameHUD();
             }));
         }
 
@@ -2713,13 +3157,21 @@ namespace LFSDriftBuddy
                 _indicatorLabelR = labelindr;
                 _indicatorLabelL = labelindl;
 
+                _hud.DriftLabel = label;
+                _hud.CurrentLabelKind = labelKind;
+                _hud.IndicatorLabelRight = labelindr;
+                _hud.IndicatorLabelLeft = labelindl;
+
                 UpdateScoreLabels();
+                // NOTE: wcześniej gałąź "else" wołała _hud.ClearAllButtons() — DriftScored strzela
+                // wielokrotnie na sekundę WYŁĄCZNIE podczas aktywnego driftu/przyspieszenia, więc
+                // każde chwilowe niespełnienie warunku (np. _insim.IsRaceNow) podczas driftu
+                // twardo czyściło cały HUD. Odświeżanie z OnCarData w tej samej sytuacji tylko
+                // pomija aktualizację, nie kasuje niczego — ujednolicone tutaj, żeby HUD nie znikał
+                // w trakcie driftu. Czyszczeniem przy rozłączeniu/wyjściu z wyścigu zajmują się już
+                // RaceStateChanged / OnDisconnected / przełącznik "Show ingame HUD".
                 if (_showHudCheck.Checked && _insim.IsConnected && _insim.IsRaceNow)
-                { UpdateInGameHUD(); }
-                else
-                {
-                    _insim.ShowButton(BTN_SCORE, "", l: xPos, t: 0, w: 1, h: 1, bStyle: 5);
-                }
+                    _hud.UpdateInGameHUD();
 
                 string angleColCode = _driftLabelKind switch
                 {
@@ -2736,6 +3188,10 @@ namespace LFSDriftBuddy
                     DriftLabelKind.AngleGood => InSimColor2,
                     DriftLabelKind.AngleGoodE => InSimColor2,
                     DriftLabelKind.Fast1 => InSimColor2,
+                    DriftLabelKind.BurnoutGood => InSimColor2,
+                    DriftLabelKind.BurnoutHigh => InSimColor3,
+                    DriftLabelKind.BurnoutExtreme => InSimColor4,
+                    DriftLabelKind.BurnoutInsane => InSimColor5,
                     _ => InSimColor1,
                 };
 
@@ -2754,6 +3210,10 @@ namespace LFSDriftBuddy
                     DriftLabelKind.AngleGood => OverlayColor2,
                     DriftLabelKind.AngleGoodE => OverlayColor2,
                     DriftLabelKind.Fast1 => OverlayColor2,
+                    DriftLabelKind.BurnoutGood => OverlayColor2,
+                    DriftLabelKind.BurnoutHigh => OverlayColor3,
+                    DriftLabelKind.BurnoutExtreme => OverlayColor4,
+                    DriftLabelKind.BurnoutInsane => OverlayColor5,
                     _ => OverlayColor1,
                 };
 
@@ -2784,52 +3244,43 @@ namespace LFSDriftBuddy
             }));
         }
         private string _lastOverlayBonusText = "";
-        private DateTime _lastPostHitTime = DateTime.MinValue;    // ← NOWE
-        private DateTime _lastTyreHitTime = DateTime.MinValue;    // ← NOWE
-        private static readonly TimeSpan ObjectHitCooldown = TimeSpan.FromMilliseconds(500);   // ← NOWE
 
-        private void HandlePostHit()
-        {
-            var now = DateTime.UtcNow;
-            if (now - _lastPostHitTime < ObjectHitCooldown) return;   // debounce — 1 efekt na pachołek
-            _lastPostHitTime = now;
+        // Wspólny debounce dla WSZYSTKICH obiektów (wcześniej osobno dla postów i stosów opon) —
+        // jeden hit na obiekt niezależnie od jego typu, żeby ten sam kolizja z tego samego obiektu
+        // nie odpaliła dwóch bonusów/kar w jednej klatce fizyki.
+        private DateTime _lastObjectHitTime = DateTime.MinValue;
+        private static readonly TimeSpan ObjectHitCooldown = TimeSpan.FromMilliseconds(500);
 
-            if (_drift.IsDrifting)
-            {
-                long bonus = (long)Math.Round(100 * _drift.ComboMultiplier);
-                _drift.ApplyPostPoints(bonus, $"POST KISS! +{bonus}");
-            }
-            else
-            {
-                _drift.ApplyPostPoints(-100, "POST HIT -100");
-            }
-
-            UpdateScoreLabels();
-            _overlay.UpdateScore(_drift.TotalScore);
-            _overlay.ShowBonus(_drift.LastAwardedText);
-            if (_showHudCheck.Checked) ShowInGameAward(_drift.LastAwardedText);
-        }
-
-        private void HandleTyreStackHit()
+        /// <summary>
+        /// Ujednolicona obsługa kolizji z DOWOLNYM wykrywalnym obiektem toru/layoutu (pachołek,
+        /// stos opon, słupek, bariera, banner itd.) — dokładnie ten sam wzorzec, który wcześniej
+        /// działał tylko dla "Tyre Stack Big":
+        ///   • poza driftem  → natychmiastowa kara
+        ///   • w trakcie driftu → 1 sekunda zwłoki, potem sprawdzenie czy drift/prędkość/kąt nie
+        ///     zostały istotnie naruszone (KISS = lekkie muśnięcie) czy jednak przerwane (HIT)
+        /// Nazwa obiektu (np. "CONE", "POST", "ARMCO BARRIER") wchodzi bezpośrednio w tekst bonusu.
+        /// </summary>
+        private void HandleObjectHit(string objectName)
         {
             var buforspeed = _speedKmh;
             var buforangle = _driftAngle;
             var now = DateTime.UtcNow;
-            if (now - _lastTyreHitTime < ObjectHitCooldown) return;   // debounce — 1 efekt na uderzenie
-            _lastTyreHitTime = now;
+            if (now - _lastObjectHitTime < ObjectHitCooldown) return;   // debounce — 1 efekt na uderzenie
+            _lastObjectHitTime = now;
 
             if (!_drift.IsDrifting)
             {
                 // uderzenie poza driftem — natychmiastowa kara
-                _drift.ApplyPostPoints(-100, "TYRE STACK HIT -100");
+                _drift.ApplyPostPoints(-100, $"{objectName} HIT -100");
                 UpdateScoreLabels();
                 _overlay.UpdateScore(_drift.TotalScore);
                 _overlay.ShowBonus(_drift.LastAwardedText);
-                if (_showHudCheck.Checked) ShowInGameAward(_drift.LastAwardedText);
+                if (_showHudCheck.Checked) _hud.ShowInGameAward(_drift.LastAwardedText);
                 return;
             }
 
-            // uderzenie podczas driftu — czekamy 2s i sprawdzamy, czy drift nadal trwa
+            // uderzenie podczas driftu — czekamy 1s i sprawdzamy, czy drift nadal trwa
+            // w podobnym stanie (ciągłość kąta/prędkości), czy został naruszony
             var delayTimer = new System.Windows.Forms.Timer { Interval = 1000 };
             delayTimer.Tick += (s, e) =>
             {
@@ -2838,25 +3289,27 @@ namespace LFSDriftBuddy
                 if (buforangle < _driftAngle) { anglegap = _driftAngle - buforangle; }
                 delayTimer.Stop();
                 delayTimer.Dispose();
-                if (_speedKmh >= 15 || _speedKmh >= buforspeed / 1.5 || anglegap <= 25) { 
+                if (_speedKmh >= 15 || _speedKmh >= buforspeed / 1.5 || anglegap <= 25)
+                {
                     if (_drift.IsDrifting)
                     {
                         long bonus = (long)Math.Round(250 * _drift.ComboMultiplier);
-                        _drift.ApplyPostPoints(bonus, $"TYRE STACK KISS! +{bonus}");
+                        _drift.ApplyPostPoints(bonus, $"{objectName} KISS! +{bonus}");
                     }
                     else
                     {
-                        _drift.ApplyPostPoints(-250, "TYRE STACK HIT -250");
+                        _drift.ApplyPostPoints(-250, $"{objectName} HIT -250");
                     }
-                } else
+                }
+                else
                 {
-                    _drift.ApplyPostPoints(-250, "TYRE STACK HIT -250");
+                    _drift.ApplyPostPoints(-250, $"{objectName} HIT -250");
                 }
 
                 UpdateScoreLabels();
                 _overlay.UpdateScore(_drift.TotalScore);
                 _overlay.ShowBonus(_drift.LastAwardedText);
-                if (_showHudCheck.Checked) ShowInGameAward(_drift.LastAwardedText);
+                if (_showHudCheck.Checked) _hud.ShowInGameAward(_drift.LastAwardedText);
             };
             delayTimer.Start();
         }
@@ -2871,15 +3324,12 @@ namespace LFSDriftBuddy
                 if (_showHudCheck.Checked && _insim.IsConnected)
                 {
                     // Flash award text in game
-                    if(_showHudCheck.Checked) ShowInGameAward(_lastAward);
-                    _awardTick = 0;
-                    _awardTimer.Start();
-                    
+                    _hud.ShowInGameAward(_lastAward);
+                    _hud.StartAwardFlash();
                 }
                 else
                 {
-
-                    _insim.ShowButton(BTN_SCORE, "", l: xPos, t: 0, w: 1, h: 1, bStyle: 5);
+                    _hud.ClearAllButtons();
                 }
             }));
         }
@@ -2892,12 +3342,54 @@ namespace LFSDriftBuddy
                 _statusLabel.ForeColor = e.IsError ? Color.FromArgb(220, 80, 80) : Color.FromArgb(100, 200, 120);
             }));
         }
-        private IndicatorManager.IndicatorState _previousIndicatorState = IndicatorManager.IndicatorState.Off;
+        // Chroni przed nałożeniem się dźwięku "tyknięcia" z lampki (OnIndicatorLampStateChanged)
+        // na dźwięk "cancel" wywołany chwilę wcześniej przez wyłączenie kierunkowskazu — bo LFS
+        // gasi lampkę niemal natychmiast po anulowaniu, co bez tej blokady odpaliłoby dodatkowo
+        // indicator_click_off.wav tuż obok indicator_cancel.wav.
+        private DateTime _lastIndicatorCancelTime = DateTime.MinValue;
+        private const int IndicatorCancelSuppressMs = 250;
+
+        // ── Diagnostyka OutGauge widoczna w panelu Kierunkowskazów ──────────────
+        // Licznik pakietów rosnący na oczach użytkownika + surowa wartość ShowLights
+        // pozwalają jednoznacznie odróżnić "OutGauge w ogóle nie dociera / źle
+        // skonfigurowany" od "dociera, ale zły bit sygnalizacji" od "wszystko działa,
+        // tylko brakuje plików .wav" — bez zgadywania.
+        private long _outGaugePacketCount = 0;
+        private uint _lastShowLightsRaw = 0;
+        private DateTime _lastIndicatorDiagUpdate = DateTime.MinValue;
+
+        private void UpdateIndicatorDiagnosticsLabel()
+        {
+            if (_indicatorStatusLabel == null) return;
+
+            string stateLine = $"{Localization.T("indicators.currentstatus")} {_indicators.CurrentState}";
+
+            string outGaugeLine = _outGaugePacketCount > 0
+                ? $"OutGauge: aktywne (pakiety: {_outGaugePacketCount:N0})"
+                : "OutGauge: BRAK DANYCH — sprawdź cfg.txt (OutGauge Mode 2, Port 35555)";
+
+            string bitsLine =
+                $"ShowLights=0x{_lastShowLightsRaw:X4}   L={(_indicators.LeftLampOn ? "WŁ" : "wył")}  P={(_indicators.RightLampOn ? "WŁ" : "wył")}  Any={(_indicators.AnySignalLampOn ? "WŁ" : "wył")}";
+
+            _indicatorStatusLabel.Text = stateLine + "\n" + outGaugeLine + "\n" + bitsLine;
+            _indicatorStatusLabel.ForeColor = _outGaugePacketCount > 0
+                ? Color.FromArgb(150, 200, 100)
+                : Color.FromArgb(220, 90, 90);
+        }
+
         private void OnIndicatorStateChanged(IndicatorManager.IndicatorState newState)
         {
 
             this.BeginInvoke((Action)(() =>
             {
+                // Cała logika kierunkowskazów (wysyłka klawisza do LFS, dźwięki, UI) ma sens
+                // tylko gdy program jest faktycznie połączony z grą przez InSim. Bez połączenia
+                // SendKeyToLFS() i tak nic by nie zmieniło w bieżącej sesji, a odpalone dźwięki
+                // czy zmiana etykiety wprowadzałyby w błąd, że kierunkowskaz realnie zadziałał.
+                // Blokada tutaj obejmuje zarówno bindowanie klawiaturowe (obsługiwane wewnątrz
+                // IndicatorManager), jak i kierownicowe (patrz ApplyIndicatorBinding).
+                if (!_insim.IsConnected)
+                    return;
 
                 // Aktualizuj UI
                 _indicatorDisplayLabel.Text = _indicators.GetIndicatorText();
@@ -2924,37 +3416,82 @@ namespace LFSDriftBuddy
 
                 });
 
+                // StateChanged odpala się TYLKO przy faktycznej zmianie CurrentState (patrz
+                // IndicatorManager.SetState), więc newState == Off oznacza, że kierunkowskaz
+                // został właśnie wyłączony — czy to ręcznie (przycisk/klawisz/kierownica),
+                // czy automatycznie przez centrowanie kierownicy (patrz auto-cancel w handlerze
+                // SteeringChanged). Obie te sytuacje mają odtworzyć indicator_cancel.wav.
+                if (newState == IndicatorManager.IndicatorState.Off && _indicatorSoundsCheck.Checked)
+                {
+                    try
+                    {
+                        ApplyIndicatorVolume();
+
+                        _indicatorClickOn.Stop();
+                        _indicatorClickOff.Stop();
+                        _indicatorCancel.Stop();
+                        _indicatorCancel.Play();
+
+                        _lastIndicatorCancelTime = DateTime.UtcNow;
+                    }
+                    catch { }
+                }
+
+                // Zaktualizuj label statusu (stan + diagnostyka OutGauge)
+                UpdateIndicatorDiagnosticsLabel();
+            }));
+        }
+
+        /// <summary>
+        /// Odtwarza "tyknięcia" kierunkowskazu w rytm REALNEGO mrugania kontrolki na desce
+        /// rozdzielczej LFS (OutGauge ShowLights), a nie naszej wewnętrznej intencji przełącznika —
+        /// dzięki temu tykanie zawsze jest zsynchronizowane z tym, co faktycznie widać w grze.
+        ///
+        ///  • kontrolka się zapala → przerwij cokolwiek gra, odtwórz indicator_click_on.wav
+        ///  • kontrolka gaśnie     → przerwij cokolwiek gra, odtwórz indicator_click_off.wav
+        ///
+        /// Samo wyłączenie kierunkowskazu (przycisk / auto-cancel od centrowania kierownicy)
+        /// obsługuje osobno OnIndicatorStateChanged, które odtwarza indicator_cancel.wav —
+        /// tutaj jest krótkie okno wygaszające (IndicatorCancelSuppressMs), żeby lampka gasnąca
+        /// tuż po cancelu nie dograła jeszcze dodatkowo indicator_click_off.wav.
+        /// </summary>
+        private void OnIndicatorLampStateChanged(bool isOn)
+        {
+            this.BeginInvoke((Action)(() =>
+            {
+                if (!_insim.IsConnected) return;
+                if (!_indicatorSoundsCheck.Checked) return;
+
+                if ((DateTime.UtcNow - _lastIndicatorCancelTime).TotalMilliseconds < IndicatorCancelSuppressMs)
+                    return;   // cancel dopiero co obsłużył ten dźwięk — pomijamy tyknięcie
+
                 try
                 {
-                    if (_previousIndicatorState != newState)
-                    {
-                        bool isCancelCase =
-                            ((_previousIndicatorState == IndicatorState.Left ||
-                              _previousIndicatorState == IndicatorState.Right) &&
-                              newState == IndicatorState.Off &&
-                              !indClickONOFF)
-                            ||
-                            (newState == IndicatorState.Off && !indClickONOFF);
+                    ApplyIndicatorVolume();
 
-                        _indicatorClick.Stop();
+                    // niezależnie od kierunku przejścia — najpierw twardo przerwij wszystko,
+                    // co aktualnie gra, żeby nowy dźwięk zawsze startował "na czysto"
+                    _indicatorClickOn.Stop();
+                    _indicatorClickOff.Stop();
 
-                        if (_indicatorSoundsCheck.Checked)
-                        {
-                            ApplyIndicatorVolume();
-
-                            if (isCancelCase)
-                                _indicatorCancel.Play();
-                            else
-                                _indicatorClick.PlayLooping();
-                        }
-
-                        _previousIndicatorState = newState;
-                    }
+                    if (isOn)
+                        _indicatorClickOn.Play();
+                    else
+                        _indicatorClickOff.Play();
                 }
-                catch { }
+                catch (Exception ex)
+                {
+                    // widoczne w statusie zamiast cichego "nic nie słychać" — najczęstsza
+                    // przyczyna to brakujący plik .wav pod oczekiwaną nazwą w folderze Sounds
+                    _statusLabel.Text = "Błąd dźwięku kierunkowskazu: " + ex.Message;
+                }
 
-                // Zaktualizuj label statusu
-                _indicatorStatusLabel.Text = $"Current status:\n{newState}";
+                // Diagnostyka: pokazuje realny stan kontrolek z OutGauge niezależnie od tego,
+                // czy odtworzenie dźwięku się powiodło — jeśli to się NIGDY nie zmienia mimo
+                // migającego kierunkowskazu w grze, oznacza to że zdarzenie z OutGauge w ogóle
+                // nie dociera (zły bit ShowLights / OutGauge nieskonfigurowany w LFS), a nie że
+                // brakuje plików dźwiękowych.
+                UpdateIndicatorDiagnosticsLabel();
             }));
         }
 
@@ -2963,12 +3500,23 @@ namespace LFSDriftBuddy
             BeginInvoke((Action)(() =>
             {
                 _connectionSwitch.SetCheckedSilent(true);
+                _connectionSwitch.Enabled = true;   // odblokuj po udanej próbie (patrz CheckedChanged)
                 _resetBtn.Enabled = true;
                 _revLimiter.Start();
                 _connectionStateLabel.Text = "⬤  Connected with LFS";
                 _connectionStateLabel.ForeColor = Color.FromArgb(60, 220, 100);
+
+                // KLUCZOWE: LFS czyści wszystkie wyświetlane przyciski IS_BTN przy każdym
+                // rozłączeniu InSim (celowym albo przypadkowym, np. restart gry/utrata sieci) —
+                // ale nasz lokalny cache w InGameHudManager o tym nie wie i po cichu pomijałby
+                // wysyłkę przycisków z tekstem identycznym jak przed rozłączeniem, mimo że
+                // fizycznie już nie istnieją w grze. Stąd "po reconnect widać tylko idle score
+                // i nic więcej się nie dzieje" — reset cache musi nastąpić przy KAŻDYM connect,
+                // nie tylko przy jawnym DeleteAllButtons().
+                _hud.InvalidateCache();
+
                 if (_showHudCheck.Checked)
-                    InitInGameHUD();
+                    _hud.InitInGameHUD();
 
 
                 if (_showOverlayCheck.Checked)
@@ -2978,6 +3526,7 @@ namespace LFSDriftBuddy
                     {
                         _overlay.UpdateScore(_drift.TotalScore);
                         _overlay.UpdateAccentColor(OverlayColor1);
+                        _overlay.UpdateMaxRpm(CalibratedMAXRPM);   // ← NOWE: startowa kalibracja obrotomierza
                         _overlay.AttachTo(lfsHwnd);
                     }
                 }
@@ -3002,9 +3551,29 @@ namespace LFSDriftBuddy
                 _speedLabel.Text = "0"; _angleValueLabel.Text = "0°";
                 _speedometer.Speed = 0; _speedometer.Invalidate();
                 _overlay.Detach();
+                _overlay.ResetOutGaugeData();
+                _hud.InvalidateCache();
             }));
 
             _tireTemperatureLimiter.Disconnect();
+        }
+
+        /// <summary>
+        /// Próba połączenia (InSimConnection.Connect) się nie powiodła — w
+        /// odróżnieniu od OnDisconnected (utrata JUŻ nawiązanego połączenia).
+        /// Przełącznik NIE może zostać widocznie "włączony" mimo braku realnego
+        /// połączenia z grą, więc cofamy go tutaj do OFF. Treść błędu trafia do
+        /// _statusLabel już przez OnStatus (StatusChanged) — nie duplikujemy jej tu.
+        /// </summary>
+        private void OnConnectFailed(object sender, string message)
+        {
+            BeginInvoke((Action)(() =>
+            {
+                _connectionSwitch.SetCheckedSilent(false);
+                _connectionSwitch.Enabled = true;
+                _connectionStateLabel.Text = "⬤  Rozłączono";
+                _connectionStateLabel.ForeColor = Color.FromArgb(130, 130, 165);
+            }));
         }
 
         // ─────────────────────────────────────────────────────
@@ -3021,8 +3590,8 @@ namespace LFSDriftBuddy
         private void UpdateScoreLabels()
         {
             _scoreValueLabel.Text = _drift.TotalScore.ToString("N0");
-            _runValueLabel.Text = _drift.IsDrifting
-                ? _drift.CurrentRunPoints.ToString("N0") : "—";
+            // NOTE: oryginalnie było tu też przypisanie na podstawie IsDrifting,
+            // ale było od razu nadpisywane poniższym — usunięte jako martwy kod.
             _runValueLabel.Text = _drift.IsSpeeding
                 ? _drift.CurrentRunPoints.ToString("N0") : "—";
             _comboValueLabel.Text = $"x{_drift.ComboMultiplier}";
@@ -3039,335 +3608,6 @@ namespace LFSDriftBuddy
             _bestDriftValueLabel.Text = $"{_drift.BestDriftDurationMs / 1000.0:F1}s";
             _bestDeepDriftValueLabel.Text = $"{_drift.BestDeepDriftDurationMs / 1000.0:F1}s";
         }
-        // ─────────────────────────────────────────────────────
-        //  In-game HUD via IS_BTN
-        //
-        //  Layout (all in 0-200 coord space, recommended area L 0-110, T 30-170):
-        //
-        //   [BTN_SCORE ]  total score       — top centre, wide
-        //   [BTN_RUN   ]  current run pts   — below score
-        //   [BTN_COMBO ]  combo x N         — right of run
-        //   [BTN_LABEL ]  "GREAT DRIFT" etc — below run, fades
-        //   [BTN_AWARD ]  "EPIC! 5000 pts"  — flashes on drift end
-        // ─────────────────────────────────────────────────────
-        static byte xPos = 108;
-        static byte xPosSec = 80;
-        static byte xPosT = 120;
-        private void InitInGameHUD()
-        {
-            // Static header button — "DRIFT BUDDY" title (always visible)
-            if (_showHudCheck.Checked)
-            {
-                _insim.ShowButton(BTN_SCORE, InSimColor1 + _drift.TotalScore.ToString("N0") + InSimColor1,
-                l: 70, t: 3, w: 60, h: 15, bStyle: 5);
-            }
-            ShowInGameRPMLimitter(_revLimiterNumeric.Value.ToString());
-        }
-
-        private void UpdateInGameHUD()
-        {
-            if (!_insim.IsConnected) return;
-            
-
-            // ── Total score (top, persistent) ────────────────
-            ShowInGameRPMLimitter((_revLimiterNumeric.Value).ToString());
-
-            // ── Current run ───────────────────────────────────
-            if (_drift.IsDrifting || _drift.IsSpeeding)
-            {
-
-                string angleCol = _driftLabelKind switch
-                {
-                    DriftLabelKind.AngleHigh => InSimColor3,
-                    DriftLabelKind.AngleExtreme => InSimColor4,
-                    DriftLabelKind.AngleBackward => InSimColor3,
-                    DriftLabelKind.AngleUltraExtreme => InSimColor5,
-                    DriftLabelKind.AngleHighE => InSimColor3,
-                    DriftLabelKind.AngleExtremeE => InSimColor4,
-                    DriftLabelKind.AngleBackwardE => InSimColor3,
-                    DriftLabelKind.AngleUltraExtremeE => InSimColor5,
-                    DriftLabelKind.Fast2 => InSimColor3,
-                    DriftLabelKind.Fast3 => InSimColor4,
-                    DriftLabelKind.AngleGood => InSimColor2,
-                    DriftLabelKind.AngleGoodE => InSimColor2,
-                    DriftLabelKind.Fast1 => InSimColor2,
-                    _ => InSimColor1,
-                };
-
-                colorCurrentMain = angleCol;
-
-                string scoreText = _drift.IsSpeeding
-                 ? $"{angleCol}{_drift.TotalScore:N0}"
-                : $"{angleCol}{_drift.TotalScore:N0}{angleCol}";
-
-                scoreText = _drift.IsDrifting
-                 ? $"{angleCol}{_drift.TotalScore:N0}"
-                : $"{angleCol}{_drift.TotalScore:N0}{angleCol}";
-
-                if (_showHudCheck.Checked)
-                {
-                    _insim.ShowButton(BTN_SCORE, scoreText,
-                    l: 70, t: 3, w: 60, h: 15, bStyle: 5);
-                }
-                if (_showHudCheck.Checked) ShowInGameAward(_drift.LastAwardedText);
-
-                // ── Drift label ───────────────────────────────
-
-                _insim.ShowButton(BTN_LABEL, angleCol + _driftLabel,
-                            l: 90, t: 15, w: 20, h: 7, bStyle: 5);
-
-
-
-                string spaceIND = _totalScore >= 10000 ? $" " : $"";
-                spaceIND = _totalScore >= 100000 ? $"  " : $" ";
-                spaceIND = _totalScore >= 1000000 ? $"   " : $"  ";
-                string IND = $"{angleCol}{spaceIND}{_indicatorLabelR}";
-
-                _insim.ShowButton(BTN_RIGHTIND, IND,
-                l: 100, t: 3, w: 30, h: 15, bStyle: 5);
-
-                IND = $"{angleCol}{_indicatorLabelL}{spaceIND}";
-
-                _insim.ShowButton(BTN_LEFTIND, IND,
-                l: 70, t: 3, w: 30, h: 15, bStyle: 5);
-
-                // ── Combo ─────────────────────────────────────
-                string comboCol = _drift.ComboMultiplier >= 5 ? InSimColor4
-                                : _drift.ComboMultiplier >= 3 ? InSimColor3
-                                : _drift.ComboMultiplier >= 2 ? InSimColor2 : InSimColor1;
-
-                if (_drift.IsDrifting)
-                {
-                    _insim.ShowButton(BTN_COMBO, $"{angleCol} {_angleValueLabel.Text} {comboCol}x{_drift.ComboMultiplier}",
-                    l: xPosSec, t: 15, w: 10, h: 7, bStyle: 5);
-                }
-                else
-                {
-                    _insim.ShowButton(BTN_COMBO, $"  {comboCol}x{_drift.ComboMultiplier}",
-                        l: xPosSec, t: 15, w: 10, h: 7, bStyle: 5);
-                }
-
-
-                string runCol = _drift.CurrentRunPoints >= 5000 ? InSimColor4
-                                : _drift.CurrentRunPoints >= 1500 ? InSimColor3
-                                : _drift.CurrentRunPoints >= 500 ? InSimColor2 : InSimColor1;
-
-                string runText = $"{runCol}{_drift.CurrentRunPoints:N0}";
-                _insim.ShowButton(BTN_RUN, runText,
-                    l: xPos, t: 15, w: 10, h: 7, bStyle: 5);
-
-            }
-            else
-            {
-                // Clear run/combo/label when not drifting
-                _insim.ShowButton(BTN_RUN, "", l: xPos, t: 0, w: 1, h: 1, bStyle: 2);
-                _insim.ShowButton(BTN_COMBO, "", l: xPosSec, t: 0, w: 1, h: 1, bStyle: 2);
-                _insim.ShowButton(BTN_LABEL, "", l: xPos, t: 0, w: 1, h: 1, bStyle: 2);
-                if (_showHudCheck.Checked) { _insim.ShowButton(BTN_SCORE, "", l: xPos, t: 0, w: 1, h: 1, bStyle: 2); }
-
-            }
-
-            if (!_showHudCheck.Checked)
-            {
-                _insim.ShowButton(BTN_SCORE, "", l: xPos, t: 0, w: 1, h: 1, bStyle: 5);
-                _insim.ShowButton(BTN_AWARD, "", l: xPos, t: 0, w: 1, h: 1, bStyle: 5);
-                _insim.ShowButton(BTN_COMBO, "", l: xPos, t: 0, w: 1, h: 1, bStyle: 5);
-                _insim.ShowButton(BTN_RUN, "", l: xPos, t: 0, w: 1, h: 1, bStyle: 5);
-                _insim.ShowButton(BTN_LABEL, "", l: xPos, t: 0, w: 1, h: 1, bStyle: 2);
-                _insim.ShowButton(BTN_RIGHTIND, "", l: xPos, t: 0, w: 1, h: 1, bStyle: 2);
-                _insim.ShowButton(BTN_LEFTIND, "", l: xPos, t: 0, w: 1, h: 1, bStyle: 2);
-            }
-
-
-        }
-
-        private void BuildTitleBar()
-        {
-            _titleBar = new Panel
-            {
-                Location = new Point(1, 1),
-                Size = new Size(ClientSize.Width-2, TitleBarHeight),
-                BackColor = ApplePalette.Card,
-                Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right
-            };
-
-            _titleBar.Paint += (s, e) =>
-            {
-                using (var pen = new Pen(ApplePalette.Border))
-                    e.Graphics.DrawLine(pen, 0, _titleBar.Height + 1, _titleBar.Width, _titleBar.Height + 1);
-            };
-
-            _titleBarLabel = new Label
-            {
-                Text = "LFS Drift Tools",
-                Location = new Point(14, 0),
-                Size = new Size(300, TitleBarHeight),
-                TextAlign = ContentAlignment.MiddleLeft,
-                ForeColor = ApplePalette.Title,
-                Font = new Font("Segoe UI Semibold", 9.5f),
-                BackColor = Color.Transparent
-            };
-
-            _btnMinimize = new CaptionButton(CaptionButton.Kind.Minimize);
-            _btnClose = new CaptionButton(CaptionButton.Kind.Close);
-
-            _btnMinimize.Click += (s, e) => WindowState = FormWindowState.Minimized;
-            _btnClose.Click += (s, e) => Close();
-
-            void LayoutButtons()
-            {
-                int btnHeight = _titleBar.Height;
-
-                _btnClose.Size = new Size(_btnClose.Width, btnHeight);
-                _btnClose.Location = new Point(_titleBar.Width - _btnClose.Width, 0);
-
-                _btnMinimize.Size = new Size(_btnMinimize.Width, btnHeight);
-                _btnMinimize.Location = new Point(_btnClose.Left - _btnMinimize.Width, 0);
-            }
-
-            _titleBar.Resize += (s, e) => LayoutButtons();
-
-            _titleBar.Controls.Add(_titleBarLabel);
-            _titleBar.Controls.Add(_btnMinimize);
-            _titleBar.Controls.Add(_btnClose);
-            
-            LayoutButtons();
-            //_titleBar.Region = CreateSmoothRoundedRegion(_titleBar.Width + 16, _titleBar.Height, 20);
-            _titleBar.MouseDown += TitleBar_MouseDown;
-            _titleBarLabel.MouseDown += TitleBar_MouseDown;
-
-            Controls.Add(_titleBar);
-            _titleBar.BringToFront();
-        }
-
-        private void TitleBar_MouseDown(object sender, MouseEventArgs e)
-        {
-            if (e.Button == MouseButtons.Left)
-            {
-                ReleaseCapture();
-                SendMessage(Handle, WM_NCLBUTTONDOWN, HT_CAPTION, 0);
-            }
-        }
-
-        [DllImport("user32.dll")]
-        private static extern bool ReleaseCapture();
-
-        [DllImport("user32.dll")]
-        private static extern int SendMessage(IntPtr hWnd, int msg, int wParam, int lParam);
-
-        private const int WM_NCLBUTTONDOWN = 0xA1;
-        private const int HT_CAPTION = 0x2;
-
-        private Color InSimCodeToColor(string code)
-        {
-            return code switch
-            {
-                "^0" => Color.Black,
-                "^1" => Color.Red,
-                "^2" => Color.LimeGreen,
-                "^3" => Color.Yellow,
-                "^4" => Color.Blue,
-                "^5" => Color.Magenta,
-                "^6" => Color.Cyan,
-                "^7" => Color.White,
-                "^8" => Color.Gray,
-                "^9" => Color.LightBlue,
-                _ => Color.White
-            };
-        }
-        private void ShowInGameAward(string text)
-        {
-
-            if (!_showHudCheck.Checked)
-            {
-                _insim.ShowButton(BTN_SCORE, "", l: xPos, t: 0, w: 1, h: 1, bStyle: 5);
-                _insim.ShowButton(BTN_AWARD, "", l: xPos, t: 0, w: 1, h: 1, bStyle: 5);
-                _insim.ShowButton(BTN_COMBO, "", l: xPos, t: 0, w: 1, h: 1, bStyle: 5);
-                _insim.ShowButton(BTN_RUN, "", l: xPos, t: 0, w: 1, h: 1, bStyle: 5);
-                return;
-            }
-            
-                if (_drift.LastAwardedText != "") 
-            {
-                _insim.ShowButton(BTN_AWARD, colorCurrentMain + _drift.LastAwardedText,
-                l: 60, t: 22, w: 80, h: 6, bStyle: 5);
-
-            } else 
-            {
-                _insim.ShowButton(BTN_AWARD, "^5" + text,
-                l: 60, t: 22, w: 80, h: 6, bStyle: 5);
-
-            }
-            //UpdateInGameHUD();
-
-        }
-
-
-        private void ShowInGameRPMLimitter(string text)
-        {
-
-            if (_showRPMHudCheck.Checked && _revLimiter.Enabled)
-            {
-
-                if (!_insim.IsConnected) return;
-                _insim.ShowButton(BTN_RPMLIMIT, "^6" + "RPM LIMIT: " + text,
-                    l: 0, t: 196, w: 25, h: 5, bStyle: 65);
-                
-            }
-            else
-            {
-                if (!_insim.IsConnected) return;
-                _insim.ShowButton(BTN_RPMLIMITSTATUS, "",
-                    l: 0, t: 180, w: 35, h: 4, bStyle: 65);
-                if (!_insim.IsConnected) return;
-                _insim.ShowButton(BTN_RPMLIMIT, "",
-                    l: 0, t: 185, w: 35, h: 4, bStyle: 65);
-                _insim.ShowButton(BTN_RPMLIMITINFO, "",
-                   l: 0, t: 190, w: 35, h: 3, bStyle: 65);
-                //_insim.DeleteAllButtons();
-            }
-        }
-
-        private void AwardTimer_Tick(object? sender, EventArgs e)
-        {
-            _awardTick++;
-            if (_awardTick >= 30)
-            {
-                _awardTimer.Stop();
-                if (_insim.IsConnected)
-                    _insim.ShowButton(BTN_AWARD, "", l: xPosT, t: 0, w: 1, h: 1, bStyle: 2);
-                _insim.ShowButton(BTN_RUN, "", l: xPos, t: 0, w: 1, h: 1, bStyle: 2);
-                _insim.ShowButton(BTN_COMBO, "", l: xPosSec, t: 0, w: 1, h: 1, bStyle: 2);
-                _insim.ShowButton(BTN_LABEL, "", l: xPos, t: 0, w: 1, h: 1, bStyle: 2);
-
-                string scoreText = _drift.IsSpeeding
-                 ? $"{InSimColor2}{_drift.TotalScore:N0}"
-                : $"{InSimColor1}{_drift.TotalScore:N0}{InSimColor1}";
-
-                scoreText = _drift.IsDrifting
-                 ? $"{InSimColor2}{_drift.TotalScore:N0}"
-                : $"{InSimColor1}{_drift.TotalScore:N0}{InSimColor1}";
-                _insim.ShowButton(BTN_SCORE, scoreText,
-                    l: 70, t: 3, w: 60, h: 15, bStyle: 5);
-
-                string IND = _drift.IsDrifting
-                    ? $"{InSimColor2}{_indicatorLabelR}"
-                    : $"";
-
-
-                _insim.ShowButton(BTN_RIGHTIND, IND,
-                l: 100, t: 3, w: 30, h: 15, bStyle: 5);
-
-                IND = _drift.IsDrifting
-                    ? $"{InSimColor2}{_indicatorLabelL}"
-                    : $"";
-
-                _insim.ShowButton(BTN_LEFTIND, IND,
-                l: 70, t: 3, w: 30, h: 15, bStyle: 5);
-
-            }
-        }
-
         // ─────────────────────────────────────────────────────
         //  Helper builders
         // ─────────────────────────────────────────────────────
@@ -3813,6 +4053,18 @@ namespace LFSDriftBuddy
                 case 4: InSimColor4 = code; OverlayColor4 = c; break;
                 case 5: InSimColor5 = code; OverlayColor5 = c; break;
             }
+            SyncHudColors();
+        }
+
+        // Przekazuje aktualną paletę InSim do menedżera HUD-u w grze (IS_BTN)
+        private void SyncHudColors()
+        {
+            if (_hud == null) return;
+            _hud.InSimColor1 = InSimColor1;
+            _hud.InSimColor2 = InSimColor2;
+            _hud.InSimColor3 = InSimColor3;
+            _hud.InSimColor4 = InSimColor4;
+            _hud.InSimColor5 = InSimColor5;
         }
 
         // Podgląd na przyciskach: gdy tryb custom (overlay ON, IS_BTN HUD OFF) — pokaż OverlayColorX,
@@ -3831,9 +4083,9 @@ namespace LFSDriftBuddy
             SetButtonColor(_colorBtn5, useOverlayColors ? OverlayColor5 : InSimCodeToColor(InSimColor5));
         }
 
-        private void OpenCustomColorPicker(Button targetBtn, int slot)
+        private void OpenCustomColorPicker(Button targetBtn, Color initialColor, string title, Action<Color> onApply, bool includeAlpha = false)
         {
-            Color initial = GetOverlayColorSlot(slot);
+            Color initial = initialColor;
 
             Form overlayBg = new Form
             {
@@ -3846,12 +4098,14 @@ namespace LFSDriftBuddy
                 Owner = this
             };
 
+            int popupHeight = includeAlpha ? 320 : 275;
+
             Form popup = new Form
             {
                 FormBorderStyle = FormBorderStyle.None,
                 StartPosition = FormStartPosition.CenterParent,
                 ShowInTaskbar = false,
-                Size = new Size(300, 275),
+                Size = new Size(300, popupHeight),
                 BackColor = ApplePalette.Background
             };
 
@@ -3878,32 +4132,45 @@ namespace LFSDriftBuddy
             closeButton.Click += (s, e) => popup.Close();
             closeButton.Region = CreateSmoothRoundedRegion(closeButton.Width, closeButton.Height, 14);
 
-            MakeLabel(card, "Custom overlay color", 20, 15, 240, 24,
+            MakeLabel(card, title, 20, 15, 240, 24,
                 ApplePalette.Title, new Font("Segoe UI Semibold", 11f));
 
-            // ── podgląd koloru (styl jak przyciski palety) ──
+            // ── podgląd koloru (styl jak przyciski palety) — szachownica pod spodem,
+            //    żeby przezroczystość była faktycznie widoczna, nie tylko "domyślne tło" ──
             var preview = new Panel
             {
                 Location = new Point(20, 55),
                 Size = new Size(56, 56),
-                BackColor = initial
+                BackColor = Color.Transparent
             };
             preview.Paint += (s, e) =>
             {
                 e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
                 using var path = RoundedPath(new Rectangle(0, 0, preview.Width - 1, preview.Height - 1), 12);
-                using var brush = new SolidBrush(preview.BackColor);
+
+                using (var checkerBrush = new SolidBrush(Color.FromArgb(230, 230, 230)))
+                    e.Graphics.FillPath(checkerBrush, path);
+                using (var checkerBrush2 = new SolidBrush(Color.FromArgb(200, 200, 200)))
+                {
+                    for (int cy2 = 0; cy2 < preview.Height; cy2 += 8)
+                        for (int cx2 = 0; cx2 < preview.Width; cx2 += 8)
+                            if (((cx2 / 8) + (cy2 / 8)) % 2 == 0)
+                                e.Graphics.FillRectangle(checkerBrush2, cx2, cy2, 8, 8);
+                }
+
+                using var brush = new SolidBrush((Color)preview.Tag);
                 e.Graphics.FillPath(brush, path);
                 using var border = new Pen(ApplePalette.Border);
                 e.Graphics.DrawPath(border, path);
             };
+            preview.Tag = initial;
             preview.Region = CreateSmoothRoundedRegion(preview.Width, preview.Height, 12);
             card.Controls.Add(preview);
 
             int sliderX = 92, sliderW = 175, rowY = 58, rowGap = 34;
 
-            MacSlider sliderR = null, sliderG = null, sliderB = null;
-            Label valR = null, valG = null, valB = null;
+            MacSlider sliderR = null, sliderG = null, sliderB = null, sliderA = null;
+            Label valR = null, valG = null, valB = null, valA = null;
 
             MakeLabel(card, "R", sliderX, rowY, 16, 20, ApplePalette.Text);
             sliderR = new MacSlider { Location = new Point(sliderX + 18, rowY + 2), Size = new Size(sliderW - 30, 20), Minimum = 0, Maximum = 255, FillColor = Color.FromArgb(255, 70, 70) };
@@ -3923,25 +4190,34 @@ namespace LFSDriftBuddy
             valB = MakeLabel(card, initial.B.ToString(), sliderX + sliderW - 5, rowY + rowGap * 2, 30, 20, ApplePalette.Text);
             card.Controls.Add(sliderB);
 
+            if (includeAlpha)
+            {
+                MakeLabel(card, "A", sliderX, rowY + rowGap * 3, 16, 20, ApplePalette.Text);
+                sliderA = new MacSlider { Location = new Point(sliderX + 18, rowY + rowGap * 3 + 2), Size = new Size(sliderW - 30, 20), Minimum = 0, Maximum = 255, FillColor = Color.FromArgb(190, 190, 195) };
+                sliderA.SetValueSilent(initial.A);
+                valA = MakeLabel(card, initial.A.ToString(), sliderX + sliderW - 5, rowY + rowGap * 3, 30, 20, ApplePalette.Text);
+                card.Controls.Add(sliderA);
+            }
+
             void ApplyLive()
             {
-                Color c = Color.FromArgb(sliderR.Value, sliderG.Value, sliderB.Value);
-                preview.BackColor = c;
+                int a = includeAlpha ? sliderA.Value : 255;
+                Color c = Color.FromArgb(a, sliderR.Value, sliderG.Value, sliderB.Value);
+                preview.Tag = c;
                 preview.Invalidate();
                 valR.Text = sliderR.Value.ToString();
                 valG.Text = sliderG.Value.ToString();
                 valB.Text = sliderB.Value.ToString();
+                if (includeAlpha) valA.Text = sliderA.Value.ToString();
 
-                SetOverlayColorSlot(slot, c);
                 SetButtonColor(targetBtn, c);
-
-                if (!_isDrifting && !_isSpeeding)
-                    _overlay.UpdateAccentColor(OverlayColor1);
+                onApply(c);
             }
 
             sliderR.ValueChanged += (s, e) => ApplyLive();
             sliderG.ValueChanged += (s, e) => ApplyLive();
             sliderB.ValueChanged += (s, e) => ApplyLive();
+            if (includeAlpha) sliderA.ValueChanged += (s, e) => ApplyLive();
 
             // ── NOWE: rząd 5 przycisków z domyślnymi kolorami ──
             var defaultColors = new[]
@@ -3956,7 +4232,7 @@ namespace LFSDriftBuddy
             int presetSize = 34, presetGap = 8;
             int presetRowWidth = defaultColors.Length * presetSize + (defaultColors.Length - 1) * presetGap;
             int presetStartX = 20 + (260 - presetRowWidth) / 2;
-            int presetY = 168;
+            int presetY = includeAlpha ? 202 : 168;
 
             int px = presetStartX;
             foreach (var dc in defaultColors)
@@ -3976,9 +4252,11 @@ namespace LFSDriftBuddy
                 var chosen = dc; // capture
                 swatch.Click += (s, e) =>
                 {
-                    sliderR.Value = chosen.R;
-                    sliderG.Value = chosen.G;
-                    sliderB.Value = chosen.B;
+                    // presety zmieniają tylko RGB — jeśli jest suwak przezroczystości,
+                    // celowo NIE dotykamy go, żeby nie zgubić ustawionej transparencji
+                    sliderR.SetValueSilent(chosen.R);
+                    sliderG.SetValueSilent(chosen.G);
+                    sliderB.SetValueSilent(chosen.B);
                     ApplyLive();
                 };
 
@@ -3989,7 +4267,7 @@ namespace LFSDriftBuddy
                 px += presetSize + presetGap;
             }
 
-            var applyBtn = MakeButton(card, "OK", 20, 218, 260, 36, ApplePalette.Blue);
+            var applyBtn = MakeButton(card, "OK", 20, includeAlpha ? 252 : 218, 260, 36, ApplePalette.Blue);
             applyBtn.Click += (s, e) => { SaveSettings(); popup.Close(); };
 
             popup.Paint += (s, e) =>
@@ -4023,7 +4301,12 @@ namespace LFSDriftBuddy
             // wspiera wyłącznie 10 stałych kolorów, więc custom RGB jest blokowany)
             if (overlayOn && !insimHudOn)
             {
-                OpenCustomColorPicker(btn, slot);
+                OpenCustomColorPicker(btn, GetOverlayColorSlot(slot), "Custom overlay color", c =>
+                {
+                    SetOverlayColorSlot(slot, c);
+                    if (!_isDrifting && !_isSpeeding)
+                        _overlay.UpdateAccentColor(OverlayColor1);
+                });
             }
             else
             {
@@ -4037,6 +4320,101 @@ namespace LFSDriftBuddy
         }
 
 
+
+        private void BuildTitleBar()
+        {
+            _titleBar = new Panel
+            {
+                Location = new Point(1, 1),
+                Size = new Size(ClientSize.Width - 2, TitleBarHeight),
+                BackColor = ApplePalette.Card,
+                Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right
+            };
+
+            _titleBar.Paint += (s, e) =>
+            {
+                using (var pen = new Pen(ApplePalette.Border))
+                    e.Graphics.DrawLine(pen, 0, _titleBar.Height + 1, _titleBar.Width, _titleBar.Height + 1);
+            };
+
+            _titleBarLabel = new Label
+            {
+                Text = "LFS Drift Tools",
+                Location = new Point(14, 0),
+                Size = new Size(300, TitleBarHeight),
+                TextAlign = ContentAlignment.MiddleLeft,
+                ForeColor = ApplePalette.Title,
+                Font = new Font("Segoe UI Semibold", 9.5f),
+                BackColor = Color.Transparent
+            };
+
+            _btnMinimize = new CaptionButton(CaptionButton.Kind.Minimize);
+            _btnClose = new CaptionButton(CaptionButton.Kind.Close);
+
+            _btnMinimize.Click += (s, e) => WindowState = FormWindowState.Minimized;
+            _btnClose.Click += (s, e) => Close();
+
+            void LayoutButtons()
+            {
+                int btnHeight = _titleBar.Height;
+
+                _btnClose.Size = new Size(_btnClose.Width, btnHeight);
+                _btnClose.Location = new Point(_titleBar.Width - _btnClose.Width, 0);
+
+                _btnMinimize.Size = new Size(_btnMinimize.Width, btnHeight);
+                _btnMinimize.Location = new Point(_btnClose.Left - _btnMinimize.Width, 0);
+            }
+
+            _titleBar.Resize += (s, e) => LayoutButtons();
+
+            _titleBar.Controls.Add(_titleBarLabel);
+            _titleBar.Controls.Add(_btnMinimize);
+            _titleBar.Controls.Add(_btnClose);
+
+            LayoutButtons();
+            //_titleBar.Region = CreateSmoothRoundedRegion(_titleBar.Width + 16, _titleBar.Height, 20);
+            _titleBar.MouseDown += TitleBar_MouseDown;
+            _titleBarLabel.MouseDown += TitleBar_MouseDown;
+
+            Controls.Add(_titleBar);
+            _titleBar.BringToFront();
+        }
+
+        private void TitleBar_MouseDown(object sender, MouseEventArgs e)
+        {
+            if (e.Button == MouseButtons.Left)
+            {
+                ReleaseCapture();
+                SendMessage(Handle, WM_NCLBUTTONDOWN, HT_CAPTION, 0);
+            }
+        }
+
+        [DllImport("user32.dll")]
+        private static extern bool ReleaseCapture();
+
+        [DllImport("user32.dll")]
+        private static extern int SendMessage(IntPtr hWnd, int msg, int wParam, int lParam);
+
+        private const int WM_NCLBUTTONDOWN = 0xA1;
+        private const int HT_CAPTION = 0x2;
+
+        private Color InSimCodeToColor(string code)
+        {
+            return code switch
+            {
+                "^0" => Color.Black,
+                "^1" => Color.Red,
+                "^2" => Color.LimeGreen,
+                "^3" => Color.Yellow,
+                "^4" => Color.Blue,
+                "^5" => Color.Magenta,
+                "^6" => Color.Cyan,
+                "^7" => Color.White,
+                "^8" => Color.Gray,
+                "^9" => Color.LightBlue,
+                _ => Color.White
+            };
+        }
 
         private void SetButtonColor(Button btn, Color color)
         {
@@ -4105,6 +4483,7 @@ namespace LFSDriftBuddy
             _revLimiter.Dispose();
             _globalHotkey.Dispose();
             _overlay?.Dispose();
+            _hud?.Dispose();
             _shadow?.Close();
             base.OnFormClosing(e);
         }
@@ -4153,7 +4532,7 @@ namespace LFSDriftBuddy
                 true);
 
             Cursor = Cursors.Hand;
-            Size = new Size(51, 30); 
+            Size = new Size(51, 30);
 
             _animTimer = new System.Windows.Forms.Timer { Interval = 15 };
             _animTimer.Tick += AnimTimer_Tick;
@@ -4164,7 +4543,7 @@ namespace LFSDriftBuddy
             if (_checked == value) return;
             _checked = value;
             AnimateTo(value ? 1f : 0f);
-          
+
         }
 
         private void AnimateTo(float target)
@@ -4223,7 +4602,7 @@ namespace LFSDriftBuddy
             using (var parentBrush = new SolidBrush(Parent?.BackColor ?? BackColor))
                 g.FillRectangle(parentBrush, ClientRectangle);
 
-            Rectangle trackRect = new Rectangle(0, 0, Width-1, Height-1);
+            Rectangle trackRect = new Rectangle(0, 0, Width - 1, Height - 1);
             int radius = (Height - 1) / 2;
 
             Color trackColor = Blend(OffColor, OnColor, _knobProgress);
@@ -4596,7 +4975,7 @@ namespace LFSDriftBuddy
                 ControlStyles.SupportsTransparentBackColor,
                 true);
 
-            Height = 8; 
+            Height = 8;
         }
 
         protected override void OnPaint(PaintEventArgs e)
@@ -5001,11 +5380,24 @@ namespace LFSDriftBuddy
         }
     }
 
+    /// <summary>Ustawienia rev limitera dla jednego konkretnego pojazdu.</summary>
+    public class VehicleRevSettings
+    {
+        public int MaxRpm { get; set; }
+        public int CutMs { get; set; }
+    }
+
     public class AppSettings
     {
         public int CalibratedMAXRPM { get; set; } = 7600;
 
         public int SavedMSCUT { get; set; } = 40;
+
+        // Ustawienia rev limitera zapamiętane osobno dla każdego auta (klucz = krótki kod
+        // auta z OutGauge, np. "XFG", "FXO") — patrz MainForm.LoadVehicleRevSettings/
+        // SaveVehicleRevSettings. CalibratedMAXRPM/SavedMSCUT powyżej pozostają jako
+        // ostatnio używane wartości "globalne" (np. zanim OutGauge w ogóle przyśle nazwę auta).
+        public Dictionary<string, VehicleRevSettings> VehicleRevLimiterSettings { get; set; } = new();
 
         public string Language { get; set; } = "English";
 
@@ -5040,6 +5432,18 @@ namespace LFSDriftBuddy
         public bool IndicatorSoundsEnabled { get; set; } = true;
         public int IndicatorSoundsVolume { get; set; } = 100;
         public bool IndicatorAutoCancelOnCenter { get; set; } = true;
+
+        // ── Speedometer + Tachometer HUD (overlay, styl Forza) ──────────────────
+        public bool SpeedoTachoEnabled { get; set; } = true;
+        public float SpeedoTachoOffsetX { get; set; } = 0f;
+        public float SpeedoTachoOffsetY { get; set; } = 0f;
+        public float SpeedoTachoScale { get; set; } = 1.0f;
+        public int SpeedoTachoRedlineColor { get; set; } = Color.Red.ToArgb();
+        public int SpeedoTachoTextColor { get; set; } = Color.White.ToArgb();
+        public int SpeedoTachoIndicatorColor { get; set; } = Color.FromArgb(255, 225, 225, 230).ToArgb();
+        public int SpeedoTachoTickColor { get; set; } = Color.FromArgb(255, 215, 215, 218).ToArgb();
+        public int SpeedoTachoBackgroundColor { get; set; } = Color.FromArgb(50, 15, 15, 20).ToArgb();
+        public bool SpeedoTachoUseMph { get; set; } = false;
 
 
 

@@ -9,9 +9,9 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>disable</ImplicitUsings>
     <ApplicationIcon>app.ico</ApplicationIcon>
-	<Version>0.286.0809</Version>
-	<AssemblyVersion>0.286.0809.0</AssemblyVersion>
-	<FileVersion>0.286.0809.0</FileVersion>
+	<Version>0.288.0820</Version>
+	<AssemblyVersion>0.288.0820.0</AssemblyVersion>
+	<FileVersion>0.288.0820.0</FileVersion>
   </PropertyGroup>
 
   <ItemGroup>
@@ -48,6 +48,12 @@
       <CopyToOutputDirectory>Always</CopyToOutputDirectory>
     </None>
     <None Update="Sounds\indicator_click.wav">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </None>
+    <None Update="Sounds\indicator_click_off.wav">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </None>
+    <None Update="Sounds\indicator_click_on.wav">
       <CopyToOutputDirectory>Always</CopyToOutputDirectory>
     </None>
   </ItemGroup>

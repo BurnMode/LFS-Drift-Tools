@@ -28,12 +28,30 @@ namespace LFSDriftBuddy
         public float EngTemp { get; set; }
         public float Fuel { get; set; }
 
+        // Krótka nazwa auta (np. "XFG", "FXO", "XRT") — to samo pole co IS_NPL.CName,
+        // ale dostępne od razu z każdego pakietu OutGauge, bez dodatkowego kablowania InSim.
+        // Używane do wykrywania zmiany pojazdu (patrz MainForm — ustawienia rev limitera per auto).
+        public string Car { get; set; } = "";
+
         public uint DashLights { get; set; }   // jakie kontrolki auto W OGÓLE ma (stałe)
         public uint ShowLights { get; set; }   // ← NOWE: które kontrolki są TERAZ zapalone
         public bool Valid { get; set; }
 
+        // Bity ShowLights wg specyfikacji OutGauge (DL_*):
+        // DL_SHIFT=1, DL_FULLBEAM=2, DL_HANDBRAKE=4, DL_PITSPEED=8, DL_TC=16,
+        // DL_SIGNAL_L=32, DL_SIGNAL_R=64, DL_SIGNAL_ANY=128, DL_OILWARN=256,
+        // DL_BATTERY=512, DL_ABS=1024
+
         // DL_HANDBRAKE = bit 2 (wartość 4) — sprawdzamy ShowLights, nie DashLights!
         public bool HandbrakeOn => (ShowLights & 0x0004) != 0;
+
+        // DL_SIGNAL_L / DL_SIGNAL_R — realny stan lewego/prawego kierunkowskazu na desce
+        // rozdzielczej LFS (a nie nasza wewnętrzna intencja z IndicatorManager.CurrentState).
+        public bool LeftSignalOn => (ShowLights & 0x0020) != 0;
+        public bool RightSignalOn => (ShowLights & 0x0040) != 0;
+
+        // DL_SIGNAL_ANY — LFS zapala ten bit gdy którykolwiek kierunkowskaz (lub awaryjne) miga.
+        public bool AnySignalOn => (ShowLights & 0x0080) != 0;
     }
 
     public class RevLimiter : IDisposable
@@ -54,6 +72,7 @@ namespace LFSDriftBuddy
         public int CutMs { get; set; } = 40;     // czas wyłączenia zapłonu [ms]
         public int CooldownMs { get; set; } = 30;     // minimalny czas między cięciami
         public bool Enabled { get; set; } = true;
+
         public int UdpPort { get; set; } = 35555;
 
         // margines bezpieczeństwa dla watchdoga — jeśli minęło więcej niż CutMs + to,
@@ -166,7 +185,7 @@ namespace LFSDriftBuddy
 
             Error?.Invoke($"Rev limiter: wymuszam przywrócenie zapłonu ({reason}) — silnik utknął zgaszony.");
 
-           
+
             for (int attempt = 0; attempt < 3; attempt++)
             {
                 if (TryPressIgnitionKey())
@@ -268,7 +287,7 @@ namespace LFSDriftBuddy
             }
             finally
             {
-               
+
                 bool needsRestore;
                 lock (_lock)
                 {
@@ -357,10 +376,49 @@ namespace LFSDriftBuddy
                 Gear = d[10],
                 EngTemp = d.Length >= 28 ? BitConverter.ToSingle(d, 24) : 0f,
                 Fuel = d.Length >= 32 ? BitConverter.ToSingle(d, 28) : 0f,
+                Car = d.Length >= 8 ? ParseCarName(d, 4) : "",   // ← NOWE
                 DashLights = d.Length >= 44 ? BitConverter.ToUInt32(d, 40) : 0u,
                 ShowLights = d.Length >= 48 ? BitConverter.ToUInt32(d, 44) : 0u, // ← NOWE
                 Valid = true,
             };
+        }
+
+        // Car[4] w OutGaugePack ma DWIE różne interpretacje w zależności od typu auta:
+        //
+        //  • auta OFICJALNE — krótki tekstowy kod, litery A-Z / cyfry, zakończony zerem
+        //    w polu 4-bajtowym (np. "XFG\0", "FZ5\0") albo wypełniający je całkowicie bez
+        //    terminatora (np. "MRT5").
+        //  • auta ZMODOWANE — LFS NIE wpisuje tu tekstu, tylko surowe bajty identyfikatora
+        //    moda/skina (ten sam numer, który gra pokazuje jako hex w przeglądarce modów,
+        //    np. "8C3894"). Poprzednia wersja tej metody filtrowała bajty do zakresu
+        //    drukowalnych znaków ASCII, co dla takich danych PRZYPADKOWO "trafiało" pojedynczy
+        //    bajt mieszczący się w tym zakresie (np. bajt 0x38 z "8C3894" to akurat ASCII '8'),
+        //    gubiąc resztę i zapisując bezsensowny jednoznakowy klucz w JSON-ie.
+        //
+        // Rozwiązanie: sprawdzamy, czy WSZYSTKIE bajty przed terminatorem są literami/cyframi
+        // (czyli wyglądają jak prawdziwy kod auta) — jeśli tak, dekodujemy jako tekst jak
+        // dotychczas. Jeśli nie, to na 100% mod — kodujemy WSZYSTKIE 4 surowe bajty jako hex
+        // (bez ucinania na zerze, bo 0x00 może być pełnoprawną częścią identyfikatora binarnego,
+        // nie terminatorem). Daje to stabilny, unikalny i czytelny klucz zgodny z tym, jak sam
+        // LFS identyfikuje mody.
+        private static string ParseCarName(byte[] d, int offset)
+        {
+            if (d[offset] == 0) return "";   // pole jeszcze puste — brak danych o aucie
+
+            int len = 0;
+            while (len < 4 && d[offset + len] != 0) len++;
+
+            bool looksLikeOfficialCode = len > 0;
+            for (int i = 0; i < len && looksLikeOfficialCode; i++)
+            {
+                byte b = d[offset + i];
+                looksLikeOfficialCode = (b >= (byte)'A' && b <= (byte)'Z') || (b >= (byte)'0' && b <= (byte)'9');
+            }
+
+            if (looksLikeOfficialCode)
+                return System.Text.Encoding.ASCII.GetString(d, offset, len);
+
+            return BitConverter.ToString(d, offset, 4).Replace("-", "");
         }
 
         public void Dispose()
