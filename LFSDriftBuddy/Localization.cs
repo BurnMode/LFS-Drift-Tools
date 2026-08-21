@@ -308,6 +308,14 @@ namespace LFSDriftBuddy
                     [AppLanguage.German] = "Ingame-HUD anzeigen (IS_BTN)",
                     [AppLanguage.Spanish] = "Mostrar HUD en el juego (IS_BTN)",
                 },
+                ["hud.show-disabled"] = new()
+                {
+                    [AppLanguage.English] = "Currently unavailable",
+                    [AppLanguage.Polish] = "Obecnie niedostępne",
+                    [AppLanguage.Turkish] = "Şu anda kullanılamıyor",
+                    [AppLanguage.German] = "Derzeit nicht verfügbar",
+                    [AppLanguage.Spanish] = "Actualmente no disponible",
+                },
                 ["hud.REVLimitter"] = new()
                 {
                     [AppLanguage.English] = "Show ingame REV Limitter HUD",
@@ -909,6 +917,57 @@ namespace LFSDriftBuddy
                     [AppLanguage.Turkish] = "SON TUR PUANI",
                     [AppLanguage.German] = "LETZTE RUNDE",
                     [AppLanguage.Spanish] = "ÚLTIMA VUELTA",
+                },
+                ["rev.calibration_prompt.title"] = new()
+                {
+                    [AppLanguage.English] = "Rev Limiter Calibration",
+                    [AppLanguage.Polish] = "Kalibracja ogranicznika obrotów",
+                    [AppLanguage.Turkish] = "Devir Sınırlayıcı Kalibrasyonu",
+                    [AppLanguage.German] = "Drehzahlbegrenzer-Kalibrierung",
+                    [AppLanguage.Spanish] = "Calibración del limitador de RPM",
+                },
+                ["rev.calibration_prompt.body"] = new()
+                {
+                    [AppLanguage.English] =
+                        "No rev limiter preset is saved yet for {0}. To calibrate the maximum RPM, " +
+                        "click the button below or press your bound calibrate button/key.",
+                    [AppLanguage.Polish] =
+                        "Dla {0} nie zapisano jeszcze ustawień rev limitera. Aby dokonać kalibracji " +
+                        "maksymalnych obrotów, kliknij przycisk poniżej lub użyj przypisanego przycisku/klawisza.",
+                    [AppLanguage.Turkish] =
+                        "{0} için henüz kaydedilmiş bir devir sınırlayıcı ayarı yok. Maksimum RPM'i kalibre " +
+                        "etmek için aşağıdaki düğmeye tıklayın ya da atanmış düğmenizi/tuşunuzu kullanın.",
+                    [AppLanguage.German] =
+                        "Für {0} ist noch kein Drehzahlbegrenzer-Preset gespeichert. Um die maximale " +
+                        "Drehzahl zu kalibrieren, klicke auf die Schaltfläche unten oder benutze deine " +
+                        "zugewiesene Taste/deinen Knopf.",
+                    [AppLanguage.Spanish] =
+                        "Aún no hay un ajuste de limitador de RPM guardado para {0}. Para calibrar las RPM " +
+                        "máximas, haz clic en el botón de abajo o usa tu botón/tecla asignada.",
+                },
+                ["rev.calibration_prompt.enter_hint"] = new()
+                {
+                    [AppLanguage.English] = " Or just press Enter.",
+                    [AppLanguage.Polish] = " Albo po prostu wciśnij Enter.",
+                    [AppLanguage.Turkish] = " Ya da sadece Enter tuşuna basın.",
+                    [AppLanguage.German] = " Oder drücke einfach Enter.",
+                    [AppLanguage.Spanish] = " O simplemente presiona Enter.",
+                },
+                ["rev.calibration_prompt.inprogress"] = new()
+                {
+                    [AppLanguage.English] = "Shift to neutral and hold full throttle",
+                    [AppLanguage.Polish] = "Wrzuć neutralny bieg i wciśnij gaz do dechy",
+                    [AppLanguage.Turkish] = "Vitesi boşa alın ve gaza sonuna kadar basılı tutun",
+                    [AppLanguage.German] = "Schalte in den Leerlauf und halte das Gaspedal durchgetreten",
+                    [AppLanguage.Spanish] = "Pon punto muerto y mantén el acelerador a fondo",
+                },
+                ["rev.calibration_prompt.done"] = new()
+                {
+                    [AppLanguage.English] = "Maximum RPM set to: {0}",
+                    [AppLanguage.Polish] = "Maksymalne obroty ustawiono na: {0}",
+                    [AppLanguage.Turkish] = "Maksimum RPM şu değere ayarlandı: {0}",
+                    [AppLanguage.German] = "Maximale Drehzahl eingestellt auf: {0}",
+                    [AppLanguage.Spanish] = "RPM máximas establecidas en: {0}",
                 },
             };
     }

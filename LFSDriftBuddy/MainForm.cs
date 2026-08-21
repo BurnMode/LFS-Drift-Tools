@@ -72,6 +72,19 @@ namespace LFSDriftBuddy
         private Dictionary<string, VehicleRevSettings> _vehicleRevSettings = new();
         private string _currentCarName = "";
 
+        // Okno-podpowiedź kalibracji rev limitera (patrz ShowRevLimiterCalibrationPromptIfNeeded/
+        // RevLimiterCalibrationPromptForm) — pokazywane RAZ na auto bez zapisanego presetu w
+        // ramach tego uruchomienia aplikacji, żeby nie nagabywać przy każdym IS_CRS/wyjeździe
+        // z pit lane tym samym, niekalibrowanym autem.
+        private RevLimiterCalibrationPromptForm? _revLimiterCalibrationPrompt;
+        private readonly HashSet<string> _revLimiterPromptShownForCars = new();
+
+        // Świeżość danych OutGauge (RPM/gaz/bieg) — osobna instancja od tej w
+        // OverlayForm (patrz DataFreshnessGate), bo służy do innego celu: blokowania
+        // wykrywania drift/speeding/burnoutu w DriftEngine (patrz OnCarData), a nie
+        // widoczności HUD-u. Pingowana z tego samego miejsca co overlay (OnRevData).
+        private readonly DataFreshnessGate _outGaugeFreshness = new(TimeSpan.FromMilliseconds(1500));
+
 
 
         private const int TitleBarHeight = 40;
@@ -257,8 +270,18 @@ namespace LFSDriftBuddy
             {
                 if (e.PLID == _lastKnownPlayerPLID)
                 {
-                    _drift.ResetLapScore();
-                    _overlay.UpdateLapScore(_drift.LapScore);
+                    // UWAGA: świadomie NIE wołamy tu _drift.ResetLapScore(). IS_CRS to
+                    // "gracz wcisnął przycisk reset auta" — najczęstsza akcja podczas
+                    // praktyki driftu (spin → reset), NIE koniec okrążenia. TotalScore
+                    // nigdy się przy tym nie zeruje, więc zerowanie LapScore w tym miejscu
+                    // powodowało narastający rozjazd między obiema liczbami: punkty zdobyte
+                    // (także z kolizji z obiektami — ApplyPostPoints dolicza je symetrycznie
+                    // do Total i Lap) zostawały w TotalScore, ale znikały z LapScore przy
+                    // każdym resecie, co wyglądało jak nierówne przydzielanie punktów przy
+                    // kolizji, choć problemem był ten reset, nie samo liczenie punktów.
+                    // Prawdziwe granice okrążenia (koniec okrążenia / wjazd i wyjazd z pit
+                    // lane / restart wyścigu / zejście z trasy) już mają własne, właściwe
+                    // resety LapScore gdzie indziej — ten tutaj był nadmiarowy.
                     LoadVehicleRevSettings(_currentCarName);   // reset samochodu — przeładuj zapisane ustawienia
                 }
             }));
@@ -802,11 +825,12 @@ namespace LFSDriftBuddy
         }
 
         // Domyślne wartości stosowane, gdy dla danego auta nie ma jeszcze żadnych zapisanych
-        // ustawień rev limitera — celowo niskie/bezpieczne (3000 RPM startowo jest poniżej
-        // biegu jałowego większości aut w LFS, więc ogranicznik faktycznie zadziała dopiero po
-        // ręcznym podniesieniu przez użytkownika/przycisk CALIBRATE), żeby nowe/nieznane auto
-        // nigdy nie dziedziczyło przypadkowo wysokiej wartości z poprzedniego pojazdu.
-        private const int DefaultVehicleMaxRpm = 3000;
+        // ustawień rev limitera — celowo WYSOKIE/bezpieczne (9000 RPM jest powyżej czerwonego
+        // pola większości aut w LFS), żeby nowe/nieznane auto nie dostało przypadkowo obcięcia
+        // zapłonu w normalnym zakresie obrotów, zanim użytkownik zdąży skalibrować (patrz
+        // ShowRevLimiterCalibrationPromptIfNeeded — dla auta bez zapisanego presetu od razu
+        // pojawia się okno z podpowiedzią kalibracji).
+        private const int DefaultVehicleMaxRpm = 9000;
         private const int DefaultVehicleCutMs = 25;
 
         /// <summary>
@@ -830,6 +854,11 @@ namespace LFSDriftBuddy
             // przez pole numeryczne albo przycisk CALIBRATE
             ApplyVehicleRevValues(DefaultVehicleMaxRpm, DefaultVehicleCutMs,
                 $"{carName}: brak zapisanych ustawień rev limitera — użyto domyślnych {DefaultVehicleMaxRpm} RPM / {DefaultVehicleCutMs} ms");
+
+            // Auto bez zapisanego presetu — podpowiedz użytkownikowi kalibrację od razu
+            // (patrz ShowRevLimiterCalibrationPromptIfNeeded), zamiast liczyć na to, że
+            // sam zauważy domyślną, niekalibrowaną wartość.
+            ShowRevLimiterCalibrationPromptIfNeeded(carName);
         }
 
         private void ApplyVehicleRevValues(int maxRpm, int cutMs, string statusMessage)
@@ -845,6 +874,61 @@ namespace LFSDriftBuddy
 
             if (!string.IsNullOrEmpty(statusMessage) && _statusLabel != null)
                 _statusLabel.Text = statusMessage;
+        }
+
+        /// <summary>
+        /// Czy Enter jest już czyimś bindowaniem (rev limiter/światła) — jeśli tak, tymczasowy
+        /// globalny hotkey Enter dla okna kalibracji (patrz ShowRevLimiterCalibrationPromptIfNeeded)
+        /// MUSIAŁby go nadpisać na czas otwarcia okna, więc zamiast tego po prostu z niego
+        /// rezygnujemy (i nie obiecujemy go w komunikacie) — użytkownik ma wtedy własny klawisz.
+        /// </summary>
+        private bool IsEnterBoundElsewhere() =>
+            (_revToggleBinding.Kind == InputKind.Keyboard && _revToggleBinding.Key == Keys.Enter) ||
+            (_revCalibrateBinding.Kind == InputKind.Keyboard && _revCalibrateBinding.Key == Keys.Enter) ||
+            (_revDecreaseBinding.Kind == InputKind.Keyboard && _revDecreaseBinding.Key == Keys.Enter) ||
+            (_revIncreaseBinding.Kind == InputKind.Keyboard && _revIncreaseBinding.Key == Keys.Enter) ||
+            (_lightToggleBinding.Kind == InputKind.Keyboard && _lightToggleBinding.Key == Keys.Enter);
+
+        /// <summary>
+        /// Pokazuje pływające okno-podpowiedź (patrz RevLimiterCalibrationPromptForm) z
+        /// przyciskiem uruchamiającym DOKŁADNIE ten sam mechanizm kalibracji co przycisk
+        /// CALIBRATE / zbindowany klawisz/przycisk kierownicy (RPMLimitterCalibrate) — RAZ
+        /// na auto w ramach tego uruchomienia aplikacji.
+        ///
+        /// Dodatkowo, na czas gdy okno jest otwarte, Enter działa jak kolejny "zbindowany
+        /// przycisk" — rejestrowany jako TYMCZASOWY globalny hotkey (ten sam mechanizm co
+        /// _globalHotkey.SetBinding dla zwykłych bindowań, patrz GlobalHotkey.cs), więc działa
+        /// NIEZALEŻNIE od tego, czy to okno ma fokus (a nie ma — patrz WS_EX_NOACTIVATE w
+        /// RevLimiterCalibrationPromptForm), czyli też podczas jazdy w LFS. Usuwany natychmiast
+        /// przy zamknięciu okna, żeby nie zostawić klawisza Enter globalnie zbindowanego.
+        /// </summary>
+        private void ShowRevLimiterCalibrationPromptIfNeeded(string carName)
+        {
+            if (_revLimiterPromptShownForCars.Contains(carName)) return;
+            _revLimiterPromptShownForCars.Add(carName);
+
+            _revLimiterCalibrationPrompt?.Close();
+
+            bool enterAvailable = !IsEnterBoundElsewhere();
+
+            _revLimiterCalibrationPrompt = new RevLimiterCalibrationPromptForm(
+                this, carName, () => RPMLimitterCalibrate(), enterAvailable);
+
+            if (enterAvailable)
+            {
+                _globalHotkey.SetBinding(Keys.Enter, () => BeginInvoke((Action)(() =>
+                {
+                    if (_revLimiterCalibrationPrompt != null && !calibrationON)
+                        _ = RPMLimitterCalibrate();
+                })));
+            }
+
+            _revLimiterCalibrationPrompt.FormClosed += (s, e) =>
+            {
+                if (enterAvailable) _globalHotkey.RemoveBinding(Keys.Enter);
+                _revLimiterCalibrationPrompt = null;
+            };
+            _revLimiterCalibrationPrompt.Show();
         }
 
         /// <summary>
@@ -873,6 +957,7 @@ namespace LFSDriftBuddy
                 // prędkościomierza+obrotomierza i blokadą HUD-u wyniku w trybie idle,
                 // gdy dane milkną (menu/garaż/poza autem). Patrz OverlayForm.NotifyOutGaugeData.
                 _overlay.NotifyOutGaugeData();
+                _outGaugeFreshness.Ping();
 
                 _drift.SetHandbrakeActive(data.HandbrakeOn);
                 _rpmLabel.Text = ((int)data.RPM).ToString("N0");
@@ -889,6 +974,7 @@ namespace LFSDriftBuddy
                 if (calibrationON == true)
                 {
                     if (data.RPM > CalibratedMAXRPM) { CalibratedMAXRPM = (int)data.RPM; } else { }
+                    _revLimiterCalibrationPrompt?.UpdateLiveRpm(CalibratedMAXRPM);
                 }
 
                 // ── Ustawienia rev limitera per pojazd ──────────────────────────────────
@@ -1372,12 +1458,13 @@ namespace LFSDriftBuddy
 
             _showHudCheck = new MacCheckBox
             {
-                Text = "Show ingame HUD (IS_BTN)",
+                Text = "Currently unavailable",
 
                 Location = new Point(16, 155),
                 Size = new Size(240, 20),
                 BackColor = Color.Transparent,
                 Checked = false
+               
 
             };
 
@@ -1445,7 +1532,7 @@ namespace LFSDriftBuddy
 
             hudPanel.Controls.Add(_showHudCheck);
             hudPanel.Controls.Add(_showRPMHudCheck);
-            _localizedControls.Add((_showHudCheck, "hud.show"));
+            _localizedControls.Add((_showHudCheck, "hud.show-disabled"));
             _localizedControls.Add((_showRPMHudCheck, "hud.REVLimitter"));
 
             revLimiterPanel = CreateCard(
@@ -2107,6 +2194,7 @@ namespace LFSDriftBuddy
             _revEnableSwitch.SetCheckedSilent(false);
 
             _hud.ShowInGameAward("REV LIMITTER CALIBRATION - SELECT NEUTRAL AND HOLD FULL THROTTLE!!!");
+            _revLimiterCalibrationPrompt?.ShowCalibratingState();
 
             _revLimitLabel.Text = "CALIBRATION... ";
             //PressWKey(true);
@@ -2120,12 +2208,13 @@ namespace LFSDriftBuddy
             _revLimitLabel.Text = CalibratedMAXRPM.ToString();
             _revLimitLabel.Text = "RPM LIMIT: ";
             //_revLimitLabel.ForeColor = Color.FromArgb(60, 60, 60);
-            _revLimiterNumeric.Value = CalibratedMAXRPM;
+            _revLimiterNumeric.Value = CalibratedMAXRPM;   // ← wyzwala też SaveVehicleRevSettings
 
             _revLimiter.Enabled = wasEnabledBeforeCalibration;
             _revEnableSwitch.SetCheckedSilent(wasEnabledBeforeCalibration);
             _hud.ShowInGameAward($"RPM LIMIT: {CalibratedMAXRPM}");
             _hud.ShowInGameRPMLimitter(CalibratedMAXRPM.ToString());
+            _revLimiterCalibrationPrompt?.ShowDoneState(CalibratedMAXRPM);
             await Task.Delay(1000);
 
             _hud.ShowInGameAward("REV LIMITTER CALIBRATION DONE!!!");
@@ -2140,6 +2229,11 @@ namespace LFSDriftBuddy
             _hud.ShowInGameAward($"");
             _revLimitLabel.Text = "RPM LIMIT: ";
             SaveSettings();
+
+            // Wynik już był widoczny przez ~5s (ShowDoneState powyżej + opóźnienia nad tą
+            // linią) — teraz zamknij okno-podpowiedź, jeśli wciąż otwarte.
+            _revLimiterCalibrationPrompt?.Close();
+            _revLimiterCalibrationPrompt = null;
         }
 
         private RoundedPanel CreateCard(
@@ -2195,13 +2289,37 @@ namespace LFSDriftBuddy
         private JoystickOffset _savedWheelAxis = JoystickOffset.X;
         private void ShowWheelSetupDialog(List<(Guid Guid, string Name)> devices)
         {
-            using var dlg = new WheelSetupForm(_wheelInput, devices);
-            if (dlg.ShowDialog(this) == DialogResult.OK)
+            // Ten sam ciemny "backdrop" co ShowHudColorsMenu/OpenLanguagePicker itd. —
+            // przyciemnia resztę aplikacji pod modalnym dialogiem.
+            Form overlayBg = new Form
             {
-                _savedWheelGuid = dlg.SelectedDeviceGuid;
-                _savedWheelAxis = dlg.SelectedAxis;
-                SaveSettings();
-                _statusLabel.Text = $"Kierownica skonfigurowana: {_wheelInput.DeviceName} (oś: {_wheelInput.SteeringAxis})";
+                FormBorderStyle = FormBorderStyle.None,
+                StartPosition = FormStartPosition.Manual,
+                ShowInTaskbar = false,
+                Bounds = this.Bounds,
+                BackColor = Color.Black,
+                Opacity = 0.5,
+                Owner = this
+            };
+
+            using var dlg = new WheelSetupForm(this, _wheelInput, devices);
+            dlg.Owner = overlayBg;
+
+            overlayBg.Show();
+            try
+            {
+                if (dlg.ShowDialog(overlayBg) == DialogResult.OK)
+                {
+                    _savedWheelGuid = dlg.SelectedDeviceGuid;
+                    _savedWheelAxis = dlg.SelectedAxis;
+                    SaveSettings();
+                    _statusLabel.Text = $"Kierownica skonfigurowana: {_wheelInput.DeviceName} (oś: {_wheelInput.SteeringAxis})";
+                }
+            }
+            finally
+            {
+                overlayBg.Close();
+                overlayBg.Dispose();
             }
         }
 
@@ -2232,8 +2350,19 @@ namespace LFSDriftBuddy
         // ────────────────────────────────────────────────────────
         // Dialog konfiguracji kierownicy — wybór urządzenia + kalibracja osi skrętu
         // ────────────────────────────────────────────────────────
+        // ────────────────────────────────────────────────────────
+        // Dialog konfiguracji kierownicy — DOKŁADNIE ten sam mechanizm rysowania co
+        // ShowHudColorsMenu/OpenLanguagePicker itd.: prawdziwy zaokrąglony KSZTAŁT okna
+        // przez Region (nie tylko rysunek na prostokątnym canvasie), miękki cień w Paint,
+        // przycisk "×" w tym samym stylu, i przyciski treści przez owner.MakeButton (ta
+        // sama instancja MainForm co wszędzie indziej — bez lokalnie duplikowanego
+        // koloru/gradientu). Kolor przycisków to teraz DOMYŚLNY ApplePalette.Blue
+        // (MakeButton bez podanego bg), tak jak w reszcie aplikacji — bez ręcznych
+        // override'ów na Secondary/Card jak poprzednio.
+        // ────────────────────────────────────────────────────────
         public class WheelSetupForm : Form
         {
+            private readonly MainForm _owner;
             private readonly SteeringWheelInput _wheelInput;
             private readonly List<(Guid Guid, string Name)> _devices;
 
@@ -2242,9 +2371,9 @@ namespace LFSDriftBuddy
 
             private static readonly JoystickOffset[] AxisChoices = new[]
             {
-        JoystickOffset.X, JoystickOffset.Y, JoystickOffset.Z,
-        JoystickOffset.RotationX, JoystickOffset.RotationY, JoystickOffset.RotationZ
-    };
+                JoystickOffset.X, JoystickOffset.Y, JoystickOffset.Z,
+                JoystickOffset.RotationX, JoystickOffset.RotationY, JoystickOffset.RotationZ
+            };
 
             private Label[] _axisBars;
             private Label _calibHint;
@@ -2253,64 +2382,105 @@ namespace LFSDriftBuddy
             private readonly Dictionary<JoystickOffset, int> _axisMax = new();
             private System.Windows.Forms.Timer _calibTimer;
 
-            public WheelSetupForm(SteeringWheelInput wheelInput, List<(Guid Guid, string Name)> devices)
-            {
-                _wheelInput = wheelInput;
+            // Chrome (karta + × + tytuł) jest stałe; obie "strony" budują się tylko
+            // wewnątrz _content, więc przełączanie stron nie rusza reszty okna.
+            private readonly Panel _content;
 
+            public WheelSetupForm(MainForm owner, SteeringWheelInput wheelInput, List<(Guid Guid, string Name)> devices)
+            {
+                _owner = owner;
+                _wheelInput = wheelInput;
                 _devices = devices;
 
                 Text = Localization.T("wheelconfig.title");
-                Size = new Size(380, 430);
+                Size = new Size(380, 460);
                 StartPosition = FormStartPosition.CenterParent;
-                FormBorderStyle = FormBorderStyle.FixedDialog;
-                MaximizeBox = false;
-                MinimizeBox = false;
+                FormBorderStyle = FormBorderStyle.None;
+                ShowInTaskbar = false;
                 BackColor = ApplePalette.Background;
+
+                Shown += (s, e) => Region = _owner.CreateSmoothRoundedRegion(Width, Height, 20);
+
+                var card = new RoundedPanel { Dock = DockStyle.Fill };
+                Controls.Add(card);
+
+                var closeButton = new Button
+                {
+                    Text = "×",
+                    Size = new Size(28, 28),
+                    Location = new Point(Width - 38, 10),
+                    FlatStyle = FlatStyle.Flat,
+                    BackColor = Color.Transparent,
+                    ForeColor = ApplePalette.Secondary,
+                    Font = new Font("Segoe UI Semibold", 12f),
+                    Cursor = Cursors.Hand,
+                    TabStop = false
+                };
+                closeButton.FlatAppearance.BorderSize = 0;
+                closeButton.FlatAppearance.MouseOverBackColor = Color.FromArgb(235, 235, 240);
+                closeButton.FlatAppearance.MouseDownBackColor = Color.FromArgb(220, 220, 225);
+                closeButton.Click += (s, e) => { DialogResult = DialogResult.Cancel; Close(); };
+                closeButton.Region = _owner.CreateSmoothRoundedRegion(closeButton.Width, closeButton.Height, 14);
+                card.Controls.Add(closeButton);
+
+                _owner.MakeLabel(card, Localization.T("wheelconfig.title"), 20, 15, 250, 24,
+                    ApplePalette.Title, new Font("Segoe UI Semibold", 11f));
+
+                _content = new Panel
+                {
+                    Location = new Point(20, 50),
+                    Size = new Size(Width - 40, Height - 50 - 20),
+                    BackColor = Color.Transparent,
+                };
+                card.Controls.Add(_content);
+
+                Paint += (s, e) =>
+                {
+                    e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
+                    for (int i = 30; i >= 1; i--)
+                    {
+                        int alpha = (int)(22 * (1.0 - i / 30.0));
+                        Rectangle shadowRect = new Rectangle(12 - i, 12 - i, Width - 24 + i * 2, Height - 24 + i * 2);
+                        using (GraphicsPath p = _owner.RoundedPath(shadowRect, 20 + i))
+                        using (SolidBrush b = new SolidBrush(Color.FromArgb(alpha, 0, 0, 0)))
+                            e.Graphics.FillPath(b, p);
+                    }
+                };
 
                 ShowDeviceList();
             }
 
             private void ShowDeviceList()
             {
-                Controls.Clear();
+                _content.Controls.Clear();
 
                 var title = new Label
                 {
                     Text = Localization.T("wheelconfig.nodetectauto"),
-                    Location = new Point(20, 15),
-                    Size = new Size(330, 40),
-                    ForeColor = ApplePalette.Title,
-                    Font = new Font("Segoe UI Semibold", 10f)
+                    Location = new Point(0, 0),
+                    Size = new Size(_content.Width, 40),
+                    ForeColor = ApplePalette.Text,
+                    Font = new Font("Segoe UI", 9.5f),
                 };
-                Controls.Add(title);
+                _content.Controls.Add(title);
 
-                int y = 65;
+                int y = 46;
 
                 if (_devices.Count == 0)
                 {
-                    Controls.Add(new Label
+                    _content.Controls.Add(new Label
                     {
                         Text = Localization.T("wheelconfig.nodetect"),
-                        Location = new Point(20, y),
-                        Size = new Size(330, 40),
+                        Location = new Point(0, y),
+                        Size = new Size(_content.Width, 40),
                         ForeColor = ApplePalette.Secondary
                     });
+                    y += 46;
                 }
 
                 foreach (var d in _devices)
                 {
-                    var btn = new Button
-                    {
-                        Text = d.Name,
-                        Location = new Point(20, y),
-                        Size = new Size(330, 34),
-                        FlatStyle = FlatStyle.Flat,
-                        BackColor = ApplePalette.Blue,
-                        ForeColor = Color.White,
-                        Font = new Font("Segoe UI", 9.5f),
-                        Cursor = Cursors.Hand
-                    };
-                    btn.FlatAppearance.BorderSize = 0;
+                    var btn = _owner.MakeButton(_content, d.Name, 0, y, _content.Width, 34);
 
                     var guid = d.Guid; // capture
                     btn.Click += (s, e) =>
@@ -2319,27 +2489,17 @@ namespace LFSDriftBuddy
                         ShowAxisCalibration();
                     };
 
-                    Controls.Add(btn);
-                    y += 42;
+                    y += 40;
                 }
 
-                var cancelBtn = new Button
-                {
-                    Text = Localization.T("wheelconfig.abort"),
-                    Location = new Point(20, 340),
-                    Size = new Size(330, 32),
-                    FlatStyle = FlatStyle.Flat,
-                    BackColor = Color.FromArgb(90, 90, 100),
-                    ForeColor = Color.White
-                };
-                cancelBtn.FlatAppearance.BorderSize = 0;
+                var cancelBtn = _owner.MakeButton(_content, Localization.T("wheelconfig.abort"),
+                    0, _content.Height - 34, _content.Width, 32);
                 cancelBtn.Click += (s, e) => { DialogResult = DialogResult.Cancel; Close(); };
-                Controls.Add(cancelBtn);
             }
 
             private void ShowAxisCalibration()
             {
-                Controls.Clear();
+                _content.Controls.Clear();
 
                 // podłącz od razu z osią domyślną X — użytkownik zaraz ją potwierdzi lub zmieni
                 _wheelInput.ConnectToDevice(SelectedDeviceGuid, JoystickOffset.X);
@@ -2347,84 +2507,64 @@ namespace LFSDriftBuddy
                 var title = new Label
                 {
                     Text = Localization.T("wheelconfig.calibrateinfo"),
-                    Location = new Point(20, 15),
-                    Size = new Size(330, 40),
-                    ForeColor = ApplePalette.Title,
-                    Font = new Font("Segoe UI Semibold", 10f)
+                    Location = new Point(0, 0),
+                    Size = new Size(_content.Width, 40),
+                    ForeColor = ApplePalette.Text,
+                    Font = new Font("Segoe UI", 9.5f),
                 };
-                Controls.Add(title);
+                _content.Controls.Add(title);
 
                 _axisBars = new Label[AxisChoices.Length];
-                int y = 65;
+                int y = 44;
                 foreach (var axis in AxisChoices)
                 {
                     int idx = Array.IndexOf(AxisChoices, axis);
                     var lbl = new Label
                     {
                         Text = $"{axis}: 0",
-                        Location = new Point(20, y),
-                        Size = new Size(330, 20),
-                        ForeColor = ApplePalette.Text,
-                        Font = new Font("Consolas", 9.5f)
+                        Location = new Point(0, y),
+                        Size = new Size(_content.Width, 18),
+                        ForeColor = ApplePalette.Secondary,
+                        Font = new Font("Consolas", 9f)
                     };
-                    Controls.Add(lbl);
+                    _content.Controls.Add(lbl);
                     _axisBars[idx] = lbl;
-                    y += 24;
+                    y += 20;
                 }
 
                 _calibHint = new Label
                 {
                     Text = Localization.T("wheelconfig.detection"),
-                    Location = new Point(20, y + 8),
-                    Size = new Size(330, 20),
+                    Location = new Point(0, y + 6),
+                    Size = new Size(_content.Width, 18),
                     ForeColor = ApplePalette.Secondary
                 };
-                Controls.Add(_calibHint);
+                _content.Controls.Add(_calibHint);
 
                 var manualLabel = new Label
                 {
                     Text = Localization.T("wheelconfig.manualset"),
-                    Location = new Point(20, y + 34),
-                    Size = new Size(250, 18),
+                    Location = new Point(0, y + 28),
+                    Size = new Size(_content.Width, 16),
                     ForeColor = ApplePalette.Secondary
                 };
-                Controls.Add(manualLabel);
+                _content.Controls.Add(manualLabel);
 
-                int mx = 20, my = y + 58;
+                int mx = 0, my = y + 50;
                 foreach (var axis in AxisChoices)
                 {
-                    var b = new Button
-                    {
-                        Text = axis.ToString(),
-                        Location = new Point(mx, my),
-                        Size = new Size(105, 28),
-                        FlatStyle = FlatStyle.Flat,
-                        BackColor = ApplePalette.Card,
-                        ForeColor = ApplePalette.Text,
-                        Cursor = Cursors.Hand
-                    };
-                    b.FlatAppearance.BorderColor = ApplePalette.Border;
-                    b.FlatAppearance.BorderSize = 1;
+                    var b = _owner.MakeButton(_content, axis.ToString(), mx, my, 105, 26);
+
                     var ax = axis;
                     b.Click += (s, e) => Confirm(ax);
-                    Controls.Add(b);
 
                     mx += 112;
-                    if (mx > 260) { mx = 20; my += 34; }
+                    if (mx > 220) { mx = 0; my += 30; }
                 }
 
-                var backBtn = new Button
-                {
-                    Text = Localization.T("wheelconfig.otherdevice"),
-                    Location = new Point(20, 370),
-                    Size = new Size(330, 28),
-                    FlatStyle = FlatStyle.Flat,
-                    BackColor = Color.FromArgb(90, 90, 100),
-                    ForeColor = Color.White
-                };
-                backBtn.FlatAppearance.BorderSize = 0;
+                var backBtn = _owner.MakeButton(_content, Localization.T("wheelconfig.otherdevice"),
+                    0, _content.Height - 30, _content.Width, 28);
                 backBtn.Click += (s, e) => { StopCalibration(); ShowDeviceList(); };
-                Controls.Add(backBtn);
 
                 _axisMin.Clear();
                 _axisMax.Clear();
@@ -2575,6 +2715,164 @@ namespace LFSDriftBuddy
                 }
 
                 return base.ProcessCmdKey(ref msg, keyData);
+            }
+        }
+
+        // ────────────────────────────────────────────────────────
+        // Okno-podpowiedź kalibracji rev limitera dla auta bez zapisanego presetu —
+        // ten sam ciemny styl co KeyBindingForm powyżej, TopMost nad grą (patrz
+        // ShowRevLimiterCalibrationPromptIfNeeded). Sam nie prowadzi kalibracji —
+        // tylko woła przekazany callback (RPMLimitterCalibrate) i odzwierciedla jego
+        // stan (ShowCalibratingState/UpdateLiveRpm/ShowDoneState), więc działa tak
+        // samo niezależnie czy kalibrację uruchomiono z tego okna, z przycisku
+        // CALIBRATE w głównym oknie, czy ze zbindowanego klawisza/przycisku kierownicy.
+        // ────────────────────────────────────────────────────────
+        public class RevLimiterCalibrationPromptForm : Form
+        {
+            private readonly MainForm _owner;
+            private readonly Label _messageLabel;
+            private readonly Label _liveRpmLabel;
+            private readonly Button _calibrateButton;
+            private readonly Func<Task> _startCalibration;
+
+            // ── Nie kradnij fokusu z LFS ─────────────────────────────────────────
+            // Domyślnie WinForms aktywuje (i przechwytuje klawiaturę) każde okno
+            // pokazane przez Show() — dla zwykłego okna to normalne, ale TO okno wisi
+            // TopMost nad grą właśnie wtedy, gdy gracz trzyma gaz do kalibracji, więc
+            // przechwycenie klawiatury odcinałoby sterowanie w LFS (WASD/gaz/biegi).
+            // WS_EX_NOACTIVATE sprawia, że okno NIGDY nie staje się aktywne/nie
+            // przejmuje fokusu klawiatury — także po kliknięciu — a mimo to jego
+            // kontrolki (przycisk CALIBRATE) nadal normalnie reagują na klik myszą,
+            // bo Windows i tak routuje komunikaty myszy do okna pod kursorem
+            // niezależnie od aktywacji. ShowWithoutActivation to oficjalny "hak"
+            // WinForms na tę samą sytuację przy samym Show() (bez tego .NET i tak
+            // próbowałby aktywować okno przy pierwszym pokazaniu).
+            private const int WS_EX_NOACTIVATE = 0x08000000;
+            private const int WS_EX_TOOLWINDOW = 0x00000080;
+
+            protected override bool ShowWithoutActivation => true;
+
+            protected override CreateParams CreateParams
+            {
+                get
+                {
+                    var cp = base.CreateParams;
+                    cp.ExStyle |= WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW;
+                    return cp;
+                }
+            }
+
+            // Ten sam mechanizm rysowania co ShowHudColorsMenu/OpenLanguagePicker itd. —
+            // prawdziwy zaokrąglony KSZTAŁT okna przez Region (nie tylko rysunek na
+            // prostokątnym canvasie), miękki cień w Paint, i przyciski przez owner.MakeButton
+            // (ta sama instancja MainForm, więc identyczny gradient/poświata co wszędzie
+            // indziej w aplikacji — bez lokalnie duplikowanej wersji tego kodu).
+            public RevLimiterCalibrationPromptForm(MainForm owner, string carName, Func<Task> startCalibration, bool enterHintAvailable)
+            {
+                _owner = owner;
+                _startCalibration = startCalibration;
+
+                Text = Localization.T("rev.calibration_prompt.title");
+                Size = new Size(440, 250);
+                StartPosition = FormStartPosition.CenterScreen;
+                FormBorderStyle = FormBorderStyle.None;
+                ShowInTaskbar = false;
+                TopMost = true;   // nad grą, niezależnie gdzie akurat jest okno LFS
+                BackColor = ApplePalette.Background;
+
+                Shown += (s, e) => Region = _owner.CreateSmoothRoundedRegion(Width, Height, 20);
+
+                var card = new RoundedPanel { Dock = DockStyle.Fill };
+                Controls.Add(card);
+
+                var closeButton = new Button
+                {
+                    Text = "×",
+                    Size = new Size(28, 28),
+                    Location = new Point(Width - 38, 10),
+                    FlatStyle = FlatStyle.Flat,
+                    BackColor = Color.Transparent,
+                    ForeColor = ApplePalette.Secondary,
+                    Font = new Font("Segoe UI Semibold", 12f),
+                    Cursor = Cursors.Hand,
+                    TabStop = false
+                };
+                closeButton.FlatAppearance.BorderSize = 0;
+                closeButton.FlatAppearance.MouseOverBackColor = Color.FromArgb(235, 235, 240);
+                closeButton.FlatAppearance.MouseDownBackColor = Color.FromArgb(220, 220, 225);
+                closeButton.Click += (s, e) => Close();
+                closeButton.Region = _owner.CreateSmoothRoundedRegion(closeButton.Width, closeButton.Height, 14);
+                card.Controls.Add(closeButton);
+
+                _owner.MakeLabel(card, Localization.T("rev.calibration_prompt.title"), 20, 15, 300, 24,
+                    ApplePalette.Title, new Font("Segoe UI Semibold", 11f));
+
+                // Wzmianka o Enter dopisywana TYLKO gdy faktycznie działa (patrz
+                // MainForm.ShowRevLimiterCalibrationPromptIfNeeded) — nie okłamujemy
+                // użytkownika, jeśli akurat koliduje z jego własnym bindowaniem klawisza Enter.
+                string bodyText = string.Format(Localization.T("rev.calibration_prompt.body"), carName)
+                    + (enterHintAvailable ? Localization.T("rev.calibration_prompt.enter_hint") : "");
+
+                _messageLabel = _owner.MakeLabel(card, bodyText, 20, 55, Width - 40, 74,
+                    ApplePalette.Text, new Font("Segoe UI", 9.5f), ContentAlignment.TopLeft);
+
+                _liveRpmLabel = _owner.MakeLabel(card, "", 20, 55 + 74, Width - 40, 34,
+                    ApplePalette.Blue, new Font("Segoe UI Semibold", 20f, FontStyle.Bold), ContentAlignment.MiddleCenter);
+                _liveRpmLabel.Visible = false;
+
+                _calibrateButton = _owner.MakeButton(card, Localization.T("rev.calibrate"),
+                    20, Height - 56, Width - 40, 36);
+                _calibrateButton.Click += async (s, e) =>
+                {
+                    _calibrateButton.Enabled = false;
+                    await _startCalibration();
+                };
+
+                // Lokalny fallback: DZIAŁA tylko jeśli to okno akurat ma fokus klawiatury
+                // (np. LFS nie jest aktywny) — awarie WS_EX_NOACTIVATE. Głównym mechanizmem
+                // "Enter potwierdza kalibrację" jest tymczasowy GLOBALNY hotkey rejestrowany
+                // z zewnątrz (patrz MainForm.ShowRevLimiterCalibrationPromptIfNeeded), który
+                // działa NIEZALEŻNIE od fokusu — czyli też podczas jazdy w LFS.
+                AcceptButton = _calibrateButton;
+
+                Paint += (s, e) =>
+                {
+                    e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
+                    for (int i = 30; i >= 1; i--)
+                    {
+                        int alpha = (int)(22 * (1.0 - i / 30.0));
+                        Rectangle shadowRect = new Rectangle(12 - i, 12 - i, Width - 24 + i * 2, Height - 24 + i * 2);
+                        using (GraphicsPath p = _owner.RoundedPath(shadowRect, 20 + i))
+                        using (SolidBrush b = new SolidBrush(Color.FromArgb(alpha, 0, 0, 0)))
+                            e.Graphics.FillPath(b, p);
+                    }
+                };
+            }
+
+            /// <summary>Wywoływane, gdy kalibracja faktycznie się rozpoczyna (niezależnie
+            /// od tego, co ją uruchomiło) — pokazuje instrukcję i odsłania licznik RPM.</summary>
+            public void ShowCalibratingState()
+            {
+                _messageLabel.Text = Localization.T("rev.calibration_prompt.inprogress");
+                _messageLabel.TextAlign = ContentAlignment.MiddleCenter;
+                _liveRpmLabel.Visible = true;
+                _liveRpmLabel.Text = "0 RPM";
+                _calibrateButton.Enabled = false;
+            }
+
+            /// <summary>Aktualny, na bieżąco odczytany maksymalny RPM podczas kalibracji.</summary>
+            public void UpdateLiveRpm(int rpm)
+            {
+                if (!_liveRpmLabel.Visible) return;
+                _liveRpmLabel.Text = rpm.ToString("N0") + " RPM";
+            }
+
+            public void ShowDoneState(int finalRpm)
+            {
+                _messageLabel.Text = string.Format(Localization.T("rev.calibration_prompt.done"), finalRpm);
+                _messageLabel.TextAlign = ContentAlignment.MiddleCenter;
+                _liveRpmLabel.Visible = false;
+                _calibrateButton.Visible = false;
             }
         }
 
@@ -3075,38 +3373,37 @@ namespace LFSDriftBuddy
         // ─────────────────────────────────────────────────────
         private void OnCarData(object sender, CarDataEventArgs e)
         {
-
+            // Fires on the InSim receive thread, not the UI thread.
             byte viewPlid = _insim.ViewPLID;
-            // Ustaw PLID gracza (pierwszy samochód)
             if (_playerPLID == 0)
                 _playerPLID = e.Car.PLID;
 
             if (viewPlid != 0)
                 _lastKnownPlayerPLID = viewPlid;
             else if (_lastKnownPlayerPLID == 0)
-                return;  // jeszcze nie wiadomo, które auto jest nasze
+                return;
 
-            // NOTE: odczyt _showHudCheck.Checked i wywołanie na kontrolce InSim musi wejść
-            // na wątek UI — CarDataReceived odpala się z wątku InSim, nie z wątku formularza.
+            // Filter BEFORE any BeginInvoke — MCI includes every car, not just ours;
+            // dispatching per foreign car wasted a UI-thread hop on full servers.
+            if (e.Car.PLID != _lastKnownPlayerPLID)
+                return;
+
+            double speed = e.Car.SpeedKmh;
+            double headingDeg = (e.Car.Heading / 65535.0) * 360.0;
+
+            // Whole body on the UI thread. _drift.Update()/_indicators.Update() used to
+            // run unmarshaled here while also being mutated from the UI thread elsewhere
+            // (HandleObjectHit, Reset Score, OnRevData) — an unsynchronized race on
+            // DriftEngine's score fields. Same single-BeginInvoke pattern as OnRevData.
             this.BeginInvoke((Action)(() =>
             {
                 if (!_showHudCheck.Checked)
                     _hud.ShowInGameAward("");
-            }));
 
-            // Liczenie TYLKO dla gracza!
-            if (e.Car.PLID != _lastKnownPlayerPLID)
-                return;  // ← WYJDŹ jeśli to nie gracz
+                _drift.SetOutGaugeDataFresh(_outGaugeFreshness.IsFresh);
+                _drift.Update(e.Car);
+                _indicators.Update(headingDeg);
 
-            _drift.Update(e.Car);  // ← Teraz bezpieczne!
-            double speed = e.Car.SpeedKmh;
-
-            // Konwersja Heading z LFS (0-65535) na stopnie (0-360)
-            double headingDeg = (e.Car.Heading / 65535.0) * 360.0;
-            _indicators.Update(headingDeg);
-
-            this.BeginInvoke((Action)(() =>
-            {
                 _speedKmh = speed;
                 _driftAngle = _drift.DriftAngleDeg;
                 _isDrifting = _drift.IsDrifting;
@@ -3273,7 +3570,14 @@ namespace LFSDriftBuddy
                 // uderzenie poza driftem — natychmiastowa kara
                 _drift.ApplyPostPoints(-100, $"{objectName} HIT -100");
                 UpdateScoreLabels();
+                // Push PEŁNEGO stanu, nie tylko TotalScore — ApplyPostPoints (patrz DriftEngine)
+                // teraz zmienia też CurrentRunPoints/LapScore/ComboMultiplier, więc HUD ma się
+                // odświeżyć od razu, a nie dopiero przy najbliższej naturalnej klatce driftu
+                // (bez tego LapScore na overlayu potrafił chwilowo wyprzedzić "RUN"/combo).
                 _overlay.UpdateScore(_drift.TotalScore);
+                _overlay.UpdateRun(_drift.CurrentRunPoints);
+                _overlay.UpdateLapScore(_drift.LapScore);
+                _overlay.UpdateCombo(_drift.ComboMultiplier);
                 _overlay.ShowBonus(_drift.LastAwardedText);
                 if (_showHudCheck.Checked) _hud.ShowInGameAward(_drift.LastAwardedText);
                 return;
@@ -3307,7 +3611,14 @@ namespace LFSDriftBuddy
                 }
 
                 UpdateScoreLabels();
+                // Push PEŁNEGO stanu, nie tylko TotalScore — ApplyPostPoints (patrz DriftEngine)
+                // teraz zmienia też CurrentRunPoints/LapScore/ComboMultiplier, więc HUD ma się
+                // odświeżyć od razu, a nie dopiero przy najbliższej naturalnej klatce driftu
+                // (bez tego LapScore na overlayu potrafił chwilowo wyprzedzić "RUN"/combo).
                 _overlay.UpdateScore(_drift.TotalScore);
+                _overlay.UpdateRun(_drift.CurrentRunPoints);
+                _overlay.UpdateLapScore(_drift.LapScore);
+                _overlay.UpdateCombo(_drift.ComboMultiplier);
                 _overlay.ShowBonus(_drift.LastAwardedText);
                 if (_showHudCheck.Checked) _hud.ShowInGameAward(_drift.LastAwardedText);
             };
@@ -3364,14 +3675,17 @@ namespace LFSDriftBuddy
 
             string stateLine = $"{Localization.T("indicators.currentstatus")} {_indicators.CurrentState}";
 
+            /*
             string outGaugeLine = _outGaugePacketCount > 0
-                ? $"OutGauge: aktywne (pakiety: {_outGaugePacketCount:N0})"
-                : "OutGauge: BRAK DANYCH — sprawdź cfg.txt (OutGauge Mode 2, Port 35555)";
+                ? $"OutGauge - packets: {_outGaugePacketCount:N0}"
+                : "OutGauge: BRAK DANYCH";
+            */
+           
 
             string bitsLine =
-                $"ShowLights=0x{_lastShowLightsRaw:X4}   L={(_indicators.LeftLampOn ? "WŁ" : "wył")}  P={(_indicators.RightLampOn ? "WŁ" : "wył")}  Any={(_indicators.AnySignalLampOn ? "WŁ" : "wył")}";
+                $"Lights=0x{_lastShowLightsRaw:X4} L={(_indicators.LeftLampOn ? "O" : "X")} R={(_indicators.RightLampOn ? "O" : "X")} Any={(_indicators.AnySignalLampOn ? "O" : "X")}";
 
-            _indicatorStatusLabel.Text = stateLine + "\n" + outGaugeLine + "\n" + bitsLine;
+            _indicatorStatusLabel.Text = stateLine + "\n" + bitsLine;
             _indicatorStatusLabel.ForeColor = _outGaugePacketCount > 0
                 ? Color.FromArgb(150, 200, 100)
                 : Color.FromArgb(220, 90, 90);
@@ -3552,6 +3866,8 @@ namespace LFSDriftBuddy
                 _speedometer.Speed = 0; _speedometer.Invalidate();
                 _overlay.Detach();
                 _overlay.ResetOutGaugeData();
+                _outGaugeFreshness.Reset();
+                _drift.SetOutGaugeDataFresh(false);
                 _hud.InvalidateCache();
             }));
 
@@ -4472,6 +4788,7 @@ namespace LFSDriftBuddy
         protected override void OnFormClosing(FormClosingEventArgs e)
         {
             SaveSettings();
+            _drift.FlushStats();   // bypass save throttle so the last few seconds aren't lost
             Localization.LanguageChanged -= ApplyLanguage;
             if (_insim.IsConnected) { _insim.DeleteAllButtons(); System.Threading.Thread.Sleep(120); }
             try
@@ -4485,6 +4802,7 @@ namespace LFSDriftBuddy
             _overlay?.Dispose();
             _hud?.Dispose();
             _shadow?.Close();
+            _revLimiterCalibrationPrompt?.Close();
             base.OnFormClosing(e);
         }
 

@@ -37,6 +37,19 @@ namespace LFSDriftBuddy
         private int _awardTick;
         private string _colorCurrentMain = "^7";
 
+        // ── Tłumienie migotania RUN/COMBO/LABEL/IND ─────────────────────────────
+        // "active" (IsDrifting/IsSpeeding/IsBurnout) jest liczone na surowo, klatka po
+        // klatce telemetrii (~co 200ms, w rytm pakietów MCI) — pojedyncza klatka szumu
+        // w kącie/prędkości tuż przy progu (np. MIN_DRIFT_ANGLE_DEG) natychmiast zbija
+        // "active" na false, co czyściło te przyciski, żeby chwilę później znów je
+        // wysłać — widoczne jako miganie HUD-u. Krótka "sklejka" (grace period) ignoruje
+        // pojedyncze, chwilowe zniknięcie aktywności — dłuższa przerwa nadal poprawnie
+        // chowa HUD. Celowo krótsza niż DriftEngine.COMBO_TIMEOUT_SEC (3s, używane przez
+        // overlay do widocznego odliczania combo) — tu chodzi wyłącznie o wygaszenie
+        // szumu klatka-do-klatki, nie o UX-owe "combo jeszcze żyje przez chwilę".
+        private const int ActiveGraceMs = 450;
+        private DateTime _lastActiveUtc = DateTime.MinValue;
+
         // Cache ostatnio wysłanego stanu każdego przycisku IS_BTN — pozwala pominąć wysyłkę,
         // gdy tekst/pozycja/styl się nie zmieniły. Bez tego UpdateInGameHUD() wywoływane teraz
         // na każdym ticku telemetrii (kilkadziesiąt razy/s) zalałoby InSim identycznymi pakietami.
@@ -108,7 +121,12 @@ namespace LFSDriftBuddy
 
             ShowInGameRPMLimitter(_revLimiterNumeric.Value.ToString());
 
-            bool active = _drift.IsDrifting || _drift.IsSpeeding || _drift.IsBurnout;
+            bool activeNow = _drift.IsDrifting || _drift.IsSpeeding || _drift.IsBurnout;
+            if (activeNow) _lastActiveUtc = DateTime.UtcNow;
+
+            // Sklejka (patrz ActiveGraceMs powyżej) — nie zbijaj HUD-u do stanu idle na
+            // pojedynczej klatce ciszy tuż po aktywności, tylko po realnym zaniku.
+            bool active = activeNow || (DateTime.UtcNow - _lastActiveUtc).TotalMilliseconds < ActiveGraceMs;
 
             // Główny licznik wyniku ma być widoczny cały czas, gdy HUD jest włączony —
             // niezależnie od tego, czy w danej chwili trwa drift. Wcześniej gałąź "idle"
@@ -208,10 +226,24 @@ namespace LFSDriftBuddy
                 return;
             }
 
-            if (_drift.LastAwardedText != "")
-                Send(BTN_AWARD, _colorCurrentMain + _drift.LastAwardedText, l: 60, t: 22, w: 80, h: 6, bStyle: 5);
-            else
-                Send(BTN_AWARD, "^5" + text, l: 60, t: 22, w: 80, h: 6, bStyle: 5);
+            // BUG (naprawiony): wcześniej ta metoda IGNOROWAŁA przekazany `text` ilekroć
+            // _drift.LastAwardedText było niepuste (co trwa do BONUS_TIMEOUT_SEC=2.5s po
+            // KAŻDYM punktowanym zdarzeniu driftu) — pokazywała wtedy zawsze stary tekst
+            // z DriftEngine zamiast tego, co faktycznie poprosił wywołujący. Efekt: komunikaty
+            // kalibracji rev limitera, testowe przyciski kierownicy itd. potrafiły zostać po
+            // cichu podmienione/zjedzone, jeśli gracz akurat coś wcześniej wydriftował —
+            // wyglądało to jak "HUD się nie odświeża". Teraz zawsze wyświetlamy dokładnie to,
+            // co przyszło w parametrze — kolor dobierany tylko na podstawie tego, czy pokrywa
+            // się z aktualnym tekstem nagrody z DriftEngine (wtedy kolor etykiety driftu),
+            // czy to inny, zewnętrzny komunikat (wtedy stały kolor).
+            if (string.IsNullOrEmpty(text))
+            {
+                Send(BTN_AWARD, "", l: 60, t: 22, w: 80, h: 6, bStyle: 5);
+                return;
+            }
+
+            string colorPrefix = text == _drift.LastAwardedText ? _colorCurrentMain : "^5";
+            Send(BTN_AWARD, colorPrefix + text, l: 60, t: 22, w: 80, h: 6, bStyle: 5);
         }
 
         public void ShowInGameRPMLimitter(string text)

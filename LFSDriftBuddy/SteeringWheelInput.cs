@@ -65,6 +65,13 @@ public class SteeringWheelInput : IDisposable
         JoystickOffset.RotationX, JoystickOffset.RotationY, JoystickOffset.RotationZ
     };
 
+    // Computed once — was rebuilt via reflection every 20ms poll tick in PollXInput().
+    private static readonly XInputApi.GamepadButtonFlags[] XInputButtonFlags =
+        Enum.GetValues(typeof(XInputApi.GamepadButtonFlags))
+            .Cast<XInputApi.GamepadButtonFlags>()
+            .Where(f => f != XInputApi.GamepadButtonFlags.None)
+            .ToArray();
+
     public void SetBinding(int buttonIndex, Action onPressed)
     {
         _buttonBindings[buttonIndex] = onPressed;
@@ -176,14 +183,9 @@ public class SteeringWheelInput : IDisposable
         // Mapowanie flag przycisków XInput na indeksy 0-15 (kolejność jak w SharpDX.XInput.GamepadButtonFlags)
         var flags = state.Gamepad.Buttons;
         bool[] buttons = new bool[16];
-        // new_str
-        var allFlags = Enum.GetValues(typeof(XInputApi.GamepadButtonFlags))
-                            .Cast<XInputApi.GamepadButtonFlags>()
-                            .Where(f => f != XInputApi.GamepadButtonFlags.None)
-                            .ToArray();
 
-        for (int i = 0; i < allFlags.Length && i < buttons.Length; i++)
-            buttons[i] = flags.HasFlag(allFlags[i]);
+        for (int i = 0; i < XInputButtonFlags.Length && i < buttons.Length; i++)
+            buttons[i] = flags.HasFlag(XInputButtonFlags[i]);
 
         for (int i = 0; i < buttons.Length; i++)
         {

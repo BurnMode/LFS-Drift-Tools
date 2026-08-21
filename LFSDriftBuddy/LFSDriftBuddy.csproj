@@ -9,9 +9,9 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>disable</ImplicitUsings>
     <ApplicationIcon>app.ico</ApplicationIcon>
-	<Version>0.288.0820</Version>
-	<AssemblyVersion>0.288.0820.0</AssemblyVersion>
-	<FileVersion>0.288.0820.0</FileVersion>
+	<Version>0.289.0821</Version>
+	<AssemblyVersion>0.289.0821.0</AssemblyVersion>
+	<FileVersion>0.289.0821.0</FileVersion>
   </PropertyGroup>
 
   <ItemGroup>

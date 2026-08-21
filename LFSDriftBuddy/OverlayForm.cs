@@ -34,6 +34,11 @@ namespace LFSDriftBuddy
         private Font _activeFont17;
         private Font _activeFont15;
         private Font _activeFont11;
+        // Cached fonts for DrawSpeedoTachoContent (60fps loop) — avoid per-frame Font allocation.
+        private Font _tachoTickFont;
+        private Font _tachoGearFont;
+        private Font _tachoSpeedFont;
+        private Font _tachoUnitFont;
 
 
         private void LoadFonts()
@@ -59,6 +64,11 @@ namespace LFSDriftBuddy
             _activeFont20 = new Font(active, 20f, FontStyle.Bold);
             _activeFont17 = new Font(active, 17f, FontStyle.Bold);
             _activeFont15 = new Font(active, 15f, FontStyle.Bold);
+
+            _tachoTickFont = new Font(active, 12f, FontStyle.Bold);
+            _tachoGearFont = new Font(active, 26f, FontStyle.Bold);
+            _tachoSpeedFont = new Font(active, 40f, FontStyle.Bold);
+            _tachoUnitFont = new Font(active, 11f, FontStyle.Bold);
         }
 
         private IntPtr _targetHwnd = IntPtr.Zero;
@@ -124,16 +134,15 @@ namespace LFSDriftBuddy
         // wprost przez SetActive), bo drift/speeding liczą się z InSim MCI, który MOŻE
         // działać nawet bez OutGauge — bez tej blokady HUD punktacji przełączałby się
         // na "active" przy zerowych danych z silnika.
-        private DateTime _lastOutGaugeDataUtc = DateTime.MinValue;
-        private static readonly TimeSpan OutGaugeStaleThreshold = TimeSpan.FromMilliseconds(1500);
+        private readonly DataFreshnessGate _outGaugeFreshness = new(TimeSpan.FromMilliseconds(1500));
 
-        public void NotifyOutGaugeData() => _lastOutGaugeDataUtc = DateTime.UtcNow;
+        public void NotifyOutGaugeData() => _outGaugeFreshness.Ping();
 
         /// <summary>Wywołaj przy rozłączeniu z LFS, żeby stan nie "dogrywał" się jeszcze
-        /// przez OutGaugeStaleThreshold po AttachTo() przy kolejnym połączeniu.</summary>
-        public void ResetOutGaugeData() => _lastOutGaugeDataUtc = DateTime.MinValue;
+        /// przez próg świeżości po AttachTo() przy kolejnym połączeniu.</summary>
+        public void ResetOutGaugeData() => _outGaugeFreshness.Reset();
 
-        private bool HasFreshOutGaugeData => (DateTime.UtcNow - _lastOutGaugeDataUtc) < OutGaugeStaleThreshold;
+        private bool HasFreshOutGaugeData => _outGaugeFreshness.IsFresh;
 
         // ── aktywność (drift/speeding) + countdown combo ────
         // _isActiveNow to WYPADKOWA tego, co zgłasza SetActive (_activeRequested) ORAZ
@@ -1322,7 +1331,7 @@ namespace LFSDriftBuddy
             }
 
             // ── ticki (główne co 1000 RPM + numer, pomocnicze w połowie odcinka) — kolor konfigurowalny ──
-            using var tickFont = new Font(_activeFont11.FontFamily, 12f, FontStyle.Bold);
+            Font tickFont = _tachoTickFont;
             for (int i = 0; i <= majorTicks; i++)
             {
                 float frac = (float)i / majorTicks;
@@ -1391,7 +1400,7 @@ namespace LFSDriftBuddy
                 g.FillEllipse(hubBrush, cx - gearRadius + 3, cy - gearRadius + 3,
                     (gearRadius - 3) * 2, (gearRadius - 3) * 2);
 
-            using var gearFont = new Font(_activeFont32.FontFamily, 26f, FontStyle.Bold);
+            Font gearFont = _tachoGearFont;
             string gearText = GearToDisplayText(_currentGear);
             var gearSize = g.MeasureString(gearText, gearFont);
             DrawOutlinedText(g, gearText, gearFont, (cx - 2) - gearSize.Width / 2f, cy - gearSize.Height / 2f,
@@ -1403,8 +1412,8 @@ namespace LFSDriftBuddy
             //    AngVel) okazały się niewiarygodne w praktyce. Zostaje jedna, pewna liczba.)
             //    Konwersja na MPH (jeśli włączona) dotyczy WYŁĄCZNIE tej liczby — obrotomierz
             //    (RPM) jest od tego niezależny.
-            using var speedFont = new Font(_activeFont42.FontFamily, 40f, FontStyle.Bold);
-            using var unitFont = new Font(_activeFont11.FontFamily, 11f, FontStyle.Bold);
+            Font speedFont = _tachoSpeedFont;
+            Font unitFont = _tachoUnitFont;
 
             double displaySpeed = SpeedoTachoUseMph ? _displayedSpeedKmh * KmhToMph : _displayedSpeedKmh;
 
@@ -1557,6 +1566,10 @@ namespace LFSDriftBuddy
                 _activeFont20?.Dispose();
                 _activeFont17?.Dispose();
                 _activeFont15?.Dispose();
+                _tachoTickFont?.Dispose();
+                _tachoGearFont?.Dispose();
+                _tachoSpeedFont?.Dispose();
+                _tachoUnitFont?.Dispose();
 
                 _fontCollection?.Dispose();
                 _renderTimer?.Dispose();

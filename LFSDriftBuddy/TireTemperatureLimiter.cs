@@ -429,18 +429,16 @@ namespace LFSDriftBuddy
                     // Search within this chunk
                     for (int i = 0; i < bytesRead - _toFind.Length; i++)
                     {
+                        // Bug fix: previous version never set match=false on mismatch,
+                        // so it always "matched" at the first scanned offset.
                         bool match = true;
-                        int matches = 0;
-
                         for (int j = 0; j < _toFind.Length; j++)
                         {
-                            if (buffer[i + j] == _toFind[j])
-                                matches++;
-                        }
-
-                        if (matches >= 5) // debug threshold
-                        {
-                            Log?.Invoke($"Partial match: {matches}/{_toFind.Length}");
+                            if (buffer[i + j] != _toFind[j])
+                            {
+                                match = false;
+                                break;
+                            }
                         }
 
                         if (match)
