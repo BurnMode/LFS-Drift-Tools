@@ -115,39 +115,21 @@ namespace LFSDriftBuddy.InSim
     [System.Flags]
     public enum StateFlags : ushort
     {
-        ISS_GAME = 1,             // w grze (lub MPR)
-        ISS_REPLAY = 2,           // w SPR (powtórka jednoosobowa)
-        ISS_PAUSED = 4,           // pauza
-        ISS_SHIFTU = 8,           // tryb wolnej kamery (SHIFT+U)
-        ISS_SHIFTU_FOLLOW = 16,   // FV podąża za autem
-        ISS_SHIFTU_NO_OPT = 32,   // FV opcje widoku gracza
-        ISS_SHOW_2D = 64,         // widoczny ekran 2D
-        ISS_FRONT_END = 128,      // ekran startowy / menu główne
+        ISS_GAME = 1,             // in game (or MPR)
+        ISS_REPLAY = 2,           // in single-player replay
+        ISS_PAUSED = 4,
+        ISS_SHIFTU = 8,           // free view (SHIFT+U)
+        ISS_SHIFTU_FOLLOW = 16,   // free view follows car
+        ISS_SHIFTU_NO_OPT = 32,   // free view player options
+        ISS_SHOW_2D = 64,
+        ISS_FRONT_END = 128,      // front end / main menu
         ISS_MULTI = 256,
         ISS_MPSPEEDUP = 512,
         ISS_WINDOWED = 1024,
         ISS_SOUND_MUTE = 2048,
         ISS_VIEW_OVERRIDE = 4096,
-        ISS_VISIBLE = 8192,       // przyciski InSim widoczne
+        ISS_VISIBLE = 8192,       // InSim buttons visible
         ISS_TEXT_ENTRY = 16384,
-    }
-
-    /// <summary>
-    /// SMALL sub-types
-    /// </summary>
-    public enum SmallType : byte
-    {
-        SMALL_NONE = 0,
-        SMALL_SSP = 1,   // Start sending positions
-        SMALL_SSG = 2,   // Start sending gauges
-        SMALL_VTA = 3,   // Vote action
-        SMALL_TMS = 4,   // Time stop
-        SMALL_STP = 5,   // Time step
-        SMALL_RTP = 6,   // Race throttle percent
-        SMALL_NLI = 7,   // Node lap interval
-        SMALL_ALC = 8,   // Set allowed cars
-        SMALL_LCS = 9,   // Local car switches
-        SMALL_LCL = 10,  // Local car lights
     }
 
     /// <summary>

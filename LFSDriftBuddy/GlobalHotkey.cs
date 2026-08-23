@@ -26,13 +26,7 @@ public class GlobalHotkey : IDisposable
     private LowLevelKeyboardProc proc;
     private IntPtr hook;
 
-    // ────────────────────────────────────────────────────────
-    //  Konstruktor: przekazujesz pary (klawisz, akcja)
-    //  np. new GlobalHotkey(
-    //          (Keys.K, () => RPMLimitterCalibrate()),
-    //          (Keys.Oemcomma, () => DecreaseSomething()),
-    //          (Keys.OemPeriod, () => IncreaseSomething()));
-    // ────────────────────────────────────────────────────────
+    // Takes (key, callback) pairs, e.g. new GlobalHotkey((Keys.K, () => Foo())).
     public GlobalHotkey(params (Keys key, Action callback)[] bindings)
     {
         foreach (var b in bindings)
@@ -64,7 +58,6 @@ public class GlobalHotkey : IDisposable
             {
                 if (!state.Timer.IsRunning)
                     state.Timer.Start();
-
 
                 if (!state.Fired && state.Timer.ElapsedMilliseconds >= HoldThresholdMs)
                 {

@@ -7,7 +7,6 @@ using static LFSDriftBuddy.DriftEngine;
 namespace LFSDriftBuddy
 {
     // In-game IS_BTN HUD: score, run points, combo, drift label, indicator flash text, RPM limiter readout.
-    // Wydzielone z MainForm.cs — cała logika wysyłania przycisków InSim żyje teraz tutaj.
     public class InGameHudManager : IDisposable
     {
         private const byte BTN_SCORE = 1;   // total score top-center
@@ -37,22 +36,15 @@ namespace LFSDriftBuddy
         private int _awardTick;
         private string _colorCurrentMain = "^7";
 
-        // ── Tłumienie migotania RUN/COMBO/LABEL/IND ─────────────────────────────
-        // "active" (IsDrifting/IsSpeeding/IsBurnout) jest liczone na surowo, klatka po
-        // klatce telemetrii (~co 200ms, w rytm pakietów MCI) — pojedyncza klatka szumu
-        // w kącie/prędkości tuż przy progu (np. MIN_DRIFT_ANGLE_DEG) natychmiast zbija
-        // "active" na false, co czyściło te przyciski, żeby chwilę później znów je
-        // wysłać — widoczne jako miganie HUD-u. Krótka "sklejka" (grace period) ignoruje
-        // pojedyncze, chwilowe zniknięcie aktywności — dłuższa przerwa nadal poprawnie
-        // chowa HUD. Celowo krótsza niż DriftEngine.COMBO_TIMEOUT_SEC (3s, używane przez
-        // overlay do widocznego odliczania combo) — tu chodzi wyłącznie o wygaszenie
-        // szumu klatka-do-klatki, nie o UX-owe "combo jeszcze żyje przez chwilę".
+        // Grace period that suppresses HUD flicker: "active" is computed raw per telemetry frame,
+        // so a single noisy frame near a threshold (e.g. MIN_DRIFT_ANGLE_DEG) would clear these
+        // buttons and resend them a moment later. Shorter than DriftEngine.COMBO_TIMEOUT_SEC on
+        // purpose — this is just frame-noise suppression, not combo UX.
         private const int ActiveGraceMs = 450;
         private DateTime _lastActiveUtc = DateTime.MinValue;
 
-        // Cache ostatnio wysłanego stanu każdego przycisku IS_BTN — pozwala pominąć wysyłkę,
-        // gdy tekst/pozycja/styl się nie zmieniły. Bez tego UpdateInGameHUD() wywoływane teraz
-        // na każdym ticku telemetrii (kilkadziesiąt razy/s) zalałoby InSim identycznymi pakietami.
+        // Cache of the last sent state per button — skips resending unchanged text/position/style.
+        // Without it, UpdateInGameHUD() (called every telemetry tick) would flood InSim.
         private readonly Dictionary<byte, string> _lastSent = new();
 
         private void Send(byte id, string text, byte l, byte t, byte w, byte h, byte bStyle)
@@ -65,20 +57,18 @@ namespace LFSDriftBuddy
             _insim.ShowButton(id, text, l: l, t: t, w: w, h: h, bStyle: bStyle);
         }
 
-        // Wołane zawsze po _insim.DeleteAllButtons() — bez tego cache "myślałby", że przyciski
-        // wciąż stoją na serwerze InSim (skoro tekst się nie zmienił) i pomijałby ich ponowną
-        // wysyłkę, mimo że fizycznie zostały skasowane (np. przy wyjściu do menu/powtórki).
+        // Call after _insim.DeleteAllButtons() — otherwise the cache thinks unchanged buttons are
+        // still on the server and skips resending them after they were actually cleared.
         public void InvalidateCache() => _lastSent.Clear();
 
-        // Aktualizowane przez MainForm za każdym razem, gdy zmieni się paleta InSim
-        // (patrz MainForm.SetInSimColorSlot / SyncHudColors).
+        // Updated by MainForm whenever the InSim color palette changes.
         public string InSimColor1 = "^7";
         public string InSimColor2 = "^6";
         public string InSimColor3 = "^3";
         public string InSimColor4 = "^5";
         public string InSimColor5 = "^1";
 
-        // Wpychane przez MainForm przed każdym UpdateInGameHUD (patrz OnDriftScored).
+        // Pushed by MainForm before every UpdateInGameHUD call (see OnDriftScored).
         public string DriftLabel = "";
         public string IndicatorLabelRight = "";
         public string IndicatorLabelLeft = "";
@@ -124,16 +114,11 @@ namespace LFSDriftBuddy
             bool activeNow = _drift.IsDrifting || _drift.IsSpeeding || _drift.IsBurnout;
             if (activeNow) _lastActiveUtc = DateTime.UtcNow;
 
-            // Sklejka (patrz ActiveGraceMs powyżej) — nie zbijaj HUD-u do stanu idle na
-            // pojedynczej klatce ciszy tuż po aktywności, tylko po realnym zaniku.
+            // See ActiveGraceMs — don't drop to idle on a single quiet frame right after activity.
             bool active = activeNow || (DateTime.UtcNow - _lastActiveUtc).TotalMilliseconds < ActiveGraceMs;
 
-            // Główny licznik wyniku ma być widoczny cały czas, gdy HUD jest włączony —
-            // niezależnie od tego, czy w danej chwili trwa drift. Wcześniej gałąź "idle"
-            // poniżej kasowała też BTN_SCORE, co w połączeniu z tym, że UpdateInGameHUD()
-            // wywoływane jest tylko podczas aktywnego driftu/przyspieszenia, dawało efekt
-            // "HUD błyska na pół sekundy i znika" — score znikał w każdej chwili poza
-            // samym driftem, a odświeżenie przychodziło tylko sporadycznie.
+            // Total score stays visible whenever the HUD is on, active or not — the idle
+            // branch below used to also clear BTN_SCORE, making it disappear outside drifts.
             if (_showHudCheck.Checked && !active)
             {
                 Send(BTN_SCORE, $"{InSimColor1}{_drift.TotalScore:N0}{InSimColor1}",
@@ -166,8 +151,6 @@ namespace LFSDriftBuddy
 
                 _colorCurrentMain = angleCol;
 
-                // NOTE: oryginalnie liczone dwa razy (raz na IsSpeeding, potem nadpisywane
-                // identyczną logiką na IsDrifting) — martwy kod usunięty, zostaje tylko IsDrifting.
                 string scoreText = _drift.IsDrifting
                     ? $"{angleCol}{_drift.TotalScore:N0}"
                     : $"{angleCol}{_drift.TotalScore:N0}{angleCol}";
@@ -226,16 +209,8 @@ namespace LFSDriftBuddy
                 return;
             }
 
-            // BUG (naprawiony): wcześniej ta metoda IGNOROWAŁA przekazany `text` ilekroć
-            // _drift.LastAwardedText było niepuste (co trwa do BONUS_TIMEOUT_SEC=2.5s po
-            // KAŻDYM punktowanym zdarzeniu driftu) — pokazywała wtedy zawsze stary tekst
-            // z DriftEngine zamiast tego, co faktycznie poprosił wywołujący. Efekt: komunikaty
-            // kalibracji rev limitera, testowe przyciski kierownicy itd. potrafiły zostać po
-            // cichu podmienione/zjedzone, jeśli gracz akurat coś wcześniej wydriftował —
-            // wyglądało to jak "HUD się nie odświeża". Teraz zawsze wyświetlamy dokładnie to,
-            // co przyszło w parametrze — kolor dobierany tylko na podstawie tego, czy pokrywa
-            // się z aktualnym tekstem nagrody z DriftEngine (wtedy kolor etykiety driftu),
-            // czy to inny, zewnętrzny komunikat (wtedy stały kolor).
+            // Always shows exactly the passed text; color matches the drift-label color only
+            // when it equals DriftEngine's current award text, a fixed color otherwise.
             if (string.IsNullOrEmpty(text))
             {
                 Send(BTN_AWARD, "", l: 60, t: 22, w: 80, h: 6, bStyle: 5);
@@ -262,14 +237,13 @@ namespace LFSDriftBuddy
             }
         }
 
-        // Wywoływane po zakończeniu driftu — pokazuje award i po chwili sam się chowa (patrz AwardTimer_Tick).
+        // Called when a drift ends — shows the award, then hides it after a moment (see AwardTimer_Tick).
         public void StartAwardFlash()
         {
             _awardTick = 0;
             _awardTimer.Start();
         }
 
-        // Czyści wszystkie przyciski HUD-a (np. gdy użytkownik wyłączy checkbox "Show ingame HUD").
         public void ClearAllButtons()
         {
             Send(BTN_SCORE, "", l: xPos, t: 0, w: 1, h: 1, bStyle: 5);
@@ -293,7 +267,6 @@ namespace LFSDriftBuddy
             Send(BTN_COMBO, "", l: xPosSec, t: 0, w: 1, h: 1, bStyle: 2);
             Send(BTN_LABEL, "", l: xPos, t: 0, w: 1, h: 1, bStyle: 2);
 
-            // NOTE: taki sam martwy podwójny warunek jak w UpdateInGameHUD istniał tutaj — zredukowany do IsDrifting.
             string scoreText = _drift.IsDrifting
                 ? $"{InSimColor2}{_drift.TotalScore:N0}"
                 : $"{InSimColor1}{_drift.TotalScore:N0}{InSimColor1}";

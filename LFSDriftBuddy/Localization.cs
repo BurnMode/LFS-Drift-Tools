@@ -750,6 +750,54 @@ namespace LFSDriftBuddy
                     [AppLanguage.German] = "360°-DREH!",
                     [AppLanguage.Spanish] = "¡GIRO DE 360°!",
                 },
+                ["bonus.stationary_burnout"] = new()
+                {
+                    [AppLanguage.English] = "STATIONARY BURNOUT",
+                    [AppLanguage.Polish] = "BURNOUT W MIEJSCU",
+                    [AppLanguage.Turkish] = "SABİT BURNOUT",
+                    [AppLanguage.German] = "STEHENDER BURNOUT",
+                    [AppLanguage.Spanish] = "BURNOUT ESTÁTICO",
+                },
+                ["bonus.donut"] = new()
+                {
+                    [AppLanguage.English] = "DONUT!",
+                    [AppLanguage.Polish] = "DONUT!",
+                    [AppLanguage.Turkish] = "DONUT!",
+                    [AppLanguage.German] = "DONUT!",
+                    [AppLanguage.Spanish] = "¡DONUT!",
+                },
+                ["bonus.unstoppable"] = new()
+                {
+                    [AppLanguage.English] = "UNSTOPPABLE!",
+                    [AppLanguage.Polish] = "NIEPOWSTRZYMANY!",
+                    [AppLanguage.Turkish] = "DURDURULAMAZ!",
+                    [AppLanguage.German] = "UNAUFHALTSAM!",
+                    [AppLanguage.Spanish] = "¡IMPARABLE!",
+                },
+                ["bonus.clean_lap"] = new()
+                {
+                    [AppLanguage.English] = "CLEAN LAP!",
+                    [AppLanguage.Polish] = "CZYSTE OKRĄŻENIE!",
+                    [AppLanguage.Turkish] = "TEMİZ TUR!",
+                    [AppLanguage.German] = "SAUBERE RUNDE!",
+                    [AppLanguage.Spanish] = "¡VUELTA LIMPIA!",
+                },
+                ["bonus.burnout_to_drift"] = new()
+                {
+                    [AppLanguage.English] = "BURNOUT → DRIFT!",
+                    [AppLanguage.Polish] = "BURNOUT → DRIFT!",
+                    [AppLanguage.Turkish] = "BURNOUT → DRIFT!",
+                    [AppLanguage.German] = "BURNOUT → DRIFT!",
+                    [AppLanguage.Spanish] = "BURNOUT → DRIFT!",
+                },
+                ["bonus.drift_to_burnout"] = new()
+                {
+                    [AppLanguage.English] = "DRIFT → BURNOUT!",
+                    [AppLanguage.Polish] = "DRIFT → BURNOUT!",
+                    [AppLanguage.Turkish] = "DRIFT → BURNOUT!",
+                    [AppLanguage.German] = "DRIFT → BURNOUT!",
+                    [AppLanguage.Spanish] = "DRIFT → BURNOUT!",
+                },
                 ["drift.label.entry_good"] = new()
                 {
                     [AppLanguage.English] = "GOOD ENTRY",

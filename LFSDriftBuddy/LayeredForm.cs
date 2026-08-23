@@ -6,19 +6,16 @@ using System.Windows.Forms;
 
 namespace LFSDriftBuddy
 {
-    /// <summary>
-    /// Forma z per-pikselową przezroczystością (WS_EX_LAYERED + UpdateLayeredWindow).
-    /// W przeciwieństwie do TransparencyKey nie zostawia obwódek na wygładzonym tekście/kształtach.
-    /// </summary>
+    /// <summary>Form with per-pixel transparency (WS_EX_LAYERED + UpdateLayeredWindow) —
+    /// unlike TransparencyKey, doesn't leave fringing on anti-aliased text/shapes.</summary>
     public class LayeredForm : Form
     {
         private const int WS_EX_LAYERED = 0x80000;
         private const int WS_EX_TRANSPARENT = 0x20;
         private const int WS_EX_TOOLWINDOW = 0x80;
         private const int WS_EX_NOACTIVATE = 0x08000000;
-        private const int WS_EX_TOPMOST = 0x00000008; // ← NOWE
+        private const int WS_EX_TOPMOST = 0x00000008;
         private const int GWL_EXSTYLE = -20;
-          
 
         [DllImport("user32.dll")] private static extern int GetWindowLong(IntPtr hWnd, int nIndex);
         [DllImport("user32.dll")] private static extern int SetWindowLong(IntPtr hWnd, int nIndex, int dwNewLong);
@@ -43,7 +40,6 @@ namespace LFSDriftBuddy
         private const uint SWP_NOSIZE = 0x0001;
         private const uint SWP_NOACTIVATE = 0x0010;
 
-        
         public void ForceTopmost()
         {
             SetWindowPos(Handle, HWND_TOPMOST, 0, 0, 0, 0,
@@ -76,7 +72,6 @@ namespace LFSDriftBuddy
             }
         }
 
-       
         public void SetClickThrough(bool enabled)
         {
             int ex = GetWindowLong(Handle, GWL_EXSTYLE);
@@ -84,11 +79,11 @@ namespace LFSDriftBuddy
             SetWindowLong(Handle, GWL_EXSTYLE, ex);
         }
 
-        /// <summary>Podmienia całą zawartość okna na bitmapę 32bppArgb (pełna alpha per piksel).</summary>
+        /// <summary>Replaces the whole window content with a 32bppArgb bitmap (full per-pixel alpha).</summary>
         protected void SetBitmap(Bitmap bitmap)
         {
             if (bitmap.PixelFormat != PixelFormat.Format32bppArgb)
-                throw new ArgumentException("Bitmapa musi być w formacie 32bppArgb.");
+                throw new ArgumentException("Bitmap must be 32bppArgb.");
 
             IntPtr screenDc = GetDC(IntPtr.Zero);
             IntPtr memDc = CreateCompatibleDC(screenDc);
@@ -122,6 +117,6 @@ namespace LFSDriftBuddy
             }
         }
 
-        protected override void OnPaintBackground(PaintEventArgs e) { /* rysujemy ręcznie przez SetBitmap */ }
+        protected override void OnPaintBackground(PaintEventArgs e) { /* drawn manually via SetBitmap */ }
     }
 }

@@ -85,6 +85,26 @@ namespace LFSDriftBuddy
         // widoczności HUD-u. Pingowana z tego samego miejsca co overlay (OnRevData).
         private readonly DataFreshnessGate _outGaugeFreshness = new(TimeSpan.FromMilliseconds(1500));
 
+        // Polls _outGaugeFreshness on its own clock instead of relying on OnCarData (MCI can
+        // keep flowing even when OutGauge alone goes quiet, but if BOTH stop — e.g. menu without
+        // MCI — nothing would ever notice the fresh->stale edge otherwise). On that edge: cancels
+        // the drift engine run, closes the lap box, stops lap counting, resets the HUD to its
+        // idle color — same reaction the game already gets on leaving to the menu.
+        private readonly System.Windows.Forms.Timer _outGaugeFreshnessPoll = new() { Interval = 250 };
+        private bool _wasOutGaugeFresh = true;
+
+        private void OnOutGaugeFreshnessPollTick(object sender, EventArgs e)
+        {
+            bool fresh = _outGaugeFreshness.IsFresh;
+            if (fresh == _wasOutGaugeFresh) return;
+            _wasOutGaugeFresh = fresh;
+            if (fresh) return;   // odzyskanie danych — nic wymuszać, naturalnie wróci na kolejnym okrążeniu/ticku
+
+            _drift.SetOutGaugeDataFresh(false);
+            _drift.DeactivateLapCounting();
+            _overlay.SetLapBoxVisible(false);
+            _overlay.UpdateAccentColor(OverlayColor1);
+        }
 
 
         private const int TitleBarHeight = 40;
@@ -241,7 +261,7 @@ namespace LFSDriftBuddy
                 {
                     _drift.OnLapCompleted();
                     _overlay.UpdateBestLapScore(_drift.BestLapScore);
-                    if (_drift.LastLapScore >= 250)
+                    if (_drift.LastLapScore >= 1000)
                     { _overlay.UpdateLastLapScore(_drift.LastLapScore); }
 
                     _overlay.ShowLapResult(_drift.LastLapScore);
@@ -447,6 +467,9 @@ namespace LFSDriftBuddy
             _overlay = new OverlayForm();
             _overlay.ComboTimeoutSec = DriftEngine.COMBO_TIMEOUT_SEC;
             Localization.LanguageChanged += ApplyLanguage;
+
+            _outGaugeFreshnessPoll.Tick += OnOutGaugeFreshnessPollTick;
+            _outGaugeFreshnessPoll.Start();
 
             BuildUI();
 
@@ -3389,7 +3412,6 @@ namespace LFSDriftBuddy
                 return;
 
             double speed = e.Car.SpeedKmh;
-            double headingDeg = (e.Car.Heading / 65535.0) * 360.0;
 
             // Whole body on the UI thread. _drift.Update()/_indicators.Update() used to
             // run unmarshaled here while also being mutated from the UI thread elsewhere
@@ -3402,7 +3424,7 @@ namespace LFSDriftBuddy
 
                 _drift.SetOutGaugeDataFresh(_outGaugeFreshness.IsFresh);
                 _drift.Update(e.Car);
-                _indicators.Update(headingDeg);
+                _indicators.Update();
 
                 _speedKmh = speed;
                 _driftAngle = _drift.DriftAngleDeg;
@@ -3437,6 +3459,16 @@ namespace LFSDriftBuddy
                 // sporadycznie na chwilę — patrz komentarz w InGameHudManager.UpdateInGameHUD().
                 if (_showHudCheck.Checked && _insim.IsConnected && _insim.IsRaceNow)
                     _hud.UpdateInGameHUD();
+
+                // Catches bonuses whose award frame skips DriftScored (e.g. burnout 360-spin
+                // bonus when conditionNow flips false the same frame it's granted) — without
+                // this, points were credited but the popup never showed. Runs every tick,
+                // same dedup field as OnDriftScored.
+                if (!string.IsNullOrEmpty(_drift.LastAwardedText) && _drift.LastAwardedText != _lastOverlayBonusText)
+                {
+                    _overlay.ShowBonus(_drift.LastAwardedText);
+                    _lastOverlayBonusText = _drift.LastAwardedText;
+                }
             }));
         }
 
@@ -3557,6 +3589,11 @@ namespace LFSDriftBuddy
         ///     zostały istotnie naruszone (KISS = lekkie muśnięcie) czy jednak przerwane (HIT)
         /// Nazwa obiektu (np. "CONE", "POST", "ARMCO BARRIER") wchodzi bezpośrednio w tekst bonusu.
         /// </summary>
+        // LFS może wysłać IS_OBH kilka razy dla JEDNEGO fizycznego muśnięcia (wejście/wyjście
+        // kontaktu) — bez tej blokady każde z nich odpalało własny, niezależny 1-sekundowy
+        // timer i podwajało (albo więcej) bonus/karę za to samo zdarzenie.
+        private bool _objectHitCheckPending = false;
+
         private void HandleObjectHit(string objectName)
         {
             var buforspeed = _speedKmh;
@@ -3565,29 +3602,52 @@ namespace LFSDriftBuddy
             if (now - _lastObjectHitTime < ObjectHitCooldown) return;   // debounce — 1 efekt na uderzenie
             _lastObjectHitTime = now;
 
+            if (_drift.IsSpeeding)
+            {
+                if (_objectHitCheckPending) return;   // poprzednie muśnięcie wciąż czeka na rozstrzygnięcie
+                _objectHitCheckPending = true;
+
+                // szybka jazda (bez driftu) — czekamy 1s; jeśli prędkość nie spadła o >=10 km/h,
+                // uderzenie nie przerwało jazdy, więc zamiast kary dostajesz bonus "Niepowstrzymany"
+                var speedingDelayTimer = new System.Windows.Forms.Timer { Interval = 1000 };
+                speedingDelayTimer.Tick += (s, e) =>
+                {
+                    speedingDelayTimer.Stop();
+                    speedingDelayTimer.Dispose();
+                    _objectHitCheckPending = false;
+
+                    if (buforspeed - _speedKmh < 10)
+                        _drift.AwardUnstoppableBonus();
+                    else
+                    {
+                        _drift.ApplyPostPoints(-100, $"{objectName} HIT -100");
+                        _drift.RegisterCollisionPenalty();
+                    }
+
+                    PushObjectHitOverlayState();
+                };
+                speedingDelayTimer.Start();
+                return;
+            }
+
             if (!_drift.IsDrifting)
             {
                 // uderzenie poza driftem — natychmiastowa kara
                 _drift.ApplyPostPoints(-100, $"{objectName} HIT -100");
-                UpdateScoreLabels();
-                // Push PEŁNEGO stanu, nie tylko TotalScore — ApplyPostPoints (patrz DriftEngine)
-                // teraz zmienia też CurrentRunPoints/LapScore/ComboMultiplier, więc HUD ma się
-                // odświeżyć od razu, a nie dopiero przy najbliższej naturalnej klatce driftu
-                // (bez tego LapScore na overlayu potrafił chwilowo wyprzedzić "RUN"/combo).
-                _overlay.UpdateScore(_drift.TotalScore);
-                _overlay.UpdateRun(_drift.CurrentRunPoints);
-                _overlay.UpdateLapScore(_drift.LapScore);
-                _overlay.UpdateCombo(_drift.ComboMultiplier);
-                _overlay.ShowBonus(_drift.LastAwardedText);
-                if (_showHudCheck.Checked) _hud.ShowInGameAward(_drift.LastAwardedText);
+                _drift.RegisterCollisionPenalty();
+                PushObjectHitOverlayState();
                 return;
             }
+
+            if (_objectHitCheckPending) return;   // poprzednie muśnięcie wciąż czeka na rozstrzygnięcie
+            _objectHitCheckPending = true;
 
             // uderzenie podczas driftu — czekamy 1s i sprawdzamy, czy drift nadal trwa
             // w podobnym stanie (ciągłość kąta/prędkości), czy został naruszony
             var delayTimer = new System.Windows.Forms.Timer { Interval = 1000 };
             delayTimer.Tick += (s, e) =>
             {
+                _objectHitCheckPending = false;
                 double anglegap = 0;
                 if (buforangle > _driftAngle) { anglegap = buforangle - _driftAngle; }
                 if (buforangle < _driftAngle) { anglegap = _driftAngle - buforangle; }
@@ -3603,26 +3663,42 @@ namespace LFSDriftBuddy
                     else
                     {
                         _drift.ApplyPostPoints(-250, $"{objectName} HIT -250");
+                        _drift.RegisterCollisionPenalty();
                     }
                 }
                 else
                 {
                     _drift.ApplyPostPoints(-250, $"{objectName} HIT -250");
+                    _drift.RegisterCollisionPenalty();
                 }
 
-                UpdateScoreLabels();
-                // Push PEŁNEGO stanu, nie tylko TotalScore — ApplyPostPoints (patrz DriftEngine)
-                // teraz zmienia też CurrentRunPoints/LapScore/ComboMultiplier, więc HUD ma się
-                // odświeżyć od razu, a nie dopiero przy najbliższej naturalnej klatce driftu
-                // (bez tego LapScore na overlayu potrafił chwilowo wyprzedzić "RUN"/combo).
-                _overlay.UpdateScore(_drift.TotalScore);
-                _overlay.UpdateRun(_drift.CurrentRunPoints);
-                _overlay.UpdateLapScore(_drift.LapScore);
-                _overlay.UpdateCombo(_drift.ComboMultiplier);
-                _overlay.ShowBonus(_drift.LastAwardedText);
-                if (_showHudCheck.Checked) _hud.ShowInGameAward(_drift.LastAwardedText);
+                PushObjectHitOverlayState();
             };
             delayTimer.Start();
+        }
+
+        // Push PEŁNEGO stanu, nie tylko TotalScore — ApplyPostPoints (patrz DriftEngine) zmienia
+        // też CurrentRunPoints/LapScore/ComboMultiplier, więc HUD ma się odświeżyć od razu, a nie
+        // dopiero przy najbliższej naturalnej klatce driftu (bez tego LapScore na overlayu
+        // potrafił chwilowo wyprzedzić "RUN"/combo). Współdzielone przez wszystkie gałęzie HandleObjectHit.
+        private void PushObjectHitOverlayState()
+        {
+            UpdateScoreLabels();
+            _overlay.UpdateScore(_drift.TotalScore);
+            _overlay.UpdateRun(_drift.CurrentRunPoints);
+            _overlay.UpdateLapScore(_drift.LapScore);
+            _overlay.UpdateCombo(_drift.ComboMultiplier);
+
+            // Dedup against _lastOverlayBonusText — same guard OnCarData's per-tick catch-up
+            // check uses. Without it, this call shows the bonus once here and the catch-up
+            // check (which doesn't know this already happened) shows it again next tick.
+            if (!string.IsNullOrEmpty(_drift.LastAwardedText) && _drift.LastAwardedText != _lastOverlayBonusText)
+            {
+                _overlay.ShowBonus(_drift.LastAwardedText);
+                _lastOverlayBonusText = _drift.LastAwardedText;
+            }
+
+            if (_showHudCheck.Checked) _hud.ShowInGameAward(_drift.LastAwardedText);
         }
 
 
@@ -4789,6 +4865,8 @@ namespace LFSDriftBuddy
         {
             SaveSettings();
             _drift.FlushStats();   // bypass save throttle so the last few seconds aren't lost
+            _outGaugeFreshnessPoll.Stop();
+            _outGaugeFreshnessPoll.Dispose();
             Localization.LanguageChanged -= ApplyLanguage;
             if (_insim.IsConnected) { _insim.DeleteAllButtons(); System.Threading.Thread.Sleep(120); }
             try

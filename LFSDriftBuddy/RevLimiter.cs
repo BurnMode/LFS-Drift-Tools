@@ -8,16 +8,8 @@ using System.Windows.Forms;
 
 namespace LFSDriftBuddy
 {
-    // =========================================================
-    //  RevLimiter — OutGauge UDP reader + ignition cut via WinAPI
-    //
-    //  Wymaga w LFS cfg.txt:
-    //    OutGauge Mode 2
-    //    OutGauge Delay 1
-    //    OutGauge IP 127.0.0.1
-    //    OutGauge Port 35555
-    //    OutGauge ID 1
-    // =========================================================
+    // RevLimiter — OutGauge UDP reader + ignition cut via WinAPI.
+    // Requires in LFS cfg.txt: OutGauge Mode 2, Delay 1, IP 127.0.0.1, Port 35555, ID 1.
 
     public class OutGaugeData
     {
@@ -28,29 +20,23 @@ namespace LFSDriftBuddy
         public float EngTemp { get; set; }
         public float Fuel { get; set; }
 
-        // Krótka nazwa auta (np. "XFG", "FXO", "XRT") — to samo pole co IS_NPL.CName,
-        // ale dostępne od razu z każdego pakietu OutGauge, bez dodatkowego kablowania InSim.
-        // Używane do wykrywania zmiany pojazdu (patrz MainForm — ustawienia rev limitera per auto).
+        // Short car code ("XFG", "FXO"...) — same field as IS_NPL.CName, but available from
+        // every OutGauge packet without wiring up InSim. Used to detect a car change.
         public string Car { get; set; } = "";
 
-        public uint DashLights { get; set; }   // jakie kontrolki auto W OGÓLE ma (stałe)
-        public uint ShowLights { get; set; }   // ← NOWE: które kontrolki są TERAZ zapalone
+        public uint DashLights { get; set; }   // which lights the car HAS at all (fixed)
+        public uint ShowLights { get; set; }   // which lights are lit RIGHT NOW
         public bool Valid { get; set; }
 
-        // Bity ShowLights wg specyfikacji OutGauge (DL_*):
-        // DL_SHIFT=1, DL_FULLBEAM=2, DL_HANDBRAKE=4, DL_PITSPEED=8, DL_TC=16,
-        // DL_SIGNAL_L=32, DL_SIGNAL_R=64, DL_SIGNAL_ANY=128, DL_OILWARN=256,
-        // DL_BATTERY=512, DL_ABS=1024
-
-        // DL_HANDBRAKE = bit 2 (wartość 4) — sprawdzamy ShowLights, nie DashLights!
+        // ShowLights bits (OutGauge DL_*): SHIFT=1, FULLBEAM=2, HANDBRAKE=4, PITSPEED=8, TC=16,
+        // SIGNAL_L=32, SIGNAL_R=64, SIGNAL_ANY=128, OILWARN=256, BATTERY=512, ABS=1024.
         public bool HandbrakeOn => (ShowLights & 0x0004) != 0;
 
-        // DL_SIGNAL_L / DL_SIGNAL_R — realny stan lewego/prawego kierunkowskazu na desce
-        // rozdzielczej LFS (a nie nasza wewnętrzna intencja z IndicatorManager.CurrentState).
+        // Real dashboard turn-signal state, not our own toggle intent.
         public bool LeftSignalOn => (ShowLights & 0x0020) != 0;
         public bool RightSignalOn => (ShowLights & 0x0040) != 0;
 
-        // DL_SIGNAL_ANY — LFS zapala ten bit gdy którykolwiek kierunkowskaz (lub awaryjne) miga.
+        // Set when any signal (or hazards) is blinking, for cars without separate L/R bits.
         public bool AnySignalOn => (ShowLights & 0x0080) != 0;
     }
 
@@ -65,40 +51,38 @@ namespace LFSDriftBuddy
 
         private const uint WM_KEYDOWN = 0x0100;
         private const uint WM_KEYUP = 0x0101;
-        private const int VK_I = 0x49;  // klawisz "I" – zapłon w LFS
+        private const int VK_I = 0x49;  // "I" — ignition key in LFS
 
-        // ── Settings (publiczne, można zmieniać z UI) ─────────
-        public int RpmLimit { get; set; } = 7500;   // RPM przy którym tnie
-        public int CutMs { get; set; } = 40;     // czas wyłączenia zapłonu [ms]
-        public int CooldownMs { get; set; } = 30;     // minimalny czas między cięciami
+        // ── Settings (public, UI-adjustable) ──────────────────
+        public int RpmLimit { get; set; } = 7500;
+        public int CutMs { get; set; } = 40;      // ignition-off duration [ms]
+        public int CooldownMs { get; set; } = 30;      // min. time between cuts
         public bool Enabled { get; set; } = true;
 
         public int UdpPort { get; set; } = 35555;
 
-        // margines bezpieczeństwa dla watchdoga — jeśli minęło więcej niż CutMs + to,
-        // a silnik wciąż jest zgaszony, watchdog wymusza zapłon niezależnie od tego,
-        // co się stało z głównym cyklem cięcia (lag, zgubiony pakiet, wyjątek itp.)
+        // Safety margin for the watchdog — if more than CutMs + this has passed and the
+        // engine is still off, the watchdog forces ignition back on regardless of what
+        // happened to the main cut cycle (lag, dropped packet, exception, ...).
         public int WatchdogMarginMs { get; set; } = 200;
 
         // ── State ─────────────────────────────────────────────
         public OutGaugeData LastData { get; private set; } = new OutGaugeData();
         public bool IsCutting { get; private set; } = false;
 
-        public float lastRPM { get; private set; } = 0;
-
-        private volatile bool _ignitionState = true;  // zakładamy że silnik jest włączony na start
+        private volatile bool _ignitionState = true;  // assume engine on at start
         public bool IgnitionOn => _ignitionState;
         public bool IsRunning { get; private set; } = false;
-        public int CutCount { get; private set; } = 0;   // ile razy uciął
+        public int CutCount { get; private set; } = 0;
 
-        // ile razy watchdog musiał ratować sytuację — przydatne do debugowania,
-        // jeśli ktoś zgłosi że silnik regularnie "się gubi"
+        // How many times the watchdog had to recover — useful for debugging reports of
+        // the engine getting stuck off.
         public int WatchdogRecoveries { get; private set; } = 0;
 
         // ── Events ────────────────────────────────────────────
-        public event Action<OutGaugeData>? DataReceived;   // każdy pakiet UDP
-        public event Action? CutStarted;     // zapłon wyłączony
-        public event Action? CutEnded;       // zapłon przywrócony
+        public event Action<OutGaugeData>? DataReceived;
+        public event Action? CutStarted;
+        public event Action? CutEnded;
         public event Action<string>? Error;
 
         // ── Internals ─────────────────────────────────────────
@@ -122,8 +106,8 @@ namespace LFSDriftBuddy
                 IsRunning = true;
                 Task.Run(() => ReceiveLoop(_cts.Token));
 
-                // watchdog działa NIEZALEŻNIE od pętli UDP — nawet jeśli LFS przestanie
-                // wysyłać pakiety (lag, freeze), watchdog i tak sprawdzi stan zapłonu
+                // Watchdog runs independently of the UDP loop — even if LFS stops sending
+                // packets (lag, freeze), it still checks ignition state.
                 _watchdogTimer = new System.Threading.Timer(
                     _ => WatchdogCheck(),
                     null,
@@ -148,17 +132,14 @@ namespace LFSDriftBuddy
             _watchdogTimer?.Dispose();
             _watchdogTimer = null;
 
-            // jeśli program się zatrzymuje w trakcie cięcia, nie zostawiaj silnika zgaszonego
+            // Don't leave the engine cut if stopping mid-cut.
             ForceRestoreIgnitionIfNeeded("Stop()");
 
             IsCutting = false;
             LastData = new OutGaugeData();
         }
 
-        // ─────────────────────────────────────────────────────
-        //  Watchdog — pilnuje, żeby silnik nigdy nie został
-        //  zgaszony na dłużej niż powinien
-        // ─────────────────────────────────────────────────────
+        // ── Watchdog: makes sure the engine never stays cut longer than it should ──
         private void WatchdogCheck()
         {
             if (!_ignitionState)
@@ -171,8 +152,7 @@ namespace LFSDriftBuddy
             }
         }
 
-        // wspólna, bezpieczna ścieżka przywracania zapłonu — używana zarówno przez
-        // watchdog, jak i przez Stop(), żeby nie duplikować logiki
+        // Shared ignition-restore path used by both the watchdog and Stop().
         private void ForceRestoreIgnitionIfNeeded(string reason)
         {
             bool needsRestore;
@@ -184,7 +164,6 @@ namespace LFSDriftBuddy
             if (!needsRestore) return;
 
             Error?.Invoke($"Rev limiter: wymuszam przywrócenie zapłonu ({reason}) — silnik utknął zgaszony.");
-
 
             for (int attempt = 0; attempt < 3; attempt++)
             {
@@ -205,9 +184,7 @@ namespace LFSDriftBuddy
             CutEnded?.Invoke();
         }
 
-        // ─────────────────────────────────────────────────────
-        //  UDP receive loop
-        // ─────────────────────────────────────────────────────
+        // ── UDP receive loop ──────────────────────────────────
         private void ReceiveLoop(CancellationToken ct)
         {
             var ep = new IPEndPoint(IPAddress.Any, 0);
@@ -228,7 +205,7 @@ namespace LFSDriftBuddy
                 catch (SocketException)
                 {
                     if (!ct.IsCancellationRequested)
-                        continue;   // timeout – normalny stan gdy LFS nie wysyła
+                        continue;   // timeout — normal when LFS isn't sending
                 }
                 catch (Exception ex)
                 {
@@ -238,14 +215,12 @@ namespace LFSDriftBuddy
             }
         }
 
-        // ─────────────────────────────────────────────────────
-        //  RPM check & cut trigger
-        // ─────────────────────────────────────────────────────
+        // ── RPM check & cut trigger ───────────────────────────
         private void CheckRpm(float rpm, float throttle)
         {
             CooldownMs = Math.Max(Math.Min((CutMs / 2), 55), 20);
 
-            if (throttle < 0.20f) return;   // tylko przy wciśniętym gazie
+            if (throttle < 0.20f) return;   // only while on throttle
             if (rpm <= RpmLimit - 100) return;
             if (rpm <= RpmLimit && _ignitionState) return;
             lock (_lock)
@@ -258,7 +233,7 @@ namespace LFSDriftBuddy
                 CutCount++;
             }
 
-            // Uruchom asynchronicznie żeby nie blokować pętli UDP
+            // Run async so the UDP loop isn't blocked.
             Task.Run(() => DoCut());
         }
 
@@ -287,7 +262,6 @@ namespace LFSDriftBuddy
             }
             finally
             {
-
                 bool needsRestore;
                 lock (_lock)
                 {
@@ -308,11 +282,8 @@ namespace LFSDriftBuddy
             }
         }
 
-        // ─────────────────────────────────────────────────────
-        //  Wysyłanie klawisza "I" do okna LFS
-        // ─────────────────────────────────────────────────────
-        // zwraca false, jeśli nie udało się znaleźć okna LFS — pozwala wywołującemu
-        // wiedzieć, że warto spróbować ponownie (patrz ForceRestoreIgnitionIfNeeded)
+        // Sends the "I" ignition key to the LFS window. Returns false if the window wasn't
+        // found, so callers know a retry may be worth it.
         private bool TryPressIgnitionKey()
         {
             IntPtr hwnd = FindLfsWindow();
@@ -322,7 +293,7 @@ namespace LFSDriftBuddy
                 return false;
             }
 
-            // PostMessage jest nieblokujące i działa nawet gdy LFS jest w tle
+            // PostMessage is non-blocking and works even while LFS is in the background.
             PostMessage(hwnd, WM_KEYDOWN, (IntPtr)VK_I, (IntPtr)0x00170001);
             Thread.Sleep(40);
             PostMessage(hwnd, WM_KEYUP, (IntPtr)VK_I, (IntPtr)0xC0170001);
@@ -331,7 +302,6 @@ namespace LFSDriftBuddy
 
         private static IntPtr FindLfsWindow()
         {
-            // LFS używa różnych tytułów zależnie od wersji i trybu
             string[] titles = { "LFS", "Live for Speed", "LFS S3", "LFS S2", "LFS Demo" };
             foreach (var t in titles)
             {
@@ -341,31 +311,9 @@ namespace LFSDriftBuddy
             return IntPtr.Zero;
         }
 
-        // ─────────────────────────────────────────────────────
-        //  OutGauge packet parser
-        //
-        //  Struktura (96 bajtów, little-endian):
-        //  Offset  0 : uint   Time
-        //  Offset  4 : char[4] Car
-        //  Offset  8 : ushort Flags
-        //  Offset 10 : byte   Gear
-        //  Offset 11 : byte   PLID
-        //  Offset 12 : float  Speed  (m/s)
-        //  Offset 16 : float  RPM
-        //  Offset 20 : float  Turbo
-        //  Offset 24 : float  EngTemp
-        //  Offset 28 : float  Fuel
-        //  Offset 32 : float  OilPress
-        //  Offset 36 : float  OilTemp
-        //  Offset 40 : uint   DashLights
-        //  Offset 44 : uint   ShowLights
-        //  Offset 48 : float  Throttle
-        //  Offset 52 : float  Brake
-        //  Offset 56 : float  Clutch
-        //  Offset 60 : char[16] Display1
-        //  Offset 76 : char[16] Display2
-        //  Offset 92 : int    ID  (opcjonalne)
-        // ─────────────────────────────────────────────────────
+        // OutGauge packet, 96 bytes little-endian: Time(4) Car(4) Flags(2) Gear(1) PLID(1)
+        // Speed(4) RPM(4) Turbo(4) EngTemp(4) Fuel(4) OilPress(4) OilTemp(4) DashLights(4)
+        // ShowLights(4) Throttle(4) Brake(4) Clutch(4) Display1(16) Display2(16) ID(4, optional).
         private static OutGaugeData ParseOutGauge(byte[] d)
         {
             return new OutGaugeData
@@ -376,34 +324,21 @@ namespace LFSDriftBuddy
                 Gear = d[10],
                 EngTemp = d.Length >= 28 ? BitConverter.ToSingle(d, 24) : 0f,
                 Fuel = d.Length >= 32 ? BitConverter.ToSingle(d, 28) : 0f,
-                Car = d.Length >= 8 ? ParseCarName(d, 4) : "",   // ← NOWE
+                Car = d.Length >= 8 ? ParseCarName(d, 4) : "",
                 DashLights = d.Length >= 44 ? BitConverter.ToUInt32(d, 40) : 0u,
-                ShowLights = d.Length >= 48 ? BitConverter.ToUInt32(d, 44) : 0u, // ← NOWE
+                ShowLights = d.Length >= 48 ? BitConverter.ToUInt32(d, 44) : 0u,
                 Valid = true,
             };
         }
 
-        // Car[4] w OutGaugePack ma DWIE różne interpretacje w zależności od typu auta:
-        //
-        //  • auta OFICJALNE — krótki tekstowy kod, litery A-Z / cyfry, zakończony zerem
-        //    w polu 4-bajtowym (np. "XFG\0", "FZ5\0") albo wypełniający je całkowicie bez
-        //    terminatora (np. "MRT5").
-        //  • auta ZMODOWANE — LFS NIE wpisuje tu tekstu, tylko surowe bajty identyfikatora
-        //    moda/skina (ten sam numer, który gra pokazuje jako hex w przeglądarce modów,
-        //    np. "8C3894"). Poprzednia wersja tej metody filtrowała bajty do zakresu
-        //    drukowalnych znaków ASCII, co dla takich danych PRZYPADKOWO "trafiało" pojedynczy
-        //    bajt mieszczący się w tym zakresie (np. bajt 0x38 z "8C3894" to akurat ASCII '8'),
-        //    gubiąc resztę i zapisując bezsensowny jednoznakowy klucz w JSON-ie.
-        //
-        // Rozwiązanie: sprawdzamy, czy WSZYSTKIE bajty przed terminatorem są literami/cyframi
-        // (czyli wyglądają jak prawdziwy kod auta) — jeśli tak, dekodujemy jako tekst jak
-        // dotychczas. Jeśli nie, to na 100% mod — kodujemy WSZYSTKIE 4 surowe bajty jako hex
-        // (bez ucinania na zerze, bo 0x00 może być pełnoprawną częścią identyfikatora binarnego,
-        // nie terminatorem). Daje to stabilny, unikalny i czytelny klucz zgodny z tym, jak sam
-        // LFS identyfikuje mody.
+        // Car[4] means two different things depending on car type: official cars are a short
+        // A-Z/0-9 text code ("XFG\0"); modded cars carry raw mod-id bytes instead (e.g. "8C3894"
+        // as LFS shows it in the mod browser), which aren't text at all. So: if every byte before
+        // the terminator looks like a letter/digit, decode as text; otherwise it's a mod — encode
+        // all 4 raw bytes as hex (no truncation at 0x00, which can be a real part of a mod id).
         private static string ParseCarName(byte[] d, int offset)
         {
-            if (d[offset] == 0) return "";   // pole jeszcze puste — brak danych o aucie
+            if (d[offset] == 0) return "";
 
             int len = 0;
             while (len < 4 && d[offset + len] != 0) len++;

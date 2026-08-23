@@ -216,6 +216,14 @@ namespace LFSDriftBuddy
 
         public void OnLapCompleted()
         {
+            // KISS bonuses don't count as a penalty — only actual HIT penalties do
+            // (see RegisterCollisionPenalty, called from MainForm.HandleObjectHit). Also
+            // requires the same score threshold used to show LastLapScore in the overlay
+            // (see MainForm's LapCompleted handler) — no bonus for a trivial/empty lap.
+            if (!_lapHadPenalty && LapScore >= CLEAN_LAP_MIN_SCORE)
+                AwardFixedBonus(CLEAN_LAP_BONUS_POINTS, Localization.T("bonus.clean_lap"));
+            _lapHadPenalty = false;
+
             LastLapScore = LapScore;    // ← NOWE
             SaveLastLapRecord();
             if (!string.IsNullOrEmpty(_currentTrackKey) && LapScore > BestLapScore)
@@ -292,6 +300,23 @@ namespace LFSDriftBuddy
             _lastBurnoutHeadingDeg = null;
             _burnoutSpinAccumDeg = 0;
             _burnoutActiveDuringSpin = false;
+
+            _burnoutSpinComboCount = 0;
+            _lastBurnoutSpinBonusTime = DateTime.MinValue;
+            _donutComboCount = 0;
+            _lastDonutBonusTime = DateTime.MinValue;
+            _stationaryBurnoutStart = DateTime.MinValue;
+            _stationaryBurnoutTierAwarded = 0;
+            _driftSpinAccumDeg = 0;
+            _driftSpinLastHeadingDeg = null;
+            _driftSpinStartSet = false;
+            _driftSpinStartWasBurnout = false;
+            _donutPrevIsBurnout = null;
+            _wasDriftingPrev = false;
+            _lastTransitionBonusTime = DateTime.MinValue;
+            _burnoutActiveStartTime = DateTime.MinValue;
+            _pendingBurnoutToDrift = false;
+            _pendingDriftToBurnout = false;
         }
 
         public void Update(InSim.CompCar car)
@@ -328,7 +353,49 @@ namespace LFSDriftBuddy
                          && DriftAngleDeg >= MIN_DRIFT_ANGLE_DEG
                          && DriftAngleDeg <= MAX_DRIFT_ANGLE_DEG;
 
+            // Smooth burnout->drift transition bonus — checked BEFORE UpdateBurnout(), which
+            // only touches _lastBurnoutTime while burnout is active this same frame.
+            // Awarded only once BOTH sides held >= TRANSITION_MIN_ACTIVITY_SEC: the ending
+            // burnout (checked here, at the edge) AND the new drift (checked every tick below,
+            // cancelled if drift breaks before reaching the threshold).
+            bool driftJustStarted = drifting && !_wasDriftingPrev;
+            _wasDriftingPrev = drifting;
+
+            double precedingBurnoutSec = _burnoutActiveStartTime != DateTime.MinValue
+                ? (_lastBurnoutTime - _burnoutActiveStartTime).TotalSeconds : 0;
+
+            if (driftJustStarted && _lastBurnoutTime != DateTime.MinValue &&
+                (now - _lastBurnoutTime).TotalSeconds <= TRANSITION_BONUS_GRACE_SEC &&
+                precedingBurnoutSec >= TRANSITION_MIN_ACTIVITY_SEC)
+            {
+                _pendingBurnoutToDrift = true;
+                _pendingBurnoutToDriftStart = now;
+            }
+
+            if (_pendingBurnoutToDrift)
+            {
+                if (!drifting)
+                {
+                    _pendingBurnoutToDrift = false;   // broke off before reaching the threshold
+                }
+                else if ((now - _pendingBurnoutToDriftStart).TotalSeconds >= TRANSITION_MIN_ACTIVITY_SEC)
+                {
+                    _pendingBurnoutToDrift = false;
+                    if ((now - _lastTransitionBonusTime).TotalSeconds >= TRANSITION_BONUS_COOLDOWN_SEC)
+                    {
+                        _lastTransitionBonusTime = now;
+                        AwardMilestoneBonus(Localization.T("bonus.burnout_to_drift"));
+                    }
+                }
+            }
+
             UpdateBurnout(now, drifting, speeding, headingDeg);
+            UpdateStationaryBurnoutBonus(now);
+
+            // Donuts also count during burnout (a burnout with real radius can loop back to a
+            // point same as a drift can) — IsBurnout here already reflects this tick, UpdateBurnout()
+            // ran just above. InSim.txt: CompCar.X/Y — 65536 = 1 metre.
+            UpdateDonutTracking(now, drifting, IsBurnout, headingDeg, car.X / 65536f, car.Y / 65536f);
 
             // ── FAST DRIVE SCORING ─────────────────────────────
 
@@ -346,7 +413,9 @@ namespace LFSDriftBuddy
             if (!speeding && !drifting)
             {
                 IsSpeeding = false;
-                LastAwardedText = $"";
+                // LastAwardedText clearing is handled uniformly below (bonusgapCLR, time-based) —
+                // used to also clear it instantly here, which raced with any bonus that fires
+                // while not actively speeding/drifting/burnout (e.g. burnout spin, clean lap).
 
                 // Combo/CurrentRunPoints przeżywają krótką przerwę (COMBO_TIMEOUT_SEC) między
                 // drift↔speeding↔burnout — reset następuje dopiero gdy WSZYSTKIE trzy źródła
@@ -361,6 +430,8 @@ namespace LFSDriftBuddy
                     CurrentRunPoints = 0;
                     ComboMultiplier = 1;
                     driftTotalTime = 0;
+                    _burnoutSpinComboCount = 0;
+                    _donutComboCount = 0;
                     eBrakeCount--;
                     if (eBrakeCount <= 0)
                     {
@@ -923,6 +994,40 @@ namespace LFSDriftBuddy
             SaveCurrentDriver();
         }
 
+        // Shared payout for the milestone bonuses (stationary burnout / donut / smooth
+        // transitions / spin streaks): 100 pts * current combo, +0.1 combo via ApplyPostPoints.
+        // Sets _lastBonusTime itself so the tick-based bonusgapCLR clear (see Update()) doesn't
+        // wipe the text before it reaches the overlay.
+        private void AwardMilestoneBonus(string label)
+        {
+            long pts = (long)Math.Round(MILESTONE_BONUS_POINTS * ComboMultiplier);
+            _lastBonusTime = DateTime.UtcNow;
+            ApplyPostPoints(pts, $"{label} +{pts}");
+        }
+
+        // Same as AwardMilestoneBonus but a flat point value, not combo-scaled (e.g. clean lap).
+        private void AwardFixedBonus(long points, string label)
+        {
+            _lastBonusTime = DateTime.UtcNow;
+            ApplyPostPoints(points, $"{label} +{points}");
+        }
+
+        /// <summary>Call when a collision ends in an actual penalty (HIT), not a KISS bonus —
+        /// suppresses the clean-lap bonus for the lap in progress.</summary>
+        public void RegisterCollisionPenalty() => _lapHadPenalty = true;
+
+        /// <summary>Fast-driving hit that didn't cost speed — no penalty, bonus instead.
+        /// See MainForm.HandleObjectHit.</summary>
+        private const double UNSTOPPABLE_COOLDOWN_SEC = 0.5;
+        private DateTime _lastUnstoppableBonusTime = DateTime.MinValue;
+        public void AwardUnstoppableBonus()
+        {
+            var now = DateTime.UtcNow;
+            if ((now - _lastUnstoppableBonusTime).TotalSeconds < UNSTOPPABLE_COOLDOWN_SEC) return;
+            _lastUnstoppableBonusTime = now;
+            AwardMilestoneBonus(Localization.T("bonus.unstoppable"));
+        }
+
         // Jednorazowa ocena kąta entry — wywoływana dokładnie raz na sekwencję driftu,
         // w klatce w której mija DRIFT_ENTRY_EVAL_SEC od jej rozpoczęcia. Kąt poniżej progu
         // "good" (50°) nie daje żadnego bonusu — to nie kara, po prostu entry nie było
@@ -1145,7 +1250,7 @@ namespace LFSDriftBuddy
 
         // Rzeczywista prędkość (SpeedKmh, z InSim MCI) musi być poniżej tego progu —
         // inaczej to już normalna jazda/drift, nie stanie w miejscu.
-        private const double BURNOUT_MAX_REAL_SPEED_KMH = 30.0;
+        private const double BURNOUT_MAX_REAL_SPEED_KMH = 25.0;
 
         // RPM musi być WYRAŹNIE powyżej typowego jałowego biegu (zwykle 800–1200 RPM w
         // LFS) — inaczej silnik pracujący na postoju (auto stoi, kierowca nic nie robi)
@@ -1171,6 +1276,47 @@ namespace LFSDriftBuddy
 
         // Bonus za każdy pełny obrót (360°) podczas aktywnego burnoutu ("bączek").
         private const long BURNOUT_SPIN_BONUS_POINTS = 250;
+
+        // Milestone bonuses (stationary burnout / donut / smooth transitions): base points
+        // times current combo, same as ApplyPostPoints' automatic +0.1 combo growth.
+        private const long MILESTONE_BONUS_POINTS = 100;
+
+        // Clean lap: flat 250 (not combo-scaled) if no collision penalty (HIT) happened this
+        // lap AND LapScore reached this threshold — see RegisterCollisionPenalty / _lapHadPenalty.
+        // Same value as MainForm's LastLapScore display threshold — keep both in sync.
+        private const long CLEAN_LAP_BONUS_POINTS = 250;
+        private const long CLEAN_LAP_MIN_SCORE = 1500;
+        private bool _lapHadPenalty = false;
+
+        // Stationary burnout: speed threshold + time tiers, one bonus per tier crossed.
+        private const double STATIONARY_BURNOUT_MAX_SPEED_KMH = 1.0;
+        private static readonly double[] STATIONARY_BURNOUT_TIERS_SEC = { 5, 10, 15, 20 };
+
+        // Donut: full 360° while drifting, counted only if the car ends up back near where
+        // the lap started (otherwise it's just a long drift, not a loop around a point).
+        private const double DONUT_RADIUS_METERS = 15.0;
+        private const double DRIFT_SPIN_ABANDON_SEC = 1.0;
+
+        // Max gap (s) between one activity ending and the other starting to count as a
+        // smooth burnout<->drift transition.
+        private const double TRANSITION_BONUS_GRACE_SEC = 1.0;
+
+        // Cooldown between transition bonuses (either direction) — stops rapid flicker
+        // (e.g. brief speed dips at the drifting/burnout boundary) from spamming the popup.
+        private const double TRANSITION_BONUS_COOLDOWN_SEC = 2.0;
+        private DateTime _lastTransitionBonusTime = DateTime.MinValue;
+
+        // The ending activity must have actually lasted this long — filters out brief
+        // flicker-y bursts from counting as a "smooth transition". Same threshold applies
+        // to the NEW activity too (see _pendingBurnoutToDrift/_pendingDriftToBurnout) —
+        // the bonus only fires once both sides held it.
+        private const double TRANSITION_MIN_ACTIVITY_SEC = 2.0;
+        private DateTime _burnoutActiveStartTime = DateTime.MinValue;
+
+        private bool _pendingBurnoutToDrift = false;
+        private DateTime _pendingBurnoutToDriftStart = DateTime.MinValue;
+        private bool _pendingDriftToBurnout = false;
+        private DateTime _pendingDriftToBurnoutStart = DateTime.MinValue;
 
         public bool IsBurnout { get; private set; }
 
@@ -1219,6 +1365,30 @@ namespace LFSDriftBuddy
         // Bez tego pojedyncza klatka migotania IsBurnout (przez szum wheelDiff) dokładnie
         // w momencie ukończenia obrotu potrafiłaby po cichu "zjeść" należny bonus.
         private bool _burnoutActiveDuringSpin = false;
+
+        // Consecutive spin/donut counters — tracked separately, each resets if more than
+        // SPIN_COMBO_GAP_SEC passes since its own last award (also reset with combo).
+        private const double SPIN_COMBO_GAP_SEC = 7.5;
+        private int _burnoutSpinComboCount = 0;
+        private DateTime _lastBurnoutSpinBonusTime = DateTime.MinValue;
+        private int _donutComboCount = 0;
+        private DateTime _lastDonutBonusTime = DateTime.MinValue;
+
+        // Stationary burnout tiers — see UpdateStationaryBurnoutBonus.
+        private DateTime _stationaryBurnoutStart = DateTime.MinValue;
+        private int _stationaryBurnoutTierAwarded = 0;
+
+        // Donut tracking — heading accumulation while drifting + lap start position.
+        private double? _driftSpinLastHeadingDeg = null;
+        private double _driftSpinAccumDeg = 0;
+        private DateTime _lastDriftSpinActivityTime = DateTime.MinValue;
+        private float _driftSpinStartX, _driftSpinStartY;
+        private bool _driftSpinStartSet = false;
+        private bool _driftSpinStartWasBurnout = false;
+        private bool? _donutPrevIsBurnout = null;
+
+        // Previous frame's drifting state — detects the burnout->drift transition edge.
+        private bool _wasDriftingPrev = false;
 
         /// <summary>
         /// Aktualizuje telemetrię silnika (RPM, gaz, bieg) używaną do wykrywania burnoutu —
@@ -1276,8 +1446,14 @@ namespace LFSDriftBuddy
 
                 if (_burnoutActiveDuringSpin)
                 {
-                    ApplyPostPoints(BURNOUT_SPIN_BONUS_POINTS,
-                        $"{Localization.T("drift.label.burnout_spin")} +{BURNOUT_SPIN_BONUS_POINTS}");
+                    if ((now - _lastBurnoutSpinBonusTime).TotalSeconds > SPIN_COMBO_GAP_SEC)
+                        _burnoutSpinComboCount = 0;
+                    _burnoutSpinComboCount++;
+                    _lastBurnoutSpinBonusTime = now;
+
+                    string spinLabel = Localization.T("drift.label.burnout_spin")
+                        + (_burnoutSpinComboCount > 1 ? $" x{_burnoutSpinComboCount}" : "");
+                    AwardMilestoneBonus(spinLabel);
                 }
 
                 _burnoutActiveDuringSpin = false;   // reset dla kolejnego, nowego obrotu
@@ -1302,7 +1478,8 @@ namespace LFSDriftBuddy
                 }
                 _burnoutConditionStart = DateTime.MinValue;
                 IsBurnout = false;
-                
+                _pendingDriftToBurnout = false;   // broke off before reaching the threshold
+
                 return;
             }
 
@@ -1318,7 +1495,35 @@ namespace LFSDriftBuddy
             IsBurnout = true;
 
             if (justActivated)
+            {
+                _burnoutActiveStartTime = now;
                 DriftStarted?.Invoke();
+
+                // Awarded only once BOTH sides held >= TRANSITION_MIN_ACTIVITY_SEC: the ending
+                // drift (checked here) AND the new burnout (checked below every tick, cancelled
+                // above in the !conditionNow branch if burnout breaks before reaching it).
+                double precedingDriftSec = _driftEntryStartTime != DateTime.MinValue
+                    ? (_lastDriftTime - _driftEntryStartTime).TotalSeconds : 0;
+
+                if (_lastDriftTime != DateTime.MinValue &&
+                    (now - _lastDriftTime).TotalSeconds <= TRANSITION_BONUS_GRACE_SEC &&
+                    precedingDriftSec >= TRANSITION_MIN_ACTIVITY_SEC)
+                {
+                    _pendingDriftToBurnout = true;
+                    _pendingDriftToBurnoutStart = now;
+                }
+            }
+
+            if (_pendingDriftToBurnout &&
+                (now - _pendingDriftToBurnoutStart).TotalSeconds >= TRANSITION_MIN_ACTIVITY_SEC)
+            {
+                _pendingDriftToBurnout = false;
+                if ((now - _lastTransitionBonusTime).TotalSeconds >= TRANSITION_BONUS_COOLDOWN_SEC)
+                {
+                    _lastTransitionBonusTime = now;
+                    AwardMilestoneBonus(Localization.T("bonus.drift_to_burnout"));
+                }
+            }
 
             // im wyższe RPM ponad próg aktywacji, tym szybciej rośnie ComboMultiplier —
             // ten sam wzorzec co w drifcie (ComboMultiplier rośnie z angleScore co klatkę,
@@ -1348,6 +1553,106 @@ namespace LFSDriftBuddy
             );
         }
 
+        // Stationary burnout: SpeedKmh under STATIONARY_BURNOUT_MAX_SPEED_KMH while IsBurnout,
+        // held continuously — one bonus per time tier crossed (5s/10s/15s/20s).
+        private void UpdateStationaryBurnoutBonus(DateTime now)
+        {
+            bool stationary = IsBurnout && SpeedKmh < STATIONARY_BURNOUT_MAX_SPEED_KMH;
+            if (!stationary)
+            {
+                _stationaryBurnoutStart = DateTime.MinValue;
+                _stationaryBurnoutTierAwarded = 0;
+                return;
+            }
+
+            if (_stationaryBurnoutStart == DateTime.MinValue)
+                _stationaryBurnoutStart = now;
+
+            double heldSec = (now - _stationaryBurnoutStart).TotalSeconds;
+            while (_stationaryBurnoutTierAwarded < STATIONARY_BURNOUT_TIERS_SEC.Length &&
+                   heldSec >= STATIONARY_BURNOUT_TIERS_SEC[_stationaryBurnoutTierAwarded])
+            {
+                int tierSec = (int)STATIONARY_BURNOUT_TIERS_SEC[_stationaryBurnoutTierAwarded];
+                _stationaryBurnoutTierAwarded++;
+                AwardMilestoneBonus($"{Localization.T("bonus.stationary_burnout")} {tierSec}s");
+            }
+        }
+
+        // Donut: accumulates heading change while drifting OR burning out (same idea as the
+        // burnout spin accumulator) and, on each full 360°, checks whether the car is back near
+        // where that loop started — otherwise it's just a long drift, not a loop around a point.
+        // A drift<->burnout switch cancels whatever was accumulated so far (leftover rotation
+        // from a rejected stationary burnout spin was bleeding into the next drift and awarding
+        // a "phantom" donut a moment later) — a loop must complete within one unbroken state-run.
+        private void UpdateDonutTracking(DateTime now, bool drifting, bool isBurnout, double headingDeg, float carXMeters, float carYMeters)
+        {
+            bool spinning = drifting || isBurnout;
+            if (!spinning)
+            {
+                if ((now - _lastDriftSpinActivityTime).TotalSeconds > DRIFT_SPIN_ABANDON_SEC)
+                {
+                    _driftSpinAccumDeg = 0;
+                    _driftSpinLastHeadingDeg = null;
+                    _driftSpinStartSet = false;
+                }
+                _donutPrevIsBurnout = null;
+                return;
+            }
+
+            if (_donutPrevIsBurnout.HasValue && _donutPrevIsBurnout.Value != isBurnout)
+            {
+                _driftSpinAccumDeg = 0;
+                _driftSpinLastHeadingDeg = null;
+                _driftSpinStartSet = false;
+            }
+            _donutPrevIsBurnout = isBurnout;
+
+            if (!_driftSpinStartSet)
+            {
+                _driftSpinStartX = carXMeters;
+                _driftSpinStartY = carYMeters;
+                _driftSpinStartSet = true;
+                _driftSpinStartWasBurnout = isBurnout;
+            }
+
+            if (_driftSpinLastHeadingDeg.HasValue)
+            {
+                double delta = headingDeg - _driftSpinLastHeadingDeg.Value;
+                while (delta > 180) delta -= 360;
+                while (delta < -180) delta += 360;
+                _driftSpinAccumDeg += Math.Abs(delta);
+            }
+            _driftSpinLastHeadingDeg = headingDeg;
+            _lastDriftSpinActivityTime = now;
+
+            while (_driftSpinAccumDeg >= 360.0)
+            {
+                _driftSpinAccumDeg -= 360.0;
+
+                double dx = carXMeters - _driftSpinStartX;
+                double dy = carYMeters - _driftSpinStartY;
+                bool positionOk = Math.Sqrt(dx * dx + dy * dy) <= DONUT_RADIUS_METERS;
+                bool crossedState = !(_driftSpinStartWasBurnout && isBurnout);
+
+                if (positionOk && crossedState)
+                {
+                    if ((now - _lastDonutBonusTime).TotalSeconds > SPIN_COMBO_GAP_SEC)
+                        _donutComboCount = 0;
+                    _donutComboCount++;
+                    _lastDonutBonusTime = now;
+
+                    string label = Localization.T("bonus.donut") + (_donutComboCount > 1 ? $" x{_donutComboCount}" : "");
+                    AwardMilestoneBonus(label);
+                }
+
+                _driftSpinStartWasBurnout = isBurnout;   // start state for the next loop
+
+                // start point for the next loop
+                _driftSpinStartX = carXMeters;
+                _driftSpinStartY = carYMeters;
+            }
+        }
+
         // Stopniowanie burnoutu na wzór GetLabelKind (drift/speed) — łączy nadwyżkę RPM
         // ponad próg aktywacji z czasem trwania w jedną skalę "intensywności", tak jak
         // tam łączy się kąt i prędkość. Dzielnik 100 dobrany tak, żeby solidne trzymanie
@@ -1373,6 +1678,7 @@ namespace LFSDriftBuddy
             IsDrifting = false;
             IsSpeeding = false;
             IsBurnout = false;
+            _lapHadPenalty = false;
             _burnoutConditionStart = DateTime.MinValue;
             _lastBurnoutTime = DateTime.MinValue;
             _lastBurnoutHeadingDeg = null;
@@ -1384,6 +1690,23 @@ namespace LFSDriftBuddy
             _previouslyDrifting = false;
             _lastDriftTime = DateTime.MinValue;
             _lastSpeedingTime = DateTime.MinValue;
+
+            _burnoutSpinComboCount = 0;
+            _lastBurnoutSpinBonusTime = DateTime.MinValue;
+            _donutComboCount = 0;
+            _lastDonutBonusTime = DateTime.MinValue;
+            _stationaryBurnoutStart = DateTime.MinValue;
+            _stationaryBurnoutTierAwarded = 0;
+            _driftSpinAccumDeg = 0;
+            _driftSpinLastHeadingDeg = null;
+            _driftSpinStartSet = false;
+            _driftSpinStartWasBurnout = false;
+            _donutPrevIsBurnout = null;
+            _wasDriftingPrev = false;
+            _lastTransitionBonusTime = DateTime.MinValue;
+            _burnoutActiveStartTime = DateTime.MinValue;
+            _pendingBurnoutToDrift = false;
+            _pendingDriftToBurnout = false;
 
             BestRunScore = 0;
             BestDriftDurationMs = 0;

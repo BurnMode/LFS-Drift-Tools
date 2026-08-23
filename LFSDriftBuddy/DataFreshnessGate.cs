@@ -2,13 +2,9 @@ using System;
 
 namespace LFSDriftBuddy
 {
-    /// <summary>
-    /// Śledzi "świeżość" ostatnio odebranej próbki telemetrii (np. pakietu OutGauge) —
-    /// wspólna logika znacznika czasu używana w kilku miejscach (widoczność HUD-u
-    /// prędkościomierza i blokada trybu active w OverlayForm, blokada wykrywania
-    /// drift/speeding/burnout w DriftEngine), żeby każde z nich nie duplikowało tej
-    /// samej arytmetyki na DateTime.
-    /// </summary>
+    /// <summary>Tracks freshness of the last received telemetry sample (e.g. an OutGauge
+    /// packet) — shared timestamp logic reused across OverlayForm (speedo HUD visibility,
+    /// active-mode gating) and DriftEngine (drift/speeding/burnout detection gating).</summary>
     public sealed class DataFreshnessGate
     {
         private readonly TimeSpan _staleThreshold;
@@ -19,14 +15,13 @@ namespace LFSDriftBuddy
             _staleThreshold = staleThreshold;
         }
 
-        /// <summary>Zarejestruj odebranie świeżej próbki (np. pakietu OutGauge).</summary>
+        /// <summary>Register a fresh sample.</summary>
         public void Ping() => _lastPingUtc = DateTime.UtcNow;
 
-        /// <summary>Wymuś stan "martwe" natychmiast, bez czekania na upłynięcie progu
-        /// (np. przy jawnym rozłączeniu z LFS).</summary>
+        /// <summary>Force "stale" immediately, without waiting for the threshold to elapse.</summary>
         public void Reset() => _lastPingUtc = DateTime.MinValue;
 
-        /// <summary>Czy ostatni Ping() był w oknie staleThreshold.</summary>
+        /// <summary>Whether the last Ping() was within staleThreshold.</summary>
         public bool IsFresh => (DateTime.UtcNow - _lastPingUtc) < _staleThreshold;
     }
 }

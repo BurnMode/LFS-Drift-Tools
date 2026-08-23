@@ -469,7 +469,7 @@ namespace LFSDriftBuddy
             float valueY = boxY + titleSize.Height + padV;
 
 
-            if (_lapResultScore >= 250)
+            if (_lapResultScore >= 1000)
             {
                 // ── tytuł: statyczny, wyśrodkowany ──
                 DrawOutlinedText(g, title, titleFont, titleX, titleY,

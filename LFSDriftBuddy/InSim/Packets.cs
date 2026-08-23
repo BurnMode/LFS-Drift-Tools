@@ -3,19 +3,11 @@ using System.Text;
 
 namespace LFSDriftBuddy.InSim
 {
-    // =========================================================
-    //  Packet builders – hand-crafted byte arrays
-    //
-    //  CRITICAL InSim rule: the Size byte in EVERY packet is
-    //  actual_byte_count / 4  (LFS multiplies it back by 4).
-    //  E.g. a 44-byte packet sends Size = 11.
-    // =========================================================
+    // Packet builders — hand-crafted byte arrays. Size byte = actual_byte_count / 4 in every packet.
 
     public static class Packets
     {
-        // ── IS_ISI – Initialise InSim ────────────────────────
-        // Actual size = 44 bytes  →  Size byte = 11
-        // InSim version 10 added the InSimVer field (was Sp0 before)
+        // IS_ISI – Initialise InSim, 44 bytes.
         public static byte[] BuildISI(
             ushort udpPort   = 0,
             ISFlags flags    = ISFlags.ISF_MCI,
@@ -59,8 +51,7 @@ namespace LFSDriftBuddy.InSim
             return packet;
         }
 
-        // ── IS_TINY – Keep-alive / generic 4-byte ────────────
-        // Actual size = 4  →  Size byte = 1
+        // IS_TINY – keep-alive / generic 4-byte.
         public static byte[] BuildTiny(byte reqI, TinyType subT)
         {
             return new byte[]
@@ -72,47 +63,8 @@ namespace LFSDriftBuddy.InSim
             };
         }
 
-        // ── IS_SMALL – Enable MCI streaming ──────────────────
-        // Actual size = 8  →  Size byte = 2
-        public static byte[] BuildSmall(byte reqI, SmallType subT, uint uval)
-        {
-            byte[] packet = new byte[8];
-            packet[0] = 2;                      // Size = 8 / 4
-            packet[1] = (byte)PacketType.ISP_SMALL;
-            packet[2] = reqI;
-            packet[3] = (byte)subT;
-            packet[4] = (byte)(uval & 0xFF);
-            packet[5] = (byte)((uval >> 8) & 0xFF);
-            packet[6] = (byte)((uval >> 16) & 0xFF);
-            packet[7] = (byte)((uval >> 24) & 0xFF);
-            return packet;
-        }
-
-        // ── IS_MST – Send text message/command to LFS ────────
-        // Actual size = 68  →  Size byte = 17
-        public static byte[] BuildMST(string message)
-        {
-            byte[] packet = new byte[68];
-            packet[0] = 17;                     // Size = 68 / 4
-            packet[1] = (byte)PacketType.ISP_MST;
-            packet[2] = 0;
-            packet[3] = 0;
-
-            byte[] msgBytes = PadString(message, 64);
-            Array.Copy(msgBytes, 0, packet, 4, 64);
-            return packet;
-        }
-
-        // ── IS_BTN – Display button in LFS ───────────────────
-        // Actual size = 12 + textLen bytes  →  Size byte = actual / 4
-        //
-        // RULES (from InSim.txt / wiki):
-        //   • ReqI MUST be non-zero
-        //   • Size = actual_bytes / 4
-        //   • Text must be null-terminated and padded to multiple of 4 bytes (min 4)
-        //   • ISB_DARK = 32, ISB_LIGHT = 16
-        //   • L/T/W/H are in the 0-200 coordinate space (not percentages)
-        //   • Recommended area: L 0-110, T 30-170
+        // IS_BTN – display button in LFS. ReqI must be non-zero. Text is null-terminated,
+        // padded to a multiple of 4. L/T/W/H use the 0-200 coordinate space, not percentages.
         public static byte[] BuildBTN(
             byte   ucid,
             byte   clickId,
@@ -156,9 +108,7 @@ namespace LFSDriftBuddy.InSim
             return packet;
         }
 
-        // ── IS_BFN – Delete buttons ───────────────────────────
-        // Actual size = 8  →  Size byte = 2
-        // SubT values: BFN_DEL_BTN=0 (delete one), BFN_CLEAR=3 (delete all for UCID)
+        // IS_BFN – delete buttons (SubT 3 = BFN_CLEAR, all buttons for this UCID).
         public static byte[] BuildBFN_DeleteAll(byte ucid)
         {
             return new byte[]
@@ -174,7 +124,6 @@ namespace LFSDriftBuddy.InSim
             };
         }
 
-        // ── Helpers ───────────────────────────────────────────
         private static byte[] PadString(string s, int length)
         {
             byte[] result = new byte[length];
@@ -187,11 +136,7 @@ namespace LFSDriftBuddy.InSim
         }
     }
 
-    // =========================================================
-    //  IS_MCI – Multi Car Info packet parser
-    //  Header = 4 bytes, each CompCar sub-structure = 28 bytes
-    //  Note: Size byte here is also actual_bytes/4
-    // =========================================================
+    // IS_MCI – Multi Car Info. Header = 4 bytes, each CompCar = 28 bytes.
     public class CompCar
     {
         public ushort Node;
@@ -200,17 +145,14 @@ namespace LFSDriftBuddy.InSim
         public byte   Position;
         public byte   Info;
         public byte   Sp3;
-        public int    X;        // world position in 1/16 m units
+        public int    X;        // world position — InSim.txt: 65536 = 1 metre
         public int    Y;
         public int    Z;
-        public ushort Speed;    // speed in (m/s * 100)
+        public ushort Speed;    // 32768 = 100 m/s
         public ushort Direction;
         public ushort Heading;
         public short  AngVel;
 
-        /// <summary>Speed converted to km/h.</summary>
-        /// InSim docs: Speed word where 32768 = 100 m/s
-        /// Formula: (Speed / 32768.0) * 100 m/s * 3.6 = km/h
         public double SpeedKmh => (Speed / 32768.0) * 100.0 * 3.6;
         public double SpeedMs  => (Speed / 32768.0) * 100.0;
 

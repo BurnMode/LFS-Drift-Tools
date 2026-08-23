@@ -4,11 +4,8 @@ using System.Runtime.InteropServices;
 
 namespace LFSDriftBuddy
 {
-    /// <summary>
-    /// Tire Temperature Limiter for LFS 0.8C
-    /// Patches LFS.exe memory to prevent tire temperature increase during drift.
-
-    /// </summary>
+    /// <summary>Tire Temperature Limiter for LFS 0.8C — patches LFS.exe memory to prevent
+    /// tire temperature increase during drift.</summary>
     public class TireTemperatureLimiter
     {
         // ──────────────────────────────────────────────────────
@@ -108,9 +105,7 @@ namespace LFSDriftBuddy
         public bool IsPatched => _isPatched;
         public bool IsConnected => _lfsHandle != IntPtr.Zero;
 
-        /// <summary>
-        /// Initialize connection to LFS process
-        /// </summary>
+        /// <summary>Initialize connection to LFS process.</summary>
         public bool Connect()
         {
             try
@@ -154,9 +149,7 @@ namespace LFSDriftBuddy
             }
         }
 
-        /// <summary>
-        /// Disconnect from LFS process
-        /// </summary>
+        /// <summary>Disconnect from LFS process.</summary>
         public void Disconnect()
         {
             try
@@ -179,9 +172,7 @@ namespace LFSDriftBuddy
             }
         }
 
-        /// <summary>
-        /// Apply tire temperature limiting patch
-        /// </summary>
+        /// <summary>Apply tire temperature limiting patch.</summary>
         public bool Patch()
         {
             if (_isPatched)
@@ -276,9 +267,7 @@ namespace LFSDriftBuddy
             }
         }
 
-        /// <summary>
-        /// Remove tire temperature limiting patch (restore original code)
-        /// </summary>
+        /// <summary>Remove tire temperature limiting patch (restore original code).</summary>
         public bool Unpatch()
         {
             if (!_isPatched)
@@ -315,10 +304,7 @@ namespace LFSDriftBuddy
             }
         }
 
-        /// <summary>
-        /// Try alternative patterns for different LFS versions
-        /// Set alternativePattern to try different byte sequences
-        /// </summary>
+        /// <summary>Try alternative find/replace byte patterns for other LFS versions.</summary>
         public bool TryAlternativePattern(byte[] findPattern, byte[] replacePattern)
         {
             if (findPattern == null || replacePattern == null || findPattern.Length != replacePattern.Length)

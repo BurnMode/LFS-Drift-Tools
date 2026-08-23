@@ -30,26 +30,22 @@ namespace LFSDriftBuddy.InSim
         public byte PLID { get; set; }
     }
 
-
-
     public class CheckpointCrossedEventArgs : PlidEventArgs
     {
-        /// <summary>0 = meta, 1 = pierwszy punkt kontrolny, 2 = drugi, 3 = trzeci (wg edytora layoutu LFS)</summary>
+        /// <summary>0 = finish, 1-3 = checkpoint number (per LFS layout editor).</summary>
         public int CheckpointIndex { get; set; }
         public bool Forward { get; set; }
     }
 
-    /// <summary>Uderzenie w dowolny obiekt autocrossowy (IS_OBH) — zastępuje wcześniejsze
-    /// osobne zdarzenia PostHit/TyreStackHit jednym uogólnionym, z nazwą obiektu
-    /// rozpoznaną na podstawie oficjalnej listy indeksów AXO_ z lfs.net/programmer/lyt.</summary>
+    /// <summary>Hit on any autocross object (IS_OBH). Object name is resolved from the
+    /// official AXO_ index list (lfs.net/programmer/lyt).</summary>
     public class ObjectHitEventArgs : PlidEventArgs
     {
-        /// <summary>Surowy indeks obiektu (Index z IS_OBH), 4–191 wg specyfikacji LFS.</summary>
+        /// <summary>Raw IS_OBH.Index, 4-191 per the LFS spec.</summary>
         public byte ObjectIndex { get; set; }
 
-        /// <summary>Czytelna nazwa obiektu (angielska, w stylu istniejących tekstów bonusów
-        /// typu "POST"/"TYRE STACK") — "OBJECT #N" jako fallback dla nierozpoznanych/
-        /// zarezerwowanych indeksów.</summary>
+        /// <summary>Readable object name ("POST", "TYRE STACK"...), "OBJECT #N" fallback
+        /// for unrecognised/reserved indices.</summary>
         public string ObjectName { get; set; }
     }
 
@@ -64,24 +60,23 @@ namespace LFSDriftBuddy.InSim
         public event EventHandler Connected;
         public event EventHandler Disconnected;
 
-        // Wywoływane WYŁĄCZNIE gdy próba połączenia (Connect()) się nie powiedzie —
-        // w odróżnieniu od Disconnected, które sygnalizuje utratę JUŻ nawiązanego
-        // połączenia. Rozróżnienie pozwala UI (patrz MainForm — przełącznik
-        // połączenia) bezpiecznie cofnąć widoczny stan "włączony", jeśli połączenie
-        // faktycznie się nie udało, bez mylenia tego z rozłączeniem w trakcie sesji.
+        // Fires only when Connect() itself fails, unlike Disconnected (which signals losing an
+        // already-established connection) — lets the UI safely revert its connect toggle without
+        // confusing a failed attempt with a mid-session disconnect.
         public event EventHandler<string>? ConnectFailed;
         public event EventHandler<LapCompletedEventArgs> LapCompleted;
         public event EventHandler<string> TrackChanged;
-        public event EventHandler<string> LayoutChanged;   // ← NOWE
-        public event EventHandler<PlidEventArgs> CarReset;        // ← NOWE: IS_CRS
-        public event EventHandler RaceRestarted;   // ← NOWE: IS_RST
-        public event EventHandler<PlidEventArgs> PitLaneEntered;  // ← NOWE: IS_PLA, Fact=1
-        public event EventHandler<PlidEventArgs> PitLaneExited;   // ← NOWE: IS_PLA, Fact=0
+        public event EventHandler<string> LayoutChanged;
+        public event EventHandler<PlidEventArgs> CarReset;         // IS_CRS
+        public event EventHandler RaceRestarted;                   // IS_RST
+        public event EventHandler<PlidEventArgs> PitLaneEntered;   // IS_PLA, Fact=1
+        public event EventHandler<PlidEventArgs> PitLaneExited;    // IS_PLA, Fact=0
         public event EventHandler<PlidEventArgs> PlayerPitted;
-        public event EventHandler<CheckpointCrossedEventArgs> CheckpointCrossed;   // ← NOWE: IS_UCO
-        public event EventHandler<PlidEventArgs> RestrictedAreaEntered;            // ← NOWE: IS_PEN (zła trasa / zakazany obszar)
+        public event EventHandler<CheckpointCrossedEventArgs> CheckpointCrossed;   // IS_UCO
+        public event EventHandler<PlidEventArgs> RestrictedAreaEntered;            // IS_PEN (wrong way / restricted area)
         public event EventHandler<ObjectHitEventArgs> ObjectHit;
         public event EventHandler<byte[]> RawObjectHitDebug;
+
         // ── State ─────────────────────────────────────────────
         private TcpClient _client;
         private NetworkStream _stream;
@@ -93,15 +88,12 @@ namespace LFSDriftBuddy.InSim
         public StateFlags GameState => _gameState;
         public byte ViewPLID { get; private set; } = 0;
         public string CurrentTrack { get; private set; } = "";
-        public string CurrentLayout { get; private set; } = "";   // ← NOWE, "" = brak customowego layoutu (.lyt)
+        public string CurrentLayout { get; private set; } = "";   // "" = no custom layout (.lyt)
 
-        // ── Nazwy obiektów autocrossowych (AXO_*) ──────────────────────────
-        // Źródło: oficjalna lista indeksów z https://www.lfs.net/programmer/lyt (LYT 0.8A).
-        // Zakres poprawnych fizycznych obiektów to Index 4–191 (Index<4 i >=192 to obiekty
-        // kontrolne: start/checkpointy/marshal/route checker — obsługiwane gdzie indziej,
-        // nie przez IS_OBH). Wpisy bez oficjalnej nazwy (numerowane "dziury" w enumie,
-        // zarezerwowane na przyszłość) celowo pominięte — dla nich Send() użyje fallbacku
-        // "OBJECT #N" w GetObjectName(), więc nic nie zostanie po cichu zignorowane.
+        // Autocross object names (AXO_*) — from https://www.lfs.net/programmer/lyt (LYT 0.8A).
+        // Valid physical objects are Index 4-191 (outside that range = control objects: start/
+        // checkpoints/marshal, handled elsewhere, not via IS_OBH). Entries without an official
+        // name are omitted on purpose — GetObjectName() falls back to "OBJECT #N" for those.
         private static readonly Dictionary<byte, string> AxoObjectNames = new()
         {
             [4] = "CHALK LINE",
@@ -175,24 +167,18 @@ namespace LFSDriftBuddy.InSim
             [179] = "CONCRETE WEDGE",
         };
 
-        /// <summary>Zwraca czytelną nazwę obiektu autocrossowego dla danego indeksu (IS_OBH.Index),
-        /// z fallbackiem dla indeksów bez oficjalnej nazwy (zarezerwowane/przyszłe obiekty).</summary>
+        /// <summary>Readable name for an autocross object index (IS_OBH.Index).</summary>
         private static string GetObjectName(byte index) =>
             AxoObjectNames.TryGetValue(index, out var name) ? name : $"OBJECT #{index}";
-
-
-
 
         public bool IsConnected => _client?.Connected == true && _running;
 
         // ─────────────────────────────────────────────────────
         //  Connect
         // ─────────────────────────────────────────────────────
-        // Maksymalny czas oczekiwania na nawiązanie połączenia TCP. Bez tego
-        // TcpClient.Connect() na nieosiągalnym hoście (zły IP/zapora, nie: "port
-        // zamknięty", co zwraca błąd niemal natychmiast) potrafi blokować nawet
-        // ~20s (domyślny timeout Windows) — za długo, żeby UI mogło szybko i
-        // bezpiecznie cofnąć widoczny stan przełącznika połączenia na wyłączony.
+        // Without a timeout, TcpClient.Connect() on an unreachable host (bad IP/firewall, not a
+        // simply-closed port, which fails almost instantly) can block for ~20s (Windows default),
+        // too long for the UI to quickly revert the connect toggle.
         private const int ConnectTimeoutMs = 4000;
 
         public void Connect(string host, int port, string adminPassword = "", ushort mciInterval = 200)
@@ -203,9 +189,6 @@ namespace LFSDriftBuddy.InSim
 
                 _client = new TcpClient();
 
-                // Ograniczony czas próby — jeśli nie uda się w ConnectTimeoutMs,
-                // przerywamy (Cleanup() zamyka nawiązywane w tle gniazdo) i zgłaszamy
-                // porażkę przez ConnectFailed, zamiast wisieć w nieskończoność.
                 var connectTask = _client.ConnectAsync(host, port);
                 if (!connectTask.Wait(ConnectTimeoutMs))
                 {
@@ -217,10 +200,8 @@ namespace LFSDriftBuddy.InSim
                 }
 
                 _stream = _client.GetStream();
-
                 _running = true;
 
-                // Start receive thread
                 _receiveThread = new Thread(ReceiveLoop)
                 {
                     IsBackground = true,
@@ -228,11 +209,11 @@ namespace LFSDriftBuddy.InSim
                 };
                 _receiveThread.Start();
 
-                // Send IS_ISI – request MCI packets every mciInterval ms
+                // Request MCI packets every mciInterval ms.
                 var isi = Packets.BuildISI(
                      udpPort: 0,
-                     flags: ISFlags.ISF_MCI | ISFlags.ISF_LOCAL | ISFlags.ISF_OBH,   // ← tylko OBH, bez AXM
-                     prefix: 33,               // '!'
+                     flags: ISFlags.ISF_MCI | ISFlags.ISF_LOCAL | ISFlags.ISF_OBH,
+                     prefix: 33,
                      interval: mciInterval,
                      admin: adminPassword,
                      iname: "-Drift Tools-"
@@ -244,8 +225,6 @@ namespace LFSDriftBuddy.InSim
 
                 RaiseStatus("Połączono z LFS na " + host + ":" + port);
                 Connected?.Invoke(this, EventArgs.Empty);
-                Send(Packets.BuildTiny(4, TinyType.TINY_SST));
-                Send(Packets.BuildTiny(5, TinyType.TINY_AXI));
             }
             catch (Exception ex)
             {
@@ -256,9 +235,6 @@ namespace LFSDriftBuddy.InSim
             }
         }
 
-        // ─────────────────────────────────────────────────────
-        //  Disconnect
-        // ─────────────────────────────────────────────────────
         public void Disconnect()
         {
             if (_running)
@@ -270,9 +246,6 @@ namespace LFSDriftBuddy.InSim
             }
         }
 
-        // ─────────────────────────────────────────────────────
-        //  Send raw bytes
-        // ─────────────────────────────────────────────────────
         public void Send(byte[] data)
         {
             try
@@ -285,13 +258,7 @@ namespace LFSDriftBuddy.InSim
             }
         }
 
-        // ─────────────────────────────────────────────────────
-        //  Show a button inside LFS
-        // ─────────────────────────────────────────────────────
-        // Show a button inside LFS
-        // Coordinates are 0-200 (not percentages).
-        // Recommended area: L 0-110, T 30-170
-        // ISB_DARK = 32, ISB_LIGHT = 16
+        // Coordinates are 0-200 (not percentages). Recommended area: L 0-110, T 30-170.
         public void ShowButton(byte clickId, string text,
                                byte l = 35, byte t = 32, byte w = 40, byte h = 8,
                                byte bStyle = 32 /* ISB_DARK */ )
@@ -304,22 +271,20 @@ namespace LFSDriftBuddy.InSim
                 typeIn: 0,
                 l: l, t: t, w: w, h: h,
                 text: text,
-                reqI: 1          // non-zero is required!
+                reqI: 1
             );
             Send(btn);
         }
 
-        // HUD (i cała logika zależna od "jestem w wyścigu") ma działać zarówno podczas
-        // aktywnej jazdy, jak i podczas powtórki (SPR) — stąd ISS_REPLAY NIE jest już
-        // wykluczające. LFS ustawia bit ISS_GAME przez cały czas gry (łącznie z powtórką),
-        // więc jedyne co realnie wyklucza to bycie w menu głównym (ISS_FRONT_END).
+        // HUD logic runs during both live driving and replay (SPR) — ISS_GAME stays set the
+        // whole time including replay, so only the front-end/main-menu screen excludes it.
         private static bool ComputeIsRaceNow(StateFlags flags) =>
             (flags & StateFlags.ISS_GAME) != 0
             && (flags & StateFlags.ISS_FRONT_END) == 0;
 
         public bool IsRaceNow => ComputeIsRaceNow(_gameState);
 
-        public event EventHandler<bool>? RaceStateChanged; // true = wszedł do wyścigu
+        public event EventHandler<bool>? RaceStateChanged; // true = entered a race
 
         /// <summary>Delete all InSim buttons for local connection (UCID=0).</summary>
         public void DeleteAllButtons()
@@ -341,10 +306,8 @@ namespace LFSDriftBuddy.InSim
                     int read = _stream.Read(tmp, 0, tmp.Length);
                     if (read == 0) break;  // connection closed
 
-                    // Append to buffer
                     if (_bufferLen + read > _buffer.Length)
                     {
-                        // Grow buffer
                         byte[] newBuf = new byte[_buffer.Length * 2];
                         Array.Copy(_buffer, newBuf, _bufferLen);
                         _buffer = newBuf;
@@ -352,7 +315,6 @@ namespace LFSDriftBuddy.InSim
                     Array.Copy(tmp, 0, _buffer, _bufferLen, read);
                     _bufferLen += read;
 
-                    // Process complete packets
                     ProcessBuffer();
                 }
             }
@@ -373,23 +335,19 @@ namespace LFSDriftBuddy.InSim
         {
             while (_bufferLen >= 4)
             {
-                // CRITICAL: LFS Size byte = actual_bytes / 4
-                // So actual packet size = Size * 4
+                // LFS Size byte = actual_bytes / 4.
                 int packetSize = _buffer[0] * 4;
-                if (packetSize < 4) packetSize = 4;   // minimum safety
+                if (packetSize < 4) packetSize = 4;
 
-                if (_bufferLen < packetSize) break;    // Incomplete packet yet
+                if (_bufferLen < packetSize) break;   // incomplete packet
 
-                // Copy complete packet
                 byte[] packet = new byte[packetSize];
                 Array.Copy(_buffer, packet, packetSize);
 
-                // Shift buffer
                 int remaining = _bufferLen - packetSize;
                 Array.Copy(_buffer, packetSize, _buffer, 0, remaining);
                 _bufferLen = remaining;
 
-                // Dispatch
                 HandlePacket(packet);
             }
         }
@@ -405,20 +363,17 @@ namespace LFSDriftBuddy.InSim
 
             switch (type)
             {
-                // ── Keep-alive ────────────────────────────────
                 case PacketType.ISP_TINY:
                     if (packet.Length >= 4 && packet[3] == (byte)TinyType.TINY_NONE)
-                        Send(packet);  // Echo back
+                        Send(packet);  // echo back — keep-alive
                     else if (packet.Length >= 4 && packet[3] == (byte)TinyType.TINY_AXC)
-                        HandleLayoutCleared();  // wszystkie obiekty usunięte = brak layoutu
+                        HandleLayoutCleared();  // all objects removed = no layout
                     break;
 
-                // ── Multi Car Info ────────────────────────────
                 case PacketType.ISP_MCI:
                     HandleMCI(packet);
                     break;
 
-                // ── Version reply ─────────────────────────────
                 case PacketType.ISP_VER:
                     HandleVer(packet);
                     break;
@@ -457,31 +412,22 @@ namespace LFSDriftBuddy.InSim
                     HandlePen(packet);
                     break;
 
-
-
-                case PacketType.ISP_OBH:            // ← NOWE
+                case PacketType.ISP_OBH:
                     HandleObh(packet);
                     break;
             }
         }
 
-
-
-
         private void HandleObh(byte[] p)
         {
-            // IS_OBH: w aktualnej wersji LFS pakiet ma 28 bajtów (potwierdzone empirycznie zrzutami hex),
-            // Index leży na offsecie 26, OBHFlags na offsecie 27.
+            // IS_OBH is 28 bytes in current LFS versions; Index at offset 26.
             if (p.Length < 28) return;
 
             byte plid = p[3];
             byte index = p[26];
-            byte obhFlags = p[27];
 
-            // Zakres 4–191 to jedyne poprawne fizyczne obiekty wg specyfikacji LFS (patrz
-            // lfs.net/programmer/lyt, NOTE5) — poniżej 4 i od 192 w górę to obiekty kontrolne
-            // (start/checkpointy/marshal/route checker), obsługiwane osobno gdzie indziej
-            // (IS_UCO/IS_PEN), nie przez IS_OBH.
+            // 4-191 is the only valid physical-object range (lfs.net/programmer/lyt, NOTE5) —
+            // below/above that are control objects handled by IS_UCO/IS_PEN instead.
             if (index < 4 || index >= 192) return;
 
             ObjectHit?.Invoke(this, new ObjectHitEventArgs
@@ -494,65 +440,62 @@ namespace LFSDriftBuddy.InSim
 
         private void HandleUco(byte[] p)
         {
-            // IS_UCO: Size=28 — zgłasza przejazd przez punkt kontrolny InSim lub wjazd/wyjazd z okręgu InSim
-            // ObjectInfo (Index/Flags identyfikujące obiekt) leży na offsecie 20: X(short) Y(short) Zbyte Flags Index Heading
+            // IS_UCO: InSim checkpoint/circle crossing. Index at offset 26.
             if (p.Length < 28) return;
 
             byte plid = p[3];
-            byte ucoAction = p[5];   // UCO_CIRCLE_ENTER=0 / UCO_CIRCLE_LEAVE=1 / UCO_CP_FWD=2 / UCO_CP_REV=3
+            byte ucoAction = p[5];   // 0=circle enter / 1=circle leave / 2=cp fwd / 3=cp rev
 
             byte flags = p[25];
             byte index = p[26];
 
-            if (index != 252) return;   // 252 = punkt kontrolny InSim (253 to okrąg InSim — na razie nieobsługiwany)
+            if (index != 252) return;   // 252 = InSim checkpoint (253 = circle, unsupported)
 
-            int checkpointNumber = flags & 0x03;   // 00=meta / 01=1.punkt / 10=2.punkt / 11=3.punkt
+            int checkpointNumber = flags & 0x03;
 
             CheckpointCrossed?.Invoke(this, new CheckpointCrossedEventArgs
             {
                 PLID = plid,
                 CheckpointIndex = checkpointNumber,
-                Forward = ucoAction == 2   // UCO_CP_FWD
+                Forward = ucoAction == 2
             });
         }
 
         private void HandlePen(byte[] p)
         {
-            // IS_PEN: Size=8 — kara nadana/zdjęta. LFS wysyła Reason=PENR_WRONG_WAY (2)
-            // zarówno dla złej trasy, jak i wjazdu na zakazany obszar (Restricted area) w layoucie.
+            // IS_PEN: penalty given/cleared. LFS sends Reason=PENR_WRONG_WAY (2) for both
+            // wrong-way driving and entering a restricted area.
             if (p.Length < 8) return;
 
             byte plid = p[3];
             byte reason = p[6];
 
-            if (reason == 2)   // PENR_WRONG_WAY
+            if (reason == 2)
                 RestrictedAreaEntered?.Invoke(this, new PlidEventArgs { PLID = plid });
         }
 
         private void HandlePlp(byte[] p)
         {
-            // IS_PLP: Size=4, Type=ISP_PLP, ReqI, PLID
-            // Wysyłane gdy gracz wchodzi na ekran ustawień/garażu (Shift+P lub menu "do boksów")
+            // IS_PLP: player entered the setup/garage screen.
             if (p.Length < 4) return;
             PlayerPitted?.Invoke(this, new PlidEventArgs { PLID = p[3] });
         }
+
         private void HandleCrs(byte[] p)
         {
-            // IS_CRS: Size=4, Type, ReqI, PLID
             if (p.Length < 4) return;
             CarReset?.Invoke(this, new PlidEventArgs { PLID = p[3] });
         }
 
         private void HandleRst(byte[] p)
         {
-            // IS_RST: wysyłany na starcie każdego wyścigu/kwalifikacji — bez PLID, dotyczy całej sesji
+            // IS_RST: sent at the start of every race/qualifying, no PLID.
             RaceRestarted?.Invoke(this, EventArgs.Empty);
         }
 
         private void HandlePla(byte[] p)
         {
-            // IS_PLA: Size=8, Type, ReqI, PLID, Fact, Sp1, Sp2, Sp3
-            // Fact: 0 = PITLANE_EXIT (wyjazd na tor) / 1 = PITLANE_ENTER (wjazd do alei)
+            // Fact: 0 = pit exit, 1 = pit entry.
             if (p.Length < 8) return;
 
             byte plid = p[3];
@@ -563,6 +506,7 @@ namespace LFSDriftBuddy.InSim
             else if (fact == 1)
                 PitLaneEntered?.Invoke(this, new PlidEventArgs { PLID = plid });
         }
+
         private void HandleSTA(byte[] p)
         {
             if (p.Length < 12) return;
@@ -571,7 +515,7 @@ namespace LFSDriftBuddy.InSim
             _gameState = (StateFlags)BitConverter.ToUInt16(p, 6);
             ViewPLID = p[11];
 
-            // ── Track[6] + Weather + Wind — zawsze ostatnie 8 bajtów pakietu ──
+            // Track[6] + Weather + Wind are always the last 8 bytes.
             if (p.Length >= 28)
             {
                 string track = Encoding.Latin1.GetString(p, p.Length - 8, 6).TrimEnd('\0');
@@ -579,7 +523,7 @@ namespace LFSDriftBuddy.InSim
                 {
                     CurrentTrack = track;
                     TrackChanged?.Invoke(this, track);
-                    Send(Packets.BuildTiny(7, TinyType.TINY_AXI));   // ← NOWE: świeże info o layoucie po zmianie trasy
+                    Send(Packets.BuildTiny(7, TinyType.TINY_AXI));   // refresh layout info after a track change
                 }
             }
 
@@ -589,8 +533,9 @@ namespace LFSDriftBuddy.InSim
             if (nowRace != wasRace)
                 RaceStateChanged?.Invoke(this, nowRace);
             if (nowRace)
-                Send(Packets.BuildTiny(6, TinyType.TINY_AXI));   // ← NOWE: layout może dociągnąć się dopiero na starcie
+                Send(Packets.BuildTiny(6, TinyType.TINY_AXI));   // layout may only load once the race starts
         }
+
         private void HandleMCI(byte[] packet)
         {
             if (packet.Length < 4) return;
@@ -606,12 +551,11 @@ namespace LFSDriftBuddy.InSim
                     }
                 }
             }
-            catch { /* Malformed packet – ignore */ }
+            catch { /* malformed packet — ignore */ }
         }
 
         private void HandleVer(byte[] packet)
         {
-            // IS_VER: Size=20, Type=2, ReqI, Zero, Version[8], Product[6], InSimVer(word)
             if (packet.Length >= 20)
             {
                 string version = Encoding.Latin1.GetString(packet, 4, 8).TrimEnd('\0');
@@ -623,7 +567,7 @@ namespace LFSDriftBuddy.InSim
 
         private void HandleAxi(byte[] p)
         {
-            // IS_AXI: Size=40, Type=ISP_AXI, ReqI, Zero, AXStart, NumCP, NumO(word), LName[32] @ offset 8
+            // IS_AXI: LName[32] at offset 8.
             if (p.Length < 40) return;
 
             string layout = Encoding.Latin1.GetString(p, 8, 32).TrimEnd('\0', ' ');
@@ -634,7 +578,6 @@ namespace LFSDriftBuddy.InSim
                 LayoutChanged?.Invoke(this, layout);
             }
             Send(Packets.BuildTiny(7, TinyType.TINY_AXI));
-            // ── diagnostyka: pokaż w statusie co realnie przyszło z InSim ──
             RaiseStatus(string.IsNullOrEmpty(layout)
                 ? "InSim: brak nazwy layoutu w IS_AXI (pusty LName — layout mógł być wgrany przez hosta, nie lokalnie)"
                 : $"InSim: wykryto layout '{layout}'");
@@ -647,12 +590,10 @@ namespace LFSDriftBuddy.InSim
                 CurrentLayout = "";
                 LayoutChanged?.Invoke(this, "");
             }
-
         }
+
         private void HandleLap(byte[] p)
         {
-            // IS_LAP: Size=20, Type=ISP_LAP
-            // Size,Type,ReqI,PLID, LTime(uint), ETime(uint), LapsDone(word), Flags(word), Penalty, NumStops, Sp2, Sp3
             if (p.Length < 20) return;
 
             LapCompleted?.Invoke(this, new LapCompletedEventArgs
@@ -662,7 +603,7 @@ namespace LFSDriftBuddy.InSim
                 LapsDone = BitConverter.ToUInt16(p, 12)
             });
         }
-        // ─────────────────────────────────────────────────────
+
         private void Cleanup()
         {
             try { _stream?.Close(); } catch { }
@@ -675,8 +616,6 @@ namespace LFSDriftBuddy.InSim
         {
             StatusChanged?.Invoke(this, new StatusEventArgs { Message = message, IsError = isError });
         }
-
-
 
         public void Dispose() => Disconnect();
     }

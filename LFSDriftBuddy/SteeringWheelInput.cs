@@ -23,23 +23,21 @@ public class SteeringWheelInput : IDisposable
     public double SteeringPercent { get; private set; } = 0;
     public event Action<double> SteeringChanged;
 
-    // UI (MainForm) łapie to i pokazuje dialog ręcznego wyboru urządzenia
+    // Picked up by MainForm to show the manual device-selection dialog.
     public event Action<List<(Guid Guid, string Name)>> WheelNotFound;
 
-    // surowe wartości wszystkich osi na każdej klatce — używane wyłącznie podczas
-    // kalibracji osi w WheelSetupForm (kręcisz kierownicą, program patrzy która się rusza)
+    // Raw value of every axis each frame — used only during axis calibration in
+    // WheelSetupForm (turn the wheel, the app watches which axis moves).
     public event Action<Dictionary<JoystickOffset, int>> RawAxesChanged;
 
-    // zakres, do którego normalizujemy oś po Acquire() — stała wartość,
-    // żeby nie zależeć od domyślnego zakresu sterownika
+    // Range we normalize the axis into after Acquire() — fixed so it doesn't depend
+    // on the driver's default range.
     private const int AxisRange = 10000;
 
-    // która oś DirectInput reprezentuje skręt kierownicy — domyślnie X (większość kierownic),
-    // ale da się to zmienić ręcznie (patrz SetSteeringAxis / WheelSetupForm)
+    // Which DirectInput axis is steering — defaults to X, changeable via SetSteeringAxis.
     public JoystickOffset SteeringAxis { get; private set; } = JoystickOffset.X;
 
-    // znane modele popularnych kierownic (fallback po nazwie, gdy sterownik nie zgłasza
-    // DeviceType.Driving — zdarza się np. przy starszych driverach)
+    // Known wheel models — name fallback for when the driver doesn't report DeviceType.Driving.
     private static readonly string[] KnownWheelNames = new[]
     {
         // Logitech
@@ -58,12 +56,6 @@ public class SteeringWheelInput : IDisposable
             { "T500", JoystickOffset.RotationX },
             { "TX Racing", JoystickOffset.RotationX },
         };
-
-    private static readonly JoystickOffset[] AllAxes = new[]
-    {
-        JoystickOffset.X, JoystickOffset.Y, JoystickOffset.Z,
-        JoystickOffset.RotationX, JoystickOffset.RotationY, JoystickOffset.RotationZ
-    };
 
     // Computed once — was rebuilt via reflection every 20ms poll tick in PollXInput().
     private static readonly XInputApi.GamepadButtonFlags[] XInputButtonFlags =
@@ -91,15 +83,13 @@ public class SteeringWheelInput : IDisposable
         _buttonBindings = bindings.ToDictionary(b => b.buttonIndex, b => b.onPressed);
         _directInput = new DirectInput();
 
-      
         _pollTimer = new System.Windows.Forms.Timer { Interval = 20 }; // ~50Hz
         _pollTimer.Tick += (s, e) => Poll();
         _pollTimer.Start();
     }
 
-    // ── Wykrywanie / wybór urządzenia ──────────────────────────
+    // ── Device detection / selection ──────────────────────────
 
-    // zwraca wszystkie podłączone kontrolery gier — do wyświetlenia w dialogu ręcznego wyboru
     public List<(Guid Guid, string Name)> GetAvailableDevices()
     {
         return _directInput
@@ -122,8 +112,6 @@ public class SteeringWheelInput : IDisposable
 
         if (wheelInfo == null)
         {
-           
-           
             Log?.Invoke(Localization.T("wheelconfig.nodetectauto"));
             var list = devices.Select(d => (d.InstanceGuid, d.ProductName)).ToList();
             WheelNotFound?.Invoke(list);
@@ -138,8 +126,7 @@ public class SteeringWheelInput : IDisposable
         Connect(wheelInfo.InstanceGuid, axis, wheelInfo.ProductName);
     }
 
-    // wywoływane z dialogu / z ustawień zapisanych na dysku, gdy użytkownik (lub poprzednia
-    // sesja) już wybrał konkretne urządzenie
+    // Called from the dialog, or from saved settings once a device is already chosen.
     public bool ConnectToDevice(Guid instanceGuid, JoystickOffset axis)
     {
         var info = _directInput
@@ -148,7 +135,6 @@ public class SteeringWheelInput : IDisposable
 
         if (info == null)
         {
-            
             Log?.Invoke(Localization.T("wheelconfig.disconnect"));
             return false;
         }
@@ -170,7 +156,7 @@ public class SteeringWheelInput : IDisposable
 
         var state = _xinputPad.GetState();
 
-        // Lewy stick X jako "skręt" — działa niezależnie od fokusu okna
+        // Left stick X as "steering" — works regardless of window focus.
         double newSteering = Math.Round(state.Gamepad.LeftThumbX / 32767.0 * 100.0, 1);
         newSteering = Math.Max(-100, Math.Min(100, newSteering));
 
@@ -180,7 +166,7 @@ public class SteeringWheelInput : IDisposable
             SteeringChanged?.Invoke(SteeringPercent);
         }
 
-        // Mapowanie flag przycisków XInput na indeksy 0-15 (kolejność jak w SharpDX.XInput.GamepadButtonFlags)
+        // Map XInput button flags to indices 0-15 (order matches SharpDX.XInput.GamepadButtonFlags).
         var flags = state.Gamepad.Buttons;
         bool[] buttons = new bool[16];
 
@@ -201,7 +187,8 @@ public class SteeringWheelInput : IDisposable
         }
         _previousButtons = buttons;
     }
-    // pozwala zmienić oś skrętu bez ponownego łączenia (np. po ręcznej kalibracji)
+
+    // Changes the steering axis without reconnecting (e.g. after manual calibration).
     public void SetSteeringAxis(JoystickOffset axis)
     {
         SteeringAxis = axis;
@@ -224,7 +211,7 @@ public class SteeringWheelInput : IDisposable
             _wheel?.Dispose();
             _wheel = null;
 
-            // Pierwszy podłączony/aktywny kontroler XInput (indeksy One..Four)
+            // First connected/active XInput controller (indices One..Four).
             _xinputPad = new[]
            {
                 XInputApi.UserIndex.One, XInputApi.UserIndex.Two,
@@ -235,14 +222,13 @@ public class SteeringWheelInput : IDisposable
 
             if (_xinputPad == null)
             {
-                
                 Log?.Invoke(Localization.T("wheelconfig.noxinput"));
                 return;
             }
 
             DeviceName = name;
             DeviceGuid = instanceGuid;
-            SteeringAxis = axis; // nieużywane w trybie XInput, zostaje dla spójności API
+            SteeringAxis = axis; // unused in XInput mode, kept for API consistency
             _previousButtons = new bool[16];
             _autoConnectAttempted = true;
 
@@ -258,11 +244,9 @@ public class SteeringWheelInput : IDisposable
             _wheel = new Joystick(_directInput, instanceGuid);
             _wheel.Properties.BufferSize = 128;
 
-           
             _wheel.SetCooperativeLevel(_ownerHandle, CooperativeLevel.Background | CooperativeLevel.NonExclusive);
             _wheel.Acquire();
 
-         
             foreach (var deviceObject in _wheel.GetObjects(DeviceObjectTypeFlags.Axis))
             {
                 _wheel.GetObjectPropertiesById(deviceObject.ObjectId).Range = new InputRange(-AxisRange, AxisRange);
@@ -336,7 +320,7 @@ public class SteeringWheelInput : IDisposable
                 bool now = buttons[i];
                 bool before = i < _previousButtons.Length && _previousButtons[i];
 
-                // wykrywamy tylko moment naciśnięcia (zbocze narastające)
+                // rising edge only
                 if (now && !before)
                 {
                     AnyButtonPressed?.Invoke(i);
@@ -349,7 +333,7 @@ public class SteeringWheelInput : IDisposable
         }
         catch (SharpDX.SharpDXException)
         {
-            // kierownica odłączona / utracona kontrola
+            // wheel disconnected / lost control
             _wheel = null;
             Log?.Invoke(Localization.T("status.disconnectwheel"));
         }
