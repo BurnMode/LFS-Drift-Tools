@@ -1,29 +1,34 @@
 # LFS Drift Tools
 
-**LFS Drift Tools** is a companion application for [Live for Speed](https://www.lfs.net/) that turns your drift sessions into a more fun experience. It connects to LFS via InSim/OutGauge and adds real-time scoring, an in-game HUD, a transparent overlay, a configurable rev limiter, and a smarter turn signal system - all wrapped in a clean, modern UI.
+**Version 0.300.0824**
+
+**LFS Drift Tools** is a companion application for [Live for Speed](https://www.lfs.net/) that turns your drift sessions into a more fun experience. It connects to LFS via InSim/OutGauge and adds real-time scoring, an in-game HUD, a transparent overlay, a configurable rev limiter, and a smarter turn signal system, all wrapped in a clean, modern UI.
 
 ## Key Features
 
 - **DriftEngine - Real-time Scoring Engine**
-  Calculates drift score based on angle, speed, and combo multipliers, with per-track and per-layout best lap tracking (persisted locally in JSON). Automatically detects laps, track/layout changes, pit stops, and race restarts via InSim events.
+  Calculates drift score based on angle, speed, and combo multipliers, with per-track and per-layout best lap tracking. Stats are saved per driver and reload instantly when you switch cars or spectate someone else. Automatically detects laps, track/layout changes, pit stops, and race restarts via InSim events.
+
+- **Multiplayer-aware Driver Identity**
+  Tracks your driver profile by your LFS nickname, staying accurate as you switch cars, tab-cycle through spectated drivers, or rename yourself in-game, even on a busy multiplayer server.
 
 - **In-Game HUD (IS_BTN)**
-  Displays live score, run points, combo multiplier, and drift labels directly inside LFS using native InSim buttons - fully color-customizable through an in-app InSim color picker.
+  Displays live score, run points, combo multiplier, and drift labels directly inside LFS using native InSim buttons, fully color-customizable through an in-app InSim color picker.
 
-- **Burnout Detection**
-  Detects wheelspin while the car is essentially stationary (RPM, throttle, and gear read directly from OutGauge) and scores it with tiered labels (Good/High/Extreme/Insane) based on intensity and hold duration, plus a bonus for every completed 360° spin.
+- **Burnout Detection & Bonus System**
+  Detects wheelspin while the car is essentially stationary (RPM, throttle, and gear read directly from OutGauge) and scores it with tiered labels (Good/High/Extreme/Insane) based on intensity and hold duration. Bonus points reward a full 360° burnout spin, a Donut (a full loop completed while drifting), a Clean Lap, grazing a track object cleanly (Unstoppable), and smooth Burnout↔Drift transitions.
 
 - **Forza Horizon-style Overlay**
-  A transparent, layered on-screen overlay rendered over the LFS window showing drift angle, combo countdown, bonus text animations, rev limiter status, and a circular speedometer/tachometer gauge - independent of the in-game HUD.
+  A transparent, layered on-screen overlay rendered over the LFS window, showing drift angle, combo countdown, bonus text animations, rev limiter status, and a circular speedometer/tachometer gauge.
 
 - **Speedometer & Tachometer Gauge**
-  A Forza-style circular gauge showing live (smoothed) vehicle speed, current gear, and an RPM arc that auto-calibrates to the car's redline. Fully repositionable/scalable with a KPH↔MPH toggle and per-element color customization. It only appears while real OutGauge data is flowing, so it won't sit on screen showing stale numbers while you're in a menu or garage.
+  A Forza-style circular gauge showing live (smoothed) vehicle speed, current gear, and an RPM arc that auto-calibrates to the car's redline. Repositionable and scalable, with a KPH↔MPH toggle and per-element color customization, appearing automatically whenever real OutGauge data is flowing.
 
 - **Rev Limiter**
   A configurable ignition-cut rev limiter driven by OutGauge RPM data, with adjustable cut duration, auto-calibration, and dedicated keyboard/wheel-button bindings for toggle, calibrate, increase, and decrease actions.
 
 - **Turn Signal & Hazard System**
-  Automatic, heading-based turn signal cancellation, hazard lights, and light toggling, with support for both keyboard and steering wheel/gamepad button bindings - including improved, reliable background input detection for XInput controllers.
+  Automatic, heading-based turn signal cancellation, hazard lights, and light toggling, with reliable background input detection and support for both keyboard and steering wheel/gamepad button bindings.
 
 - **Steering Wheel & Gamepad Support**
   Device detection and axis calibration for wheels via DirectInput, with native XInput support for gamepads to ensure accurate background input handling.
@@ -35,7 +40,7 @@
 
 - Windows 10/11
 - [.NET 6.0](https://dotnet.microsoft.com/download/dotnet/6.0) or later (Windows Desktop Runtime)
-- [Live for Speed](https://www.lfs.net/) with **both InSim and OutGauge** configured - see [Configuring LFS](#configuring-lfs-insim--outgauge) below
+- [Live for Speed](https://www.lfs.net/) with **both InSim and OutGauge** configured (see [Configuring LFS](#configuring-lfs-insim--outgauge) below)
 - A DirectInput/XInput-compatible steering wheel or gamepad (optional, for wheel/pad bindings)
 
 ## Supported Languages
@@ -52,7 +57,7 @@ The app needs **two separate connections** to LFS to work fully, and they're set
 
 ### 1. InSim (required for scoring, HUD, turn signals, lap/track events)
 
-InSim is enabled per-session, not through a config file - either:
+Enable InSim per session, either by:
 
 - Type `/insim <port>` in the LFS chat/console (e.g. `/insim 29999`), **or**
 - Launch LFS with the command-line option `LFS /insim=<port>` (handy in a shortcut, so it's always on).
@@ -71,19 +76,30 @@ OutGauge Port 35555
 OutGauge ID 1
 ```
 
-**`cfg.txt` is only read when LFS starts** - fully restart LFS after editing it, or the change won't take effect. The port (`35555`) must match what the app listens on and shouldn't be shared with another OutGauge client.
+**`cfg.txt` is only read when LFS starts.** Fully restart LFS after editing it, or the change won't take effect. The port (`35555`) must match what the app listens on and shouldn't be shared with another OutGauge client.
 
 ### Verifying it's working
 
-- If the Connect toggle flips back off by itself, the InSim connection attempt failed (wrong host/port, or `/insim` wasn't enabled) - check the status text at the bottom of the window for the reason.
-- If InSim connects fine but the speedometer/tachometer gauge never appears and the score HUD stays locked showing only the total score, OutGauge isn't reaching the app - re-check the `cfg.txt` block above and confirm you restarted LFS afterwards. Both of these only activate once real OutGauge data is flowing, and switch back off automatically the moment it stops (e.g. while sitting in a menu or garage) - so this is also the expected, normal behavior between sessions on track, not a bug.
+- If the Connect toggle flips back off by itself, the InSim connection attempt failed (wrong host/port, or `/insim` wasn't enabled). Check the status text at the bottom of the window for the reason.
+- If InSim connects fine but the speedometer/tachometer gauge never appears and the score HUD stays locked showing only the total score, OutGauge isn't reaching the app. Re-check the `cfg.txt` block above and confirm you restarted LFS afterwards. Both features activate automatically once real OutGauge data is flowing, and hide again the moment it stops, such as while sitting in a menu or garage.
 
 ## Getting Started
 
 1. Launch **LFS Drift Tools**.
-2. Make sure LFS has both InSim and OutGauge configured - see [Configuring LFS](#configuring-lfs-insim--outgauge) above.
+2. Make sure LFS has both InSim and OutGauge configured, per [Configuring LFS](#configuring-lfs-insim--outgauge) above.
 3. Enter the host, port, and admin password (if set) in the app, then click **Connect**.
 4. Configure your rev limiter, HUD, overlay, and turn signal bindings from the UI.
+
+## Changelog
+
+### 0.300.0824
+
+- Driver identity now resolves from your LFS nickname and updates immediately when you switch cars or the spectated driver changes.
+- Fixed Total Score jumping to a stale value in multiplayer when other players joined, left, or renamed themselves.
+- Player stats now save to disk immediately after every drift, speeding, or burnout run ends.
+- All per-driver stats (total score, best run, best/last lap records) now live together in a single `driver_data.json`, automatically migrated from the previous three separate save files.
+- Added Donut, Clean Lap, Unstoppable, and Burnout↔Drift transition bonuses to the scoring system.
+- Various stability fixes and reduced resource usage under the hood.
 
 ## Disclaimer
 

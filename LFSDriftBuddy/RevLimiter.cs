@@ -24,6 +24,11 @@ namespace LFSDriftBuddy
         // every OutGauge packet without wiring up InSim. Used to detect a car change.
         public string Car { get; set; } = "";
 
+        // PLID of whichever car this dashboard data belongs to — follows the local view
+        // (Tab-cycling while spectating switches this too), more direct/immediate than
+        // waiting on an IS_STA reply for ViewPLID.
+        public byte PLID { get; set; }
+
         public uint DashLights { get; set; }   // which lights the car HAS at all (fixed)
         public uint ShowLights { get; set; }   // which lights are lit RIGHT NOW
         public bool Valid { get; set; }
@@ -322,6 +327,7 @@ namespace LFSDriftBuddy
                 Speed = BitConverter.ToSingle(d, 12),
                 Throttle = d.Length >= 52 ? BitConverter.ToSingle(d, 48) : 0f,
                 Gear = d[10],
+                PLID = d.Length >= 12 ? d[11] : (byte)0,
                 EngTemp = d.Length >= 28 ? BitConverter.ToSingle(d, 24) : 0f,
                 Fuel = d.Length >= 32 ? BitConverter.ToSingle(d, 28) : 0f,
                 Car = d.Length >= 8 ? ParseCarName(d, 4) : "",

@@ -1017,6 +1017,200 @@ namespace LFSDriftBuddy
                     [AppLanguage.German] = "Maximale Drehzahl eingestellt auf: {0}",
                     [AppLanguage.Spanish] = "RPM máximas establecidas en: {0}",
                 },
+
+                // ── Added: strings that were previously hardcoded (not localized) in MainForm.cs ──
+                ["status.missing_sounds"] = new()
+                {
+                    [AppLanguage.English] = "Missing sound files in the Sounds folder: {0}",
+                    [AppLanguage.Polish] = "Brak plików dźwiękowych w folderze Sounds: {0}",
+                    [AppLanguage.Turkish] = "Sounds klasöründe eksik ses dosyaları: {0}",
+                    [AppLanguage.German] = "Fehlende Sounddateien im Ordner Sounds: {0}",
+                    [AppLanguage.Spanish] = "Faltan archivos de sonido en la carpeta Sounds: {0}",
+                },
+                ["rev.loaded_for_car"] = new()
+                {
+                    [AppLanguage.English] = "Loaded rev limiter settings for {0}: {1} RPM / {2} ms",
+                    [AppLanguage.Polish] = "Wczytano ustawienia rev limitera dla {0}: {1} RPM / {2} ms",
+                    [AppLanguage.Turkish] = "{0} için devir sınırlayıcı ayarları yüklendi: {1} RPM / {2} ms",
+                    [AppLanguage.German] = "Drehzahlbegrenzer-Einstellungen für {0} geladen: {1} U/min / {2} ms",
+                    [AppLanguage.Spanish] = "Ajustes del limitador de RPM cargados para {0}: {1} RPM / {2} ms",
+                },
+                ["rev.no_saved_for_car"] = new()
+                {
+                    [AppLanguage.English] = "{0}: no saved rev limiter settings — using default {1} RPM / {2} ms",
+                    [AppLanguage.Polish] = "{0}: brak zapisanych ustawień rev limitera — użyto domyślnych {1} RPM / {2} ms",
+                    [AppLanguage.Turkish] = "{0}: kayıtlı devir sınırlayıcı ayarı yok — varsayılan {1} RPM / {2} ms kullanılıyor",
+                    [AppLanguage.German] = "{0}: keine gespeicherten Drehzahlbegrenzer-Einstellungen — Standard {1} U/min / {2} ms wird verwendet",
+                    [AppLanguage.Spanish] = "{0}: no hay ajustes de limitador de RPM guardados — usando el valor predeterminado {1} RPM / {2} ms",
+                },
+                ["hud.showoverlay"] = new()
+                {
+                    [AppLanguage.English] = "Forza-style overlay",
+                    [AppLanguage.Polish] = "Nakładka w stylu Forza",
+                    [AppLanguage.Turkish] = "Forza tarzı katman",
+                    [AppLanguage.German] = "Forza-Stil-Overlay",
+                    [AppLanguage.Spanish] = "Superposición estilo Forza",
+                },
+                ["indicators.bindname.left"] = new()
+                {
+                    [AppLanguage.English] = "LEFT TURN SIGNAL",
+                    [AppLanguage.Polish] = "LEWY KIERUNKOWSKAZ",
+                    [AppLanguage.Turkish] = "SOL SİNYAL",
+                    [AppLanguage.German] = "LINKER BLINKER",
+                    [AppLanguage.Spanish] = "INTERMITENTE IZQUIERDO",
+                },
+                ["indicators.bindname.right"] = new()
+                {
+                    [AppLanguage.English] = "RIGHT TURN SIGNAL",
+                    [AppLanguage.Polish] = "PRAWY KIERUNKOWSKAZ",
+                    [AppLanguage.Turkish] = "SAĞ SİNYAL",
+                    [AppLanguage.German] = "RECHTER BLINKER",
+                    [AppLanguage.Spanish] = "INTERMITENTE DERECHO",
+                },
+                ["indicators.bindname.hazard"] = new()
+                {
+                    [AppLanguage.English] = "HAZARD SIGNALS",
+                    [AppLanguage.Polish] = "ŚWIATŁA AWARYJNE",
+                    [AppLanguage.Turkish] = "DÖRTLÜ FLAŞÖR",
+                    [AppLanguage.German] = "WARNBLINKER",
+                    [AppLanguage.Spanish] = "LUCES DE EMERGENCIA",
+                },
+                ["indicators.bindname.lights"] = new()
+                {
+                    [AppLanguage.English] = "LIGHTS TOGGLE",
+                    [AppLanguage.Polish] = "PRZEŁĄCZNIK ŚWIATEŁ",
+                    [AppLanguage.Turkish] = "FAR AÇMA/KAPAMA",
+                    [AppLanguage.German] = "LICHTSCHALTER",
+                    [AppLanguage.Spanish] = "INTERRUPTOR DE LUCES",
+                },
+                ["wheelconfig.configured"] = new()
+                {
+                    [AppLanguage.English] = "Wheel configured: {0} (axis: {1})",
+                    [AppLanguage.Polish] = "Kierownica skonfigurowana: {0} (oś: {1})",
+                    [AppLanguage.Turkish] = "Direksiyon yapılandırıldı: {0} (eksen: {1})",
+                    [AppLanguage.German] = "Lenkrad konfiguriert: {0} (Achse: {1})",
+                    [AppLanguage.Spanish] = "Volante configurado: {0} (eje: {1})",
+                },
+                ["rev.calibration_award.start"] = new()
+                {
+                    [AppLanguage.English] = "REV LIMITER CALIBRATION - SELECT NEUTRAL AND HOLD FULL THROTTLE!!!",
+                    [AppLanguage.Polish] = "KALIBRACJA OGRANICZNIKA OBROTÓW - WŁĄCZ LUZ I WCIŚNIJ GAZ DO DECHY!!!",
+                    [AppLanguage.Turkish] = "DEVİR SINIRLAYICI KALİBRASYONU - BOŞA ALIN VE GAZA SONUNA KADAR BASIN!!!",
+                    [AppLanguage.German] = "DREHZAHLBEGRENZER-KALIBRIERUNG - LEERLAUF EINLEGEN UND VOLLGAS GEBEN!!!",
+                    [AppLanguage.Spanish] = "CALIBRACIÓN DEL LIMITADOR DE RPM - PUNTO MUERTO Y ACELERADOR A FONDO!!!",
+                },
+                ["rev.calibration_award.done"] = new()
+                {
+                    [AppLanguage.English] = "REV LIMITER CALIBRATION DONE!!!",
+                    [AppLanguage.Polish] = "KALIBRACJA OGRANICZNIKA OBROTÓW ZAKOŃCZONA!!!",
+                    [AppLanguage.Turkish] = "DEVİR SINIRLAYICI KALİBRASYONU TAMAMLANDI!!!",
+                    [AppLanguage.German] = "DREHZAHLBEGRENZER-KALIBRIERUNG ABGESCHLOSSEN!!!",
+                    [AppLanguage.Spanish] = "¡CALIBRACIÓN DEL LIMITADOR DE RPM COMPLETADA!!!",
+                },
+                ["hud.colors.subtitle"] = new()
+                {
+                    [AppLanguage.English] = "Speedo+Tacho — RGB and transparency",
+                    [AppLanguage.Polish] = "Prędkościomierz+obrotomierz — RGB i przezroczystość",
+                    [AppLanguage.Turkish] = "Hız+Devir — RGB ve saydamlık",
+                    [AppLanguage.German] = "Tacho+Drehzahl — RGB und Transparenz",
+                    [AppLanguage.Spanish] = "Velocímetro+Tacómetro — RGB y transparencia",
+                },
+                ["hud.color.redline"] = new()
+                {
+                    [AppLanguage.English] = "Redline",
+                    [AppLanguage.Polish] = "Czerwone pole",
+                    [AppLanguage.Turkish] = "Kırmızı çizgi",
+                    [AppLanguage.German] = "Rote Linie",
+                    [AppLanguage.Spanish] = "Zona roja",
+                },
+                ["hud.color.text"] = new()
+                {
+                    [AppLanguage.English] = "Text",
+                    [AppLanguage.Polish] = "Tekst",
+                    [AppLanguage.Turkish] = "Metin",
+                    [AppLanguage.German] = "Text",
+                    [AppLanguage.Spanish] = "Texto",
+                },
+                ["hud.color.indicator"] = new()
+                {
+                    [AppLanguage.English] = "Indicator",
+                    [AppLanguage.Polish] = "Wskaźnik",
+                    [AppLanguage.Turkish] = "Gösterge",
+                    [AppLanguage.German] = "Zeiger",
+                    [AppLanguage.Spanish] = "Indicador",
+                },
+                ["hud.color.ticks"] = new()
+                {
+                    [AppLanguage.English] = "Ticks",
+                    [AppLanguage.Polish] = "Kreski",
+                    [AppLanguage.Turkish] = "Çizikler",
+                    [AppLanguage.German] = "Skalenstriche",
+                    [AppLanguage.Spanish] = "Marcas",
+                },
+                ["hud.color.background"] = new()
+                {
+                    [AppLanguage.English] = "Background",
+                    [AppLanguage.Polish] = "Tło",
+                    [AppLanguage.Turkish] = "Arka plan",
+                    [AppLanguage.German] = "Hintergrund",
+                    [AppLanguage.Spanish] = "Fondo",
+                },
+                ["insim.colorpicker.title"] = new()
+                {
+                    [AppLanguage.English] = "InSim Color Picker",
+                    [AppLanguage.Polish] = "Wybór koloru InSim",
+                    [AppLanguage.Turkish] = "InSim Renk Seçici",
+                    [AppLanguage.German] = "InSim-Farbwähler",
+                    [AppLanguage.Spanish] = "Selector de color InSim",
+                },
+                ["collision.hit"] = new()
+                {
+                    [AppLanguage.English] = "{0} HIT -{1}",
+                    [AppLanguage.Polish] = "{0} UDERZENIE -{1}",
+                    [AppLanguage.Turkish] = "{0} ÇARPMA -{1}",
+                    [AppLanguage.German] = "{0} TREFFER -{1}",
+                    [AppLanguage.Spanish] = "{0} GOLPE -{1}",
+                },
+                ["collision.kiss"] = new()
+                {
+                    [AppLanguage.English] = "{0} KISS! +{1}",
+                    [AppLanguage.Polish] = "{0} MUŚNIĘCIE! +{1}",
+                    [AppLanguage.Turkish] = "{0} SIYIRMA! +{1}",
+                    [AppLanguage.German] = "{0} STREIFER! +{1}",
+                    [AppLanguage.Spanish] = "{0} ROCE! +{1}",
+                },
+                ["indicators.sound_error"] = new()
+                {
+                    [AppLanguage.English] = "Indicator sound error: {0}",
+                    [AppLanguage.Polish] = "Błąd dźwięku kierunkowskazu: {0}",
+                    [AppLanguage.Turkish] = "Sinyal ses hatası: {0}",
+                    [AppLanguage.German] = "Fehler beim Blinkerton: {0}",
+                    [AppLanguage.Spanish] = "Error de sonido del intermitente: {0}",
+                },
+                ["hud.customcolor.title"] = new()
+                {
+                    [AppLanguage.English] = "Custom overlay color",
+                    [AppLanguage.Polish] = "Własny kolor nakładki",
+                    [AppLanguage.Turkish] = "Özel katman rengi",
+                    [AppLanguage.German] = "Benutzerdefinierte Overlay-Farbe",
+                    [AppLanguage.Spanish] = "Color personalizado de superposición",
+                },
+                ["rev.cut"] = new()
+                {
+                    [AppLanguage.English] = "⚡ CUT",
+                    [AppLanguage.Polish] = "⚡ CIĘCIE",
+                    [AppLanguage.Turkish] = "⚡ KESME",
+                    [AppLanguage.German] = "⚡ ABSCHALTUNG",
+                    [AppLanguage.Spanish] = "⚡ CORTE",
+                },
+                ["common.ok"] = new()
+                {
+                    [AppLanguage.English] = "OK",
+                    [AppLanguage.Polish] = "OK",
+                    [AppLanguage.Turkish] = "Tamam",
+                    [AppLanguage.German] = "OK",
+                    [AppLanguage.Spanish] = "Aceptar",
+                },
             };
     }
 }

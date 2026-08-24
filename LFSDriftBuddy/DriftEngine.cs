@@ -14,6 +14,15 @@ namespace LFSDriftBuddy
         public double BestDeepDriftDurationMs { get; set; } = 0;
     }
 
+    // Everything persisted for one driver — stats + best/last lap per track/layout — as a
+    // single unit, so the whole driver record lives in one place in driver_data.json.
+    public class DriverData
+    {
+        public DriverStats Stats { get; set; } = new();
+        public Dictionary<string, Dictionary<string, long>> LapRecords { get; set; } = new();      // track -> layout -> best
+        public Dictionary<string, Dictionary<string, long>> LastLapRecords { get; set; } = new();  // track -> layout -> last
+    }
+
 
     /// InSim Direction/Heading: word, 0 = world Y axis, 32768 = 180 degrees.
     /// Drift angle = angular difference between motion direction and car heading.
@@ -22,9 +31,9 @@ namespace LFSDriftBuddy
     {
         // ── Drift scoring ───────────────────────────────────────
         private const double MIN_SPEED_KMH = 20.0;
-        private const double MIN_DRIFT_ANGLE_DEG = 20.0;
-        private const double MAX_DRIFT_ANGLE_DEG = 130.0;
-        public const double COMBO_TIMEOUT_SEC = 3.0;
+        private const double MIN_DRIFT_ANGLE_DEG = 25.0;
+        private const double MAX_DRIFT_ANGLE_DEG = 150.0;
+        public const double COMBO_TIMEOUT_SEC = 2.5;
         private const double BONUS_TIMEOUT_SEC = 2.5;
         private const double POINTS_PER_SECOND = 400.0;
 
@@ -32,16 +41,15 @@ namespace LFSDriftBuddy
         private const double FAST_DRIVE_THRESHOLD = 100.0;
         private const double FAST_DRIVE_POINTS = 8.0;
 
-        // Przyrost ComboMultiplier na SEKUNDĘ dla poziomu 1 "szybkiej jazdy" (patrz
-        // GetFastDriveLevel) — każdy kolejny poziom dodaje kolejne tyle samo więcej
-        // (poziom 1 = 0.025/s, poziom 2 = 0.05/s, ..., poziom 5 = 0.125/s).
+        // ComboMultiplier gain PER SECOND for "fast driving" level 1 (see GetFastDriveLevel) —
+        // each next level adds the same extra amount again (level 1 = 0.025/s, level 2 =
+        // 0.05/s, ..., level 5 = 0.125/s).
         private const double FAST_DRIVE_COMBO_STEP_PER_SEC = 0.01;
 
-        /// <summary>Poziom "szybkiej jazdy" (1-5) na podstawie prędkości względem
-        /// FAST_DRIVE_THRESHOLD — te same progi, które wcześniej ustawiały ComboMultiplier
-        /// wprost, teraz tylko skalują tempo jego przyrostu na sekundę (patrz Update()).
-        /// Zakłada, że speedKmh >= FAST_DRIVE_THRESHOLD (gwarantowane przez warunek
-        /// `speeding` u wywołującego) — inaczej zawsze zwróci poziom 1.</summary>
+        /// <summary>"Fast driving" level (1-5) based on speed relative to FAST_DRIVE_THRESHOLD —
+        /// the same thresholds that used to set ComboMultiplier directly now only scale its
+        /// per-second growth rate (see Update()). Assumes speedKmh >= FAST_DRIVE_THRESHOLD
+        /// (guaranteed by the caller's `speeding` condition), otherwise always returns level 1.</summary>
         private static int GetFastDriveLevel(double speedKmh)
         {
             if (speedKmh >= FAST_DRIVE_THRESHOLD * 2.2) return 5;
@@ -61,15 +69,10 @@ namespace LFSDriftBuddy
         public bool _isHandBrakeON { get; private set; } = false;
         public void SetHandbrakeActive(bool active) => _isHandBrakeON = active;
         public long CurrentRunPoints { get; private set; }
-        public long LapScore { get; private set; }       // ← NOWE
-        public long BestLapScore { get; private set; }    // ← NOWE
-        public long LastLapScore { get; private set; }   // ← NOWE
+        public long LapScore { get; private set; }
+        public long BestLapScore { get; private set; }
+        public long LastLapScore { get; private set; }
 
-        private readonly string _lastLapRecordsFile = Path.Combine(
-            AppDomain.CurrentDomain.BaseDirectory,
-            "driver_lastlap_records.json");
-
-        private Dictionary<string, Dictionary<string, Dictionary<string, long>>> _driverLastLapRecords = new();
         public long TotalScore { get; private set; }
         public double ComboMultiplier { get; private set; } = 1;
         public long BestRunScore { get; private set; }
@@ -81,22 +84,25 @@ namespace LFSDriftBuddy
         // ── Driver ──────────────────────────────────────────────
         public string CurrentDriver { get; private set; } = "default_driver";
 
-        private readonly string _statsFile = Path.Combine(
-            AppDomain.CurrentDomain.BaseDirectory,
-            "driver_stats.json");
+        // All persisted driver data (stats + lap records) lives in one file — see DriverData.
+        private readonly string _driverDataFile = Path.Combine(
+            AppDomain.CurrentDomain.BaseDirectory, "driver_data.json");
+        private Dictionary<string, DriverData> _driverData = new();
 
-        private Dictionary<string, DriverStats> _driverScores = new();
-        private readonly string _lapRecordsFile = Path.Combine(
-        AppDomain.CurrentDomain.BaseDirectory,
-        "driver_lap_records.json");
+        // Old per-purpose files — read once to migrate into _driverDataFile if that file
+        // doesn't exist yet, then never touched again.
+        private static readonly string LegacyStatsFile = Path.Combine(
+            AppDomain.CurrentDomain.BaseDirectory, "driver_stats.json");
+        private static readonly string LegacyLapRecordsFile = Path.Combine(
+            AppDomain.CurrentDomain.BaseDirectory, "driver_lap_records.json");
+        private static readonly string LegacyLastLapRecordsFile = Path.Combine(
+            AppDomain.CurrentDomain.BaseDirectory, "driver_lastlap_records.json");
 
-        // driver → track → layout → bestLapScore
-        private Dictionary<string, Dictionary<string, Dictionary<string, long>>> _driverLapRecords = new();
         private string _currentTrackCode = "";
         private string _currentLayoutName = "";
         private string _currentTrackKey = "";
 
-        public bool HasActiveLapContext { get; private set; } = false;   // ← NOWE: false dopóki nie wykryto 1. okrążenia
+        public bool HasActiveLapContext { get; private set; } = false;   // false until the first lap checkpoint is seen
 
         private DateTime _driftStartTime;
         private DateTime _lastUpdateTime = DateTime.UtcNow;
@@ -109,16 +115,16 @@ namespace LFSDriftBuddy
         private bool _previouslyDrifting = false;
         private bool _previouslyDriftSideRight = true;
 
-        // ── Kąt entry (wejścia w pierwszy zakręt sekwencji driftu) ─────────────
-        // Oceniany DOKŁADNIE w momencie T+1,5s od rozpoczęcia sekwencji driftu (nie
-        // wcześniej, nie jako średnia) — patrz EvaluateDriftEntry(). Jeśli drift skończy
-        // się przed upływem 1,5s, ocena nigdy nie następuje (żaden bonus nie jest przyznany).
-        private const double DRIFT_ENTRY_EVAL_SEC = 1.8;
-        private const double DRIFT_ENTRY_GOOD_DEG = 55.0;
-        private const double DRIFT_ENTRY_HIGH_DEG = 65.0;
-        private const double DRIFT_ENTRY_EXTREME_DEG = 75.0;
-        private const double DRIFT_ENTRY_ULTRAEXTREME_DEG = 85.0;
-        private const double DRIFT_ENTRY_BACKWARD_DEG = 95.0;
+        // ── Entry angle (into the first corner of a drift sequence) ─────────────
+        // Evaluated EXACTLY at T+1.5s from the start of the drift sequence (not earlier, not
+        // averaged) — see EvaluateDriftEntry(). If the drift ends before 1.5s elapses, the
+        // evaluation never happens (no bonus is awarded).
+        private const double DRIFT_ENTRY_EVAL_SEC = 1.5;
+        private const double DRIFT_ENTRY_GOOD_DEG = 60.0;
+        private const double DRIFT_ENTRY_HIGH_DEG = 70.0;
+        private const double DRIFT_ENTRY_EXTREME_DEG = 80.0;
+        private const double DRIFT_ENTRY_ULTRAEXTREME_DEG = 90.0;
+        private const double DRIFT_ENTRY_BACKWARD_DEG = 100.0;
 
         private DateTime _driftEntryStartTime = DateTime.MinValue;
         private bool _driftEntryEvaluated = false;
@@ -133,9 +139,7 @@ namespace LFSDriftBuddy
 
         public DriftEngine()
         {
-            LoadStats();
-            LoadLapRecords();
-            LoadLastLapRecords();
+            LoadDriverData();
         }
 
 
@@ -149,17 +153,35 @@ namespace LFSDriftBuddy
 
             CurrentDriver = driverName;
 
-            if (!_driverScores.ContainsKey(CurrentDriver))
-                _driverScores[CurrentDriver] = new DriverStats();
-
-            var stats = _driverScores[CurrentDriver];
+            var stats = GetOrCreateDriverData(CurrentDriver).Stats;
             TotalScore = stats.TotalScore;
             BestRunScore = stats.BestRunScore;
             BestDriftDurationMs = stats.BestDriftDurationMs;
             BestDeepDriftDurationMs = stats.BestDeepDriftDurationMs;
 
-            BestLapScore = GetBestLapForDriver(CurrentDriver, _currentTrackCode, _currentLayoutName);   // ← poprawione
+            BestLapScore = GetBestLapForDriver(CurrentDriver, _currentTrackCode, _currentLayoutName);
             LastLapScore = GetLastLapForDriver(CurrentDriver, _currentTrackCode, _currentLayoutName);
+        }
+
+        private DriverData GetOrCreateDriverData(string driver)
+        {
+            if (!_driverData.TryGetValue(driver, out var d))
+            {
+                d = new DriverData();
+                _driverData[driver] = d;
+            }
+            return d;
+        }
+
+        private static Dictionary<string, long> GetOrCreateLayoutMap(
+            Dictionary<string, Dictionary<string, long>> trackMap, string track)
+        {
+            if (!trackMap.TryGetValue(track, out var layoutMap))
+            {
+                layoutMap = new Dictionary<string, long>();
+                trackMap[track] = layoutMap;
+            }
+            return layoutMap;
         }
         private static string CombineTrackKey(string track, string layout)
         {
@@ -186,11 +208,8 @@ namespace LFSDriftBuddy
 
             _currentTrackKey = newKey;
 
-            // Migracja rekordów "default" (sprzed wprowadzenia kluczy per layout) — dla
-            // najlepszego okrążenia I dla ostatniego. Druga z tych metod istniała już
-            // wcześniej jako dokładny odpowiednik pierwszej, ale nigdy nie była wywoływana
-            // (martwy kod) — rekordy "last lap" zapisane pod starym kluczem "default" nigdy
-            // by się nie migrowały do właściwego layoutu, w odróżnieniu od "best lap".
+            // Migrates "default" records (from before per-layout keys existed) to the real
+            // layout name, for both best lap and last lap.
             MigrateDefaultLapRecordIfNeeded();
             MigrateDefaultLastLapRecordIfNeeded();
 
@@ -200,18 +219,17 @@ namespace LFSDriftBuddy
             HasActiveLapContext = false;
         }
 
-
         private void MigrateDefaultLapRecordIfNeeded()
         {
             if (string.IsNullOrWhiteSpace(_currentLayoutName)) return;
-            if (!_driverLapRecords.TryGetValue(CurrentDriver, out var trackMap)) return;
+            var trackMap = GetOrCreateDriverData(CurrentDriver).LapRecords;
             if (!trackMap.TryGetValue(_currentTrackCode, out var layoutMap)) return;
             if (!layoutMap.TryGetValue("default", out var defaultScore)) return;
             if (layoutMap.ContainsKey(_currentLayoutName)) return;
 
             layoutMap[_currentLayoutName] = defaultScore;
             layoutMap.Remove("default");
-            SaveLapRecordsRaw();
+            SaveDriverDataRaw();
         }
 
         public void OnLapCompleted()
@@ -224,7 +242,7 @@ namespace LFSDriftBuddy
                 AwardFixedBonus(CLEAN_LAP_BONUS_POINTS, Localization.T("bonus.clean_lap"));
             _lapHadPenalty = false;
 
-            LastLapScore = LapScore;    // ← NOWE
+            LastLapScore = LapScore;
             SaveLastLapRecord();
             if (!string.IsNullOrEmpty(_currentTrackKey) && LapScore > BestLapScore)
             {
@@ -248,22 +266,21 @@ namespace LFSDriftBuddy
         bool eDriftActive = false;
 
         // ── Blokada wykrywania podczas przerwy w danych OutGauge ────────────────────
-        // OutGauge (RPM/gaz/bieg) to OSOBNY strumień UDP od InSim/MCI — MCI (a więc
-        // Update(car) poniżej) potrafi nadal napływać nawet gdy OutGauge ucichnie
-        // (auto stoi na torze, ale gracz jest np. w menu ustawień/garażu, albo pakiety
-        // UDP OutGauge po prostu giną). Bez tej blokady drift/speeding wykrywałyby się
-        // dalej z samego InSim, a burnout (który i tak wymaga RPM/gazu z OutGauge)
-        // zostałby po prostu zamrożony na ostatnich wartościach — oba przypadki
-        // mylące. Wołaj SetOutGaugeDataFresh(false/true) z zewnątrz (patrz
-        // MainForm.OnCarData) PRZED każdym Update(car).
+        // OutGauge (RPM/throttle/gear) is a SEPARATE UDP stream from InSim/MCI — MCI (and so
+        // Update(car) below) can keep flowing even when OutGauge goes quiet (car sits on track
+        // but the player is e.g. in a settings menu/garage, or OutGauge UDP packets just get
+        // lost). Without this gate, drift/speeding would keep detecting from InSim alone, and
+        // burnout (which needs OutGauge RPM/throttle anyway) would simply freeze on its last
+        // values — both misleading. Call SetOutGaugeDataFresh(false/true) from the outside (see
+        // MainForm.OnCarData) BEFORE every Update(car).
         private bool _outGaugeDataFresh = true;
 
         /// <summary>
-        /// Informuje silnik, czy telemetria OutGauge jest aktualnie "świeża". Przy
-        /// przejściu świeże→martwe CAŁY bieżący przejazd (combo, punkty, stan
-        /// drift/speeding/burnout) jest ANULOWANY — nie tylko zamrożony na starych
-        /// wartościach — a dopóki dane pozostają martwe, Update(car) w ogóle nie
-        /// wykrywa nowego driftu/speedingu/burnoutu (patrz early-return w Update()).
+        /// Tells the engine whether OutGauge telemetry is currently "fresh". On the
+        /// fresh→stale transition, the ENTIRE current run (combo, points, drift/speeding/burnout
+        /// state) is CANCELLED, not just frozen on old values, and while data stays stale,
+        /// Update(car) doesn't detect any new drift/speeding/burnout at all (see the early
+        /// return in Update()).
         /// </summary>
         public void SetOutGaugeDataFresh(bool isFresh)
         {
@@ -274,10 +291,15 @@ namespace LFSDriftBuddy
         }
 
         /// <summary>
-        /// Anuluje bieżący przejazd/combo/stan aktywności BEZ zaliczania go jako
-        /// zakończony — celowo NIE woła DriftEnded/RegisterRunEnd, bo to nie jest
-        /// normalne zakończenie przejazdu, tylko przerwanie z powodu utraty danych.
+        /// Cancels the current run/combo/activity state WITHOUT counting it as finished —
+        /// deliberately does NOT call DriftEnded/RegisterRunEnd, since this isn't a normal
+        /// end of run, just an interruption from data loss.
         /// </summary>
+        /// <summary>Public wrapper for CancelActiveRun — call when the driver being tracked
+        /// changes (e.g. Tab-switching who's observed), so leftover combo/run points from
+        /// whoever was watched before don't get misattributed to the new driver.</summary>
+        public void ResetCurrentRun() => CancelActiveRun();
+
         private void CancelActiveRun()
         {
             IsDrifting = false;
@@ -287,15 +309,14 @@ namespace LFSDriftBuddy
             CurrentRunPoints = 0;
             _previouslyDrifting = false;
 
-            // Znaczniki continuity combo drift↔speeding↔burnout (patrz Update()) —
-            // reset, żeby po wznowieniu danych nic "nie pamiętało" przerwanego przejazdu.
+            // Combo-continuity markers for drift↔speeding↔burnout (see Update()) — reset so
+            // nothing "remembers" the interrupted run once data resumes.
             _lastDriftTime = DateTime.MinValue;
             _lastSpeedingTime = DateTime.MinValue;
             _lastBurnoutTime = DateTime.MinValue;
 
-            // Stan śledzenia burnoutu (obrót/bączek) — reset, żeby po wznowieniu
-            // danych nagła zmiana headingu sprzed przerwy nie policzyła się jako
-            // fałszywy skok prędkości kątowej.
+            // Burnout spin-tracking state — reset so a sudden heading jump from before the
+            // interruption doesn't get counted as a false angular-speed spike once data resumes.
             _burnoutConditionStart = DateTime.MinValue;
             _lastBurnoutHeadingDeg = null;
             _burnoutSpinAccumDeg = 0;
@@ -319,11 +340,24 @@ namespace LFSDriftBuddy
             _pendingDriftToBurnout = false;
         }
 
+        // Long-drift duration milestones (driftTimeMultipler ticks, each = 500ms of continuous
+        // drift): threshold reached -> ComboMultiplier bonus factor (times angleScore). See Update().
+        private static readonly (int Threshold, double ComboFactor)[] LongDriftMilestones =
+        {
+            (5, 0.15), (10, 0.25), (15, 0.35), (20, 0.45)
+        };
+
+        // Deep-angle (>=55°) streak milestones: threshold reached -> ComboMultiplier bonus
+        // factor (times angleScore). Also pays a flat 50 points per streak tick reached. See Update().
+        private static readonly (int Threshold, double ComboFactor)[] DeepAngleMilestones =
+        {
+            (4, 0.35), (8, 0.45), (12, 0.55), (16, 0.65)
+        };
+
         public void Update(InSim.CompCar car)
         {
-            // Zablokowane — patrz SetOutGaugeDataFresh. Stan już wyzerowany przez
-            // CancelActiveRun() w momencie przejścia świeże→martwe, więc tu wystarczy
-            // po prostu nic nie robić, dopóki dane nie wrócą.
+            // Gated — see SetOutGaugeDataFresh. State was already cleared by CancelActiveRun()
+            // at the fresh→stale transition, so it's enough to just do nothing until data returns.
             if (!_outGaugeDataFresh) return;
 
             var now = DateTime.UtcNow;
@@ -339,10 +373,7 @@ namespace LFSDriftBuddy
             double motionDeg = car.Direction / 65536.0 * 360.0;
             double headingDeg = car.Heading / 65536.0 * 360.0;
 
-            double diff = headingDeg - motionDeg;
-
-            while (diff > 180) diff -= 360;
-            while (diff < -180) diff += 360;
+            double diff = NormalizeAngleDelta(headingDeg - motionDeg);
 
             DriftSideRight = diff >= 0;
             DriftAngleDeg = Math.Abs(diff);
@@ -417,9 +448,9 @@ namespace LFSDriftBuddy
                 // used to also clear it instantly here, which raced with any bonus that fires
                 // while not actively speeding/drifting/burnout (e.g. burnout spin, clean lap).
 
-                // Combo/CurrentRunPoints przeżywają krótką przerwę (COMBO_TIMEOUT_SEC) między
-                // drift↔speeding↔burnout — reset następuje dopiero gdy WSZYSTKIE trzy źródła
-                // aktywności milczą dłużej niż limit (żadne z nich nie "trzyma" jeszcze combo).
+                // Combo/CurrentRunPoints survive a short gap (COMBO_TIMEOUT_SEC) between
+                // drift↔speeding↔burnout — reset only happens once ALL THREE activity sources
+                // have been silent longer than the limit (none of them is "holding" combo anymore).
                 double gap = (now - _lastDriftTime).TotalSeconds;
                 double gap2 = (now - _lastSpeedingTime).TotalSeconds;
                 double gap3 = (now - _lastBurnoutTime).TotalSeconds;
@@ -445,13 +476,12 @@ namespace LFSDriftBuddy
 
             if (!drifting && speeding)
             {
-                // ── Poziom "szybkiej jazdy" (1-5) i przyrost combo NA SEKUNDĘ ──────────
-                // Wcześniej ComboMultiplier był tu NADPISYWANY sztywną wartością zależną
-                // WYŁĄCZNIE od bieżącej prędkości — więc migał w górę/w dół razem z nią
-                // zamiast rosnąć w czasie, inaczej niż przy drifcie/burnoucie (tam zawsze
-                // DOKŁADA się coś do ComboMultiplier co klatkę). Teraz działa tak samo:
-                // każdy poziom prędkości dodaje co sekundę więcej niż poprzedni
-                // (FAST_DRIVE_COMBO_STEP_PER_SEC na poziom), z twardym limitem 10.0.
+                // ── "Fast driving" level (1-5) and combo growth PER SECOND ──────────
+                // ComboMultiplier used to be OVERWRITTEN here with a fixed value based SOLELY on
+                // current speed, so it flickered up/down with it instead of growing over time
+                // like drift/burnout do (where something is always ADDED to ComboMultiplier every
+                // frame). Now it works the same way: each speed level adds more per second than
+                // the last (FAST_DRIVE_COMBO_STEP_PER_SEC per level), hard-capped at 10.0.
                 int speedLevel = GetFastDriveLevel(SpeedKmh);
                 double comboGainPerSec = speedLevel * FAST_DRIVE_COMBO_STEP_PER_SEC;
                 ComboMultiplier = Math.Round(Math.Min(ComboMultiplier + comboGainPerSec * _dtSec, 10.0), 2);
@@ -470,7 +500,6 @@ namespace LFSDriftBuddy
 
                 SaveCurrentDriver();
 
-                // after
                 var labelKind = GetLabelKind(DriftAngleDeg, SpeedKmh, eDriftActive);
                 DriftScored?.Invoke(
                     CurrentRunPoints,
@@ -482,9 +511,9 @@ namespace LFSDriftBuddy
                 );
                 if (!drifting)
                 {
-                    // Wewnątrz tego bloku speeding jest zawsze true (patrz warunek wejściowy
-                    // `!drifting && speeding` powyżej) — gałąź "if (!speeding)", która tu
-                    // wcześniej była, nigdy nie mogła się wykonać.
+                    // speeding is always true inside this block (see the entry condition
+                    // `!drifting && speeding` above) — an "if (!speeding)" branch that used to be
+                    // here could never execute.
                     DriftEnded?.Invoke(CurrentRunPoints);
                     RegisterRunEnd(CurrentRunPoints);
                 }
@@ -524,7 +553,7 @@ namespace LFSDriftBuddy
 
                     IsDrifting = true;
 
-                    // ── kąt entry: start pomiaru dla nowej sekwencji driftu ──
+                    // ── entry angle: start measuring for a new drift sequence ──
                     _driftEntryStartTime = now;
                     _driftEntryEvaluated = false;
                     double gap = (now - _lastDriftTime).TotalSeconds;
@@ -551,12 +580,12 @@ namespace LFSDriftBuddy
                                     ComboMultiplier = Math.Round(Math.Min(ComboMultiplier + (0.11 * speedScore), 10.0), 2);
                                     bonusScore = Math.Round(bonusScore, 0) * Math.Round(ComboMultiplier, 2);
 
-                                    // Zaokrąglone RAZ do long i użyte wszędzie identycznie — wcześniej
-                                    // CurrentRunPoints zaokrąglał bonusScore (Math.Round), a TotalScore/
-                                    // LapScore go OBCINALI (rzutowanie double→long ucina, nie zaokrągla),
-                                    // więc przy niecałkowitym bonusScore (typowe, bo mnożone przez
-                                    // ComboMultiplier) CurrentRunPoints mógł się różnić o 1 punkt od
-                                    // Total/Lap dla DOKŁADNIE tego samego zdarzenia.
+                                    // Rounded ONCE to long and used identically everywhere — CurrentRunPoints
+                                    // used to round bonusScore (Math.Round) while TotalScore/LapScore
+                                    // TRUNCATED it (double→long casting truncates, doesn't round), so for a
+                                    // non-integer bonusScore (typical, since it's multiplied by ComboMultiplier)
+                                    // CurrentRunPoints could differ by 1 point from Total/Lap for the EXACT
+                                    // same event.
                                     long bonusPts = (long)Math.Round(bonusScore, 0);
                                     CurrentRunPoints += bonusPts;
                                     TotalScore += bonusPts;
@@ -575,9 +604,9 @@ namespace LFSDriftBuddy
                     DriftStarted?.Invoke();
                 }
 
-                // ── kąt entry: ocena dokładnie w momencie T+1,5s od startu sekwencji driftu ──
-                // (nie w chwili startu ani nie jako średnia — tylko wartość DriftAngleDeg
-                // dokładnie w klatce, w której mija 1,5s nieprzerwanego driftu)
+                // ── entry angle: evaluated exactly at T+1.5s from the start of the drift sequence ──
+                // (not at the start, not averaged — just DriftAngleDeg's value in the exact
+                // frame where 1.5s of uninterrupted drift is reached)
                 if (!_driftEntryEvaluated
                     && _driftEntryStartTime != DateTime.MinValue
                     && (now - _driftEntryStartTime).TotalSeconds >= DRIFT_ENTRY_EVAL_SEC
@@ -611,68 +640,33 @@ namespace LFSDriftBuddy
                     ComboMultiplier = Math.Round(Math.Min(ComboMultiplier + (0.036 * angleScore), 10.0), 2);
                     _driftStartTime = now;
 
-                    if (driftTimeMultipler == 5)
+                    foreach (var (threshold, comboFactor) in LongDriftMilestones)
                     {
+                        if (driftTimeMultipler != threshold) continue;
                         LastAwardedText = $"{bonusText} - {Math.Round((double)500 * driftTimeMultipler / 1000, 1)}s";
-                        ComboMultiplier = Math.Round(Math.Min(ComboMultiplier + (0.15 * angleScore), 10.0), 2);
-
-                    }
-                    else if (driftTimeMultipler == 10)
-                    {
-                        LastAwardedText = $"{bonusText} - {Math.Round((double)500 * driftTimeMultipler / 1000, 1)}s";
-                        ComboMultiplier = Math.Round(Math.Min(ComboMultiplier + (0.25 * angleScore), 10.0), 2);
-                    }
-                    else if (driftTimeMultipler == 15)
-                    {
-                        LastAwardedText = $"{bonusText} - {Math.Round((double)500 * driftTimeMultipler / 1000, 1)}s";
-                        ComboMultiplier = Math.Round(Math.Min(ComboMultiplier + (0.35 * angleScore), 10.0), 2);
-                    }
-                    else if (driftTimeMultipler == 20)
-                    {
-                        LastAwardedText = $"{bonusText} - {Math.Round((double)500 * driftTimeMultipler / 1000, 1)}s";
-                        ComboMultiplier = Math.Round(Math.Min(ComboMultiplier + (0.45 * angleScore), 10.0), 2);
+                        ComboMultiplier = Math.Round(Math.Min(ComboMultiplier + (comboFactor * angleScore), 10.0), 2);
+                        break;
                     }
 
                     labelKindT = DriftLabelKind.DeepLongDrift;
                     bonusText = Localization.T(LabelKindToKey(labelKindT));
-
 
                     if (DriftAngleDeg >= 55)
                     {
                         deepAngleCount++;
                     }
                     else deepAngleCount = 0;
-                    if (deepAngleCount == 4)
-                    {
-                        TotalScore = TotalScore + (50 * deepAngleCount);
-                        LapScore = LapScore + (50 * deepAngleCount);
-                        LastAwardedText = $"{bonusText} - {Math.Round((double)500 * driftTimeMultipler / 1000, 1)}s + {50 * deepAngleCount}";
-                        ComboMultiplier = Math.Round(Math.Min(ComboMultiplier + (0.35 * angleScore), 10.0), 2);
 
-                    }
-                    else if (deepAngleCount == 8)
+                    foreach (var (threshold, comboFactor) in DeepAngleMilestones)
                     {
-                        TotalScore = TotalScore + (50 * deepAngleCount);
-                        LapScore = LapScore + (50 * deepAngleCount);
-                        LastAwardedText = $"{bonusText} - {Math.Round((double)500 * driftTimeMultipler / 1000, 1)}s + {50 * deepAngleCount}";
-                        ComboMultiplier = Math.Round(Math.Min(ComboMultiplier + (0.45 * angleScore), 10.0), 2);
+                        if (deepAngleCount != threshold) continue;
+                        long bonus = 50 * deepAngleCount;
+                        TotalScore += bonus;
+                        LapScore += bonus;
+                        LastAwardedText = $"{bonusText} - {Math.Round((double)500 * driftTimeMultipler / 1000, 1)}s + {bonus}";
+                        ComboMultiplier = Math.Round(Math.Min(ComboMultiplier + (comboFactor * angleScore), 10.0), 2);
+                        break;
                     }
-                    else if (deepAngleCount == 12)
-                    {
-                        TotalScore = TotalScore + (50 * deepAngleCount);
-                        LapScore = LapScore + (50 * deepAngleCount);
-                        LastAwardedText = $"{bonusText} - {Math.Round((double)500 * driftTimeMultipler / 1000, 1)}s + {50 * deepAngleCount}";
-                        ComboMultiplier = Math.Round(Math.Min(ComboMultiplier + (0.55 * angleScore), 10.0), 2);
-                    }
-                    else if (deepAngleCount == 16)
-                    {
-                        TotalScore = TotalScore + (50 * deepAngleCount);
-                        LapScore = LapScore + (50 * deepAngleCount);
-                        LastAwardedText = $"{bonusText} - {Math.Round((double)500 * driftTimeMultipler / 1000, 1)}s + {50 * deepAngleCount}";
-                        ComboMultiplier = Math.Round(Math.Min(ComboMultiplier + (0.65 * angleScore), 10.0), 2);
-                    }
-                    // (driftTime jest lokalną zmienną przeliczaną od nowa z _driftStartTime przy
-                    // każdym wejściu w ten blok — przypisanie jej tu do 0 nigdy nie było odczytywane)
                 }
 
                 if (eBrakeCount >= 1) { eDriftActive = true; }
@@ -689,11 +683,6 @@ namespace LFSDriftBuddy
                 LapScore += (long)framePts;
                 SaveCurrentDriver();
 
-
-
-
-
-                // after
                 var labelKind = GetLabelKind(DriftAngleDeg, SpeedKmh, eDriftActive);
                 DriftScored?.Invoke(
                     CurrentRunPoints,
@@ -711,8 +700,8 @@ namespace LFSDriftBuddy
                 FinalizeDriftSession(now);
                 FinalizeDeepDriftSession(now);
 
-                // koniec sekwencji driftu — sprzątamy stan oceny entry, żeby kolejna
-                // sekwencja zaczynała pomiar od zera
+                // end of drift sequence — clear entry-evaluation state so the next
+                // sequence starts measuring from zero
                 _driftEntryStartTime = DateTime.MinValue;
                 _driftEntryEvaluated = false;
 
@@ -735,210 +724,147 @@ namespace LFSDriftBuddy
         }
 
         // ────────────────────────────────────────────────────────
-        //  Persistence
+        //  Persistence — everything lives in one file, driver_data.json
         // ────────────────────────────────────────────────────────
-        private void LoadStats()
+        private void LoadDriverData()
         {
             try
             {
-                if (!File.Exists(_statsFile))
+                if (File.Exists(_driverDataFile))
                 {
-                    _driverScores = new Dictionary<string, DriverStats>();
+                    string json = File.ReadAllText(_driverDataFile);
+                    _driverData = JsonSerializer.Deserialize<Dictionary<string, DriverData>>(json)
+                                  ?? new Dictionary<string, DriverData>();
                     return;
-                }
-
-                string json = File.ReadAllText(_statsFile);
-
-                try
-                {
-                    _driverScores = JsonSerializer.Deserialize<Dictionary<string, DriverStats>>(json)
-                                    ?? new Dictionary<string, DriverStats>();
-                }
-                catch
-                {
-                    // migracja ze starego formatu pliku (Dictionary<string, long>)
-                    var old = JsonSerializer.Deserialize<Dictionary<string, long>>(json);
-                    _driverScores = new Dictionary<string, DriverStats>();
-
-                    if (old != null)
-                    {
-                        foreach (var kv in old)
-                            _driverScores[kv.Key] = new DriverStats { TotalScore = kv.Value };
-                    }
                 }
             }
             catch
             {
-                _driverScores = new Dictionary<string, DriverStats>();
+                _driverData = new Dictionary<string, DriverData>();
             }
+
+            // First run on the new format — pull in the old 3-file layout if present.
+            MigrateLegacyFiles();
         }
+
+        // One-time import from the pre-consolidation files (driver_stats.json,
+        // driver_lap_records.json, driver_lastlap_records.json). Leaves the old files on
+        // disk untouched; only driver_data.json is written going forward.
+        private void MigrateLegacyFiles()
+        {
+            try
+            {
+                if (File.Exists(LegacyStatsFile))
+                {
+                    string json = File.ReadAllText(LegacyStatsFile);
+                    Dictionary<string, DriverStats> old;
+                    try
+                    {
+                        old = JsonSerializer.Deserialize<Dictionary<string, DriverStats>>(json)
+                              ?? new Dictionary<string, DriverStats>();
+                    }
+                    catch
+                    {
+                        // even older format: Dictionary<string, long>
+                        var older = JsonSerializer.Deserialize<Dictionary<string, long>>(json) ?? new();
+                        old = new Dictionary<string, DriverStats>();
+                        foreach (var kv in older)
+                            old[kv.Key] = new DriverStats { TotalScore = kv.Value };
+                    }
+                    foreach (var kv in old)
+                        GetOrCreateDriverData(kv.Key).Stats = kv.Value;
+                }
+
+                if (File.Exists(LegacyLapRecordsFile))
+                {
+                    string json = File.ReadAllText(LegacyLapRecordsFile);
+                    var old = JsonSerializer.Deserialize<Dictionary<string, Dictionary<string, Dictionary<string, long>>>>(json);
+                    if (old != null)
+                        foreach (var kv in old)
+                            GetOrCreateDriverData(kv.Key).LapRecords = kv.Value;
+                }
+
+                if (File.Exists(LegacyLastLapRecordsFile))
+                {
+                    string json = File.ReadAllText(LegacyLastLapRecordsFile);
+                    var old = JsonSerializer.Deserialize<Dictionary<string, Dictionary<string, Dictionary<string, long>>>>(json);
+                    if (old != null)
+                        foreach (var kv in old)
+                            GetOrCreateDriverData(kv.Key).LastLapRecords = kv.Value;
+                }
+
+                if (_driverData.Count > 0)
+                    SaveDriverDataRaw(force: true);
+            }
+            catch { }
+        }
+
         private long GetLastLapForDriver(string driver, string track, string layout)
         {
             string layoutKey = string.IsNullOrWhiteSpace(layout) ? "default" : layout;
 
-            if (_driverLastLapRecords.TryGetValue(driver, out var trackMap) &&
-                trackMap.TryGetValue(track, out var layoutMap) &&
+            if (_driverData.TryGetValue(driver, out var d) &&
+                d.LastLapRecords.TryGetValue(track, out var layoutMap) &&
                 layoutMap.TryGetValue(layoutKey, out var last))
                 return last;
 
             return 0;
         }
 
-        private void LoadLastLapRecords()
-        {
-            try
-            {
-                if (!File.Exists(_lastLapRecordsFile))
-                {
-                    _driverLastLapRecords = new Dictionary<string, Dictionary<string, Dictionary<string, long>>>();
-                    return;
-                }
-
-                string json = File.ReadAllText(_lastLapRecordsFile);
-                _driverLastLapRecords = JsonSerializer.Deserialize<Dictionary<string, Dictionary<string, Dictionary<string, long>>>>(json)
-                                         ?? new Dictionary<string, Dictionary<string, Dictionary<string, long>>>();
-            }
-            catch
-            {
-                _driverLastLapRecords = new Dictionary<string, Dictionary<string, Dictionary<string, long>>>();
-            }
-        }
-
         private void MigrateDefaultLastLapRecordIfNeeded()
         {
             if (string.IsNullOrWhiteSpace(_currentLayoutName)) return;
-            if (!_driverLastLapRecords.TryGetValue(CurrentDriver, out var trackMap)) return;
+            var trackMap = GetOrCreateDriverData(CurrentDriver).LastLapRecords;
             if (!trackMap.TryGetValue(_currentTrackCode, out var layoutMap)) return;
             if (!layoutMap.TryGetValue("default", out var defaultScore)) return;
             if (layoutMap.ContainsKey(_currentLayoutName)) return;
 
             layoutMap[_currentLayoutName] = defaultScore;
             layoutMap.Remove("default");
-            SaveLastLapRecordsRaw();
+            SaveDriverDataRaw();
         }
 
         private void SaveLastLapRecord()
         {
             string layoutKey = string.IsNullOrWhiteSpace(_currentLayoutName) ? "default" : _currentLayoutName;
-
-            if (!_driverLastLapRecords.TryGetValue(CurrentDriver, out var trackMap))
-            {
-                trackMap = new Dictionary<string, Dictionary<string, long>>();
-                _driverLastLapRecords[CurrentDriver] = trackMap;
-            }
-
-            if (!trackMap.TryGetValue(_currentTrackCode, out var layoutMap))
-            {
-                layoutMap = new Dictionary<string, long>();
-                trackMap[_currentTrackCode] = layoutMap;
-            }
+            var trackMap = GetOrCreateDriverData(CurrentDriver).LastLapRecords;
+            var layoutMap = GetOrCreateLayoutMap(trackMap, _currentTrackCode);
 
             layoutMap[layoutKey] = LastLapScore;
-            SaveLastLapRecordsRaw();
+            SaveDriverDataRaw();
         }
 
-        private void SaveLastLapRecordsRaw()
-        {
-            try
-            {
-                string json = JsonSerializer.Serialize(
-                    _driverLastLapRecords,
-                    new JsonSerializerOptions { WriteIndented = true });
-
-                File.WriteAllText(_lastLapRecordsFile, json);
-            }
-            catch
-            {
-            }
-        }
         private long GetBestLapForDriver(string driver, string track, string layout)
         {
             string layoutKey = string.IsNullOrWhiteSpace(layout) ? "default" : layout;
 
-            if (_driverLapRecords.TryGetValue(driver, out var trackMap) &&
-                trackMap.TryGetValue(track, out var layoutMap) &&
+            if (_driverData.TryGetValue(driver, out var d) &&
+                d.LapRecords.TryGetValue(track, out var layoutMap) &&
                 layoutMap.TryGetValue(layoutKey, out var best))
                 return best;
 
             return 0;
         }
 
-        private void LoadLapRecords()
-        {
-            try
-            {
-                if (!File.Exists(_lapRecordsFile))
-                {
-                    _driverLapRecords = new Dictionary<string, Dictionary<string, Dictionary<string, long>>>();
-                    return;
-                }
-
-                string json = File.ReadAllText(_lapRecordsFile);
-                _driverLapRecords = JsonSerializer.Deserialize<Dictionary<string, Dictionary<string, Dictionary<string, long>>>>(json)
-                                     ?? new Dictionary<string, Dictionary<string, Dictionary<string, long>>>();
-            }
-            catch
-            {
-                _driverLapRecords = new Dictionary<string, Dictionary<string, Dictionary<string, long>>>();
-            }
-        }
-
         private void SaveLapRecords()
         {
             string layoutKey = string.IsNullOrWhiteSpace(_currentLayoutName) ? "default" : _currentLayoutName;
-
-            if (!_driverLapRecords.TryGetValue(CurrentDriver, out var trackMap))
-            {
-                trackMap = new Dictionary<string, Dictionary<string, long>>();
-                _driverLapRecords[CurrentDriver] = trackMap;
-            }
-
-            if (!trackMap.TryGetValue(_currentTrackCode, out var layoutMap))
-            {
-                layoutMap = new Dictionary<string, long>();
-                trackMap[_currentTrackCode] = layoutMap;
-            }
+            var trackMap = GetOrCreateDriverData(CurrentDriver).LapRecords;
+            var layoutMap = GetOrCreateLayoutMap(trackMap, _currentTrackCode);
 
             layoutMap[layoutKey] = BestLapScore;
-
-            SaveLapRecordsRaw();
+            SaveDriverDataRaw();
         }
-
-        private void SaveLapRecordsRaw()
-        {
-            try
-            {
-                string json = JsonSerializer.Serialize(
-                    _driverLapRecords,
-                    new JsonSerializerOptions { WriteIndented = true });
-
-                File.WriteAllText(_lapRecordsFile, json);
-            }
-            catch
-            {
-            }
-        }
-
 
         private DateTime _lastStatsSaveUtc = DateTime.MinValue;
         private static readonly TimeSpan StatsSaveInterval = TimeSpan.FromSeconds(2);
 
-        // Called multiple times/sec during active scoring (fastPts/framePts/burnout) — the
-        // in-memory stats dict is always kept current, but the disk write (JSON serialize +
-        // File.WriteAllText) is throttled so it doesn't stall the caller's thread every frame.
-        private void SaveCurrentDriver(bool force = false)
+        // Called multiple times/sec during active scoring (fastPts/framePts/burnout) as well
+        // as once per lap (records) — the in-memory dictionary is always kept current, but the
+        // disk write (JSON serialize + File.WriteAllText of the whole file) is throttled so it
+        // doesn't stall the caller's thread every frame.
+        private void SaveDriverDataRaw(bool force = false)
         {
-            if (!_driverScores.TryGetValue(CurrentDriver, out var stats))
-            {
-                stats = new DriverStats();
-                _driverScores[CurrentDriver] = stats;
-            }
-
-            stats.TotalScore = TotalScore;
-            stats.BestRunScore = BestRunScore;
-            stats.BestDriftDurationMs = BestDriftDurationMs;
-            stats.BestDeepDriftDurationMs = BestDeepDriftDurationMs;
-
             if (!force && (DateTime.UtcNow - _lastStatsSaveUtc) < StatsSaveInterval)
                 return;
 
@@ -947,42 +873,56 @@ namespace LFSDriftBuddy
             try
             {
                 string json = JsonSerializer.Serialize(
-                    _driverScores,
-                    new JsonSerializerOptions
-                    {
-                        WriteIndented = true
-                    });
+                    _driverData,
+                    new JsonSerializerOptions { WriteIndented = true });
 
-                File.WriteAllText(_statsFile, json);
+                File.WriteAllText(_driverDataFile, json);
             }
             catch
             {
             }
         }
 
-        /// <summary>Forces an immediate stats save, bypassing the throttle — call on app shutdown.</summary>
+        // Updates the in-memory stats for CurrentDriver and writes driver_data.json (throttled
+        // unless force is set).
+        private void SaveCurrentDriver(bool force = false)
+        {
+            var stats = GetOrCreateDriverData(CurrentDriver).Stats;
+            stats.TotalScore = TotalScore;
+            stats.BestRunScore = BestRunScore;
+            stats.BestDriftDurationMs = BestDriftDurationMs;
+            stats.BestDeepDriftDurationMs = BestDeepDriftDurationMs;
+
+            SaveDriverDataRaw(force);
+        }
+
+        /// <summary>Forces an immediate save, bypassing the throttle — call on app shutdown.</summary>
         public void FlushStats() => SaveCurrentDriver(force: true);
 
         // ────────────────────────────────────────────────────────
-        //  Rekordy: najlepszy run / najdłuższy drift / głęboki drift
+        //  Records: best run / longest drift / deep-angle drift
         // ────────────────────────────────────────────────────────
         private void RegisterRunEnd(long runPoints)
         {
             if (runPoints > BestRunScore)
             {
                 BestRunScore = runPoints;
-                SaveCurrentDriver();
             }
+
+            // Force-save (bypass the 2s throttle) whenever a drift/speeding/burnout run ends —
+            // without this, TotalScore on disk could lag behind by up to StatsSaveInterval and
+            // then sit stale until the next active run starts saving again. A stale on-disk
+            // value matters more now that legitimate driver-switch reloads read straight from it.
+            SaveCurrentDriver(force: true);
         }
 
         /// <summary>
-        /// Dodaje/odejmuje punkty za uderzenie w obiekt (bonus/kara) albo za bonus kąta wejścia
-        /// w drift. Dokłada DOKŁADNIE tę samą wartość do CurrentRunPoints, TotalScore i LapScore —
-        /// wcześniej celowo pomijał CurrentRunPoints (i komentarz to zapowiadał), przez co po
-        /// kolizji z obiektem podczas aktywnego driftu LapScore/TotalScore skakały w górę, a
-        /// "RUN SCORE"/combo na HUD-zie (liczone z CurrentRunPoints) zostawały bez zmian —
-        /// wyglądało to jak LapScore "wyprzedzający" bieżący przejazd. Teraz oba liczniki
-        /// zawsze poruszają się razem.
+        /// Adds/subtracts points for an object hit (bonus/penalty) or a drift-entry angle bonus.
+        /// Adds the EXACT same value to CurrentRunPoints, TotalScore, and LapScore — it used to
+        /// deliberately skip CurrentRunPoints (the comment even said so), so a collision during
+        /// an active drift made LapScore/TotalScore jump while "RUN SCORE"/combo on the HUD
+        /// (computed from CurrentRunPoints) stayed unchanged, looking like LapScore was "ahead of"
+        /// the current run. Both counters now always move together.
         /// </summary>
         public void ApplyPostPoints(long delta, string awardLabel)
         {
@@ -1003,6 +943,20 @@ namespace LFSDriftBuddy
             long pts = (long)Math.Round(MILESTONE_BONUS_POINTS * ComboMultiplier);
             _lastBonusTime = DateTime.UtcNow;
             ApplyPostPoints(pts, $"{label} +{pts}");
+        }
+
+        // Shared by burnout-spin and donut streaks: bumps a consecutive-hit counter (reset to 0
+        // first if more than SPIN_COMBO_GAP_SEC passed since its own last award), then awards a
+        // milestone bonus labeled "baseLabel" or "baseLabel xN" once N>1.
+        private void AwardStreakBonus(string baseLabel, ref int comboCount, ref DateTime lastBonusTime, DateTime now)
+        {
+            if ((now - lastBonusTime).TotalSeconds > SPIN_COMBO_GAP_SEC)
+                comboCount = 0;
+            comboCount++;
+            lastBonusTime = now;
+
+            string label = baseLabel + (comboCount > 1 ? $" x{comboCount}" : "");
+            AwardMilestoneBonus(label);
         }
 
         // Same as AwardMilestoneBonus but a flat point value, not combo-scaled (e.g. clean lap).
@@ -1028,10 +982,10 @@ namespace LFSDriftBuddy
             AwardMilestoneBonus(Localization.T("bonus.unstoppable"));
         }
 
-        // Jednorazowa ocena kąta entry — wywoływana dokładnie raz na sekwencję driftu,
-        // w klatce w której mija DRIFT_ENTRY_EVAL_SEC od jej rozpoczęcia. Kąt poniżej progu
-        // "good" (50°) nie daje żadnego bonusu — to nie kara, po prostu entry nie było
-        // wystarczająco głębokie, żeby się wyróżnić.
+        // One-time entry-angle evaluation — called exactly once per drift sequence, on the frame
+        // where DRIFT_ENTRY_EVAL_SEC elapses since it started. An angle below the "good"
+        // threshold (50°) gets no bonus at all — not a penalty, the entry just wasn't deep
+        // enough to stand out.
         private void EvaluateDriftEntry(double angleAtEval)
         {
             DriftLabelKind kind;
@@ -1042,7 +996,7 @@ namespace LFSDriftBuddy
             else if (angleAtEval > DRIFT_ENTRY_EXTREME_DEG) { kind = DriftLabelKind.EntryExtreme; bonus = 500; }
             else if (angleAtEval > DRIFT_ENTRY_HIGH_DEG) { kind = DriftLabelKind.EntryHigh; bonus = 300; }
             else if (angleAtEval > DRIFT_ENTRY_GOOD_DEG) { kind = DriftLabelKind.EntryGood; bonus = 150; }
-            else return;   // kąt entry poniżej progu "good" — bez bonusu
+            else return;   // entry angle below the "good" threshold — no bonus
 
             string text = Localization.T(LabelKindToKey(kind));
             ApplyPostPoints(bonus, $"{text} +{bonus}");
@@ -1079,6 +1033,16 @@ namespace LFSDriftBuddy
         // ────────────────────────────────────────────────────────
         //  Helpers
         // ────────────────────────────────────────────────────────
+
+        // Wraps an angle difference into (-180, 180] — shared by heading/motion drift angle,
+        // burnout spin tracking, and donut heading tracking.
+        private static double NormalizeAngleDelta(double delta)
+        {
+            while (delta > 180) delta -= 360;
+            while (delta < -180) delta += 360;
+            return delta;
+        }
+
         private static double AngleScore(double angle)
         {
             angle = Math.Clamp(angle, MIN_DRIFT_ANGLE_DEG, MAX_DRIFT_ANGLE_DEG);
@@ -1096,57 +1060,38 @@ namespace LFSDriftBuddy
             return 0.001 +
                    ((kmh - 1) /
                    (100 - 15)) * 1.99;
-
-
-            // double norm = kmh / (FAST_DRIVE_THRESHOLD - 40);
-            // return Math.Max(0.5, Math.Min(2.5, norm));
         }
+
+        // Shared angle "level" (0-6) behind both indicator-flash formatters below — level 0
+        // means the angle doesn't clear MIN_DRIFT_ANGLE_DEG at all (no text on either side).
+        private static int GetDriftIndicatorLevel(double angle)
+        {
+            if (angle > 90) return 6;
+            if (angle > MIN_DRIFT_ANGLE_DEG + 45) return 5;
+            if (angle > MIN_DRIFT_ANGLE_DEG + 35) return 4;
+            if (angle > MIN_DRIFT_ANGLE_DEG + 25) return 3;
+            if (angle > MIN_DRIFT_ANGLE_DEG + 15) return 2;
+            if (angle > MIN_DRIFT_ANGLE_DEG) return 1;
+            return 0;
+        }
+
+        // Right/left indicator-flash text, and the matching-width blanks used on whichever side
+        // the car ISN'T drifting toward, so the HUD layout doesn't shift when the active side
+        // switches. Indexed by GetDriftIndicatorLevel(angle).
+        private static readonly string[] IndicatorTextRight = { "", " >", " >>", " >>>", " >>>>", " >>>>>", " ???" };
+        private static readonly string[] IndicatorTextLeft = { "", "< ", "<< ", "<<< ", "<<<< ", "<<<<< ", "??? " };
+        private static readonly string[] IndicatorBlank = { "", "  ", "   ", "    ", "     ", "      ", "    " };
 
         private static string GetDriftValueINDR(double angle, bool side)
         {
-            if (side == true)
-            {
-                if (angle > 90) return " ???";
-                if (angle > 65) return " >>>>>";
-                if (angle > 55) return " >>>>";
-                if (angle > 45) return " >>>";
-                if (angle > 25) return " >>";
-                if (angle > 15) return " >";
-            }
-            else
-            {
-                if (angle > 90) return "       ";
-                if (angle > 65) return "      ";
-                if (angle > 55) return "     ";
-                if (angle > 45) return "    ";
-                if (angle > 25) return "   ";
-                if (angle > 15) return "  ";
-            }
-
-            return "";
+            int level = GetDriftIndicatorLevel(angle);
+            return side ? IndicatorTextRight[level] : IndicatorBlank[level];
         }
+
         private static string GetDriftValueINDL(double angle, bool side)
         {
-            if (side == false)
-            {
-                if (angle > 90) return "??? ";
-                if (angle > 65) return "<<<<< ";
-                if (angle > 55) return "<<<< ";
-                if (angle > 45) return "<<< ";
-                if (angle > 25) return "<< ";
-                if (angle > 10) return "< ";
-            }
-            else
-            {
-                if (angle > 90) return "       ";
-                if (angle > 65) return "      ";
-                if (angle > 55) return "     ";
-                if (angle > 45) return "    ";
-                if (angle > 25) return "   ";
-                if (angle > 15) return "  ";
-            }
-
-            return "";
+            int level = GetDriftIndicatorLevel(angle);
+            return !side ? IndicatorTextLeft[level] : IndicatorBlank[level];
         }
         public enum DriftLabelKind
         {
@@ -1190,23 +1135,23 @@ namespace LFSDriftBuddy
             if (!brake)
             {
                 if (angle > 90 && speed > 30) return DriftLabelKind.AngleBackward;
-                if (angle > 65) return DriftLabelKind.AngleUltraExtreme;
-                if (angle > 55) return DriftLabelKind.AngleExtreme;
-                if (angle > 45) return DriftLabelKind.AngleHigh;
-                if (angle > 25) return DriftLabelKind.AngleGood;
-                if (angle < 25 && angle > 15) return DriftLabelKind.Generic;
+                if (angle > MIN_DRIFT_ANGLE_DEG + 45) return DriftLabelKind.AngleUltraExtreme;
+                if (angle > MIN_DRIFT_ANGLE_DEG + 35) return DriftLabelKind.AngleExtreme;
+                if (angle > MIN_DRIFT_ANGLE_DEG + 25) return DriftLabelKind.AngleHigh;
+                if (angle > MIN_DRIFT_ANGLE_DEG + 15) return DriftLabelKind.AngleGood;
+                if (angle < MIN_DRIFT_ANGLE_DEG + 15 && angle > MIN_DRIFT_ANGLE_DEG) return DriftLabelKind.Generic;
             }
             else
             {
                 if (angle > 90 && speed > 30) return DriftLabelKind.AngleBackwardE;
-                if (angle > 65) return DriftLabelKind.AngleUltraExtremeE;
-                if (angle > 55) return DriftLabelKind.AngleExtremeE;
-                if (angle > 45) return DriftLabelKind.AngleHighE;
-                if (angle > 25) return DriftLabelKind.AngleGoodE;
-                if (angle < 25 && angle > 15) return DriftLabelKind.GenericE;
+                if (angle > MIN_DRIFT_ANGLE_DEG + 45) return DriftLabelKind.AngleUltraExtremeE;
+                if (angle > MIN_DRIFT_ANGLE_DEG + 35) return DriftLabelKind.AngleExtremeE;
+                if (angle > MIN_DRIFT_ANGLE_DEG + 25) return DriftLabelKind.AngleHighE;
+                if (angle > MIN_DRIFT_ANGLE_DEG + 15) return DriftLabelKind.AngleGoodE;
+                if (angle < MIN_DRIFT_ANGLE_DEG + 15 && angle > MIN_DRIFT_ANGLE_DEG) return DriftLabelKind.GenericE;
             }
 
-            if (speed > 120 && angle > 20) return DriftLabelKind.FastDrift;
+            if (speed > 120 && angle > MIN_DRIFT_ANGLE_DEG) return DriftLabelKind.FastDrift;
 
             return DriftLabelKind.Generic;
         }
@@ -1244,37 +1189,36 @@ namespace LFSDriftBuddy
         };
 
         // ────────────────────────────────────────────────────────
-        //  Burnout detection — koła napędowe kręcą się dużo szybciej niż
-        //  rzeczywiście jedzie auto (typowe stanie w miejscu z wciśniętym gazem).
+        //  Burnout detection — driven wheels spinning much faster than the car is
+        //  actually moving (typically standing still with the throttle down).
         // ────────────────────────────────────────────────────────
 
-        // Rzeczywista prędkość (SpeedKmh, z InSim MCI) musi być poniżej tego progu —
-        // inaczej to już normalna jazda/drift, nie stanie w miejscu.
+        // Real speed (SpeedKmh, from InSim MCI) must be below this threshold — otherwise
+        // it's normal driving/drifting, not standing still.
         private const double BURNOUT_MAX_REAL_SPEED_KMH = 25.0;
 
-        // RPM musi być WYRAŹNIE powyżej typowego jałowego biegu (zwykle 800–1200 RPM w
-        // LFS) — inaczej silnik pracujący na postoju (auto stoi, kierowca nic nie robi)
-        // fałszywie zaliczał się jako "burnout" (patrz zgłoszony błąd: wykrywanie na
-        // jałowym). Razem z progiem gazu i wymogiem włączonego biegu poniżej, to jest
-        // teraz JEDYNY sygnał burnoutu — bez estymacji prędkości kół (patrz komentarz
-        // przy UpdateEngineTelemetry: próby jej wyliczenia z RPM+przełożenia, a potem z
-        // OutSim AngVel, okazały się niewiarygodne w praktyce i zostały usunięte).
+        // RPM must be CLEARLY above a typical idle (usually 800-1200 RPM in LFS) — otherwise
+        // an engine idling with the car stationary and the driver doing nothing false-positived
+        // as a "burnout" (see the reported bug: detection while idling). Together with the
+        // throttle threshold and the gear requirement below, this is now the ONLY burnout signal
+        // — no wheel-speed estimation (see the comment at UpdateEngineTelemetry: attempts to
+        // compute it from RPM+gear ratio, then from OutSim AngVel, proved unreliable in
+        // practice and were removed).
         private const float BURNOUT_MIN_RPM = 3000f;
 
-        // Gaz musi być wciśnięty wyraźnie mocno — samo wysokie RPM (np. przy zjeżdżaniu
-        // z redline po zdjęciu nogi z gazu) nie powinno liczyć się jako burnout.
+        // Throttle must be pressed clearly hard — high RPM alone (e.g. coasting down from the
+        // redline after lifting off) shouldn't count as a burnout.
         private const float BURNOUT_MIN_THROTTLE = 0.45f;
 
-        // Warunki (prędkość + RPM + gaz + bieg) muszą trzymać się nieprzerwanie co
-        // najmniej tyle sekund, zanim burnout zostanie uznany za aktywny i zacznie
-        // liczyć punkty.
-        private const double BURNOUT_ACTIVATE_SEC = 0.35;
+        // Conditions (speed + RPM + throttle + gear) must hold continuously for at least this
+        // long before a burnout is considered active and starts scoring points.
+        private const double BURNOUT_ACTIVATE_SEC = 0.5;
 
-        // Bazowe punkty na sekundę PO aktywacji (czyli już po upływie progu 3s),
-        // mnożone przez rosnący ComboMultiplier (patrz UpdateBurnout).
+        // Base points per second AFTER activation (i.e. once BURNOUT_ACTIVATE_SEC has passed),
+        // multiplied by the growing ComboMultiplier (see UpdateBurnout).
         private const double BURNOUT_POINTS_PER_SECOND = 5.0;
 
-        // Bonus za każdy pełny obrót (360°) podczas aktywnego burnoutu ("bączek").
+        // Bonus for every full rotation (360°) during an active burnout (a "spin").
         private const long BURNOUT_SPIN_BONUS_POINTS = 250;
 
         // Milestone bonuses (stationary burnout / donut / smooth transitions): base points
@@ -1289,12 +1233,12 @@ namespace LFSDriftBuddy
         private bool _lapHadPenalty = false;
 
         // Stationary burnout: speed threshold + time tiers, one bonus per tier crossed.
-        private const double STATIONARY_BURNOUT_MAX_SPEED_KMH = 1.0;
+        private const double STATIONARY_BURNOUT_MAX_SPEED_KMH = 1.5;
         private static readonly double[] STATIONARY_BURNOUT_TIERS_SEC = { 5, 10, 15, 20 };
 
         // Donut: full 360° while drifting, counted only if the car ends up back near where
         // the lap started (otherwise it's just a long drift, not a loop around a point).
-        private const double DONUT_RADIUS_METERS = 15.0;
+        private const double DONUT_RADIUS_METERS = 20.0;
         private const double DRIFT_SPIN_ABANDON_SEC = 1.0;
 
         // Max gap (s) between one activity ending and the other starting to count as a
@@ -1320,50 +1264,48 @@ namespace LFSDriftBuddy
 
         public bool IsBurnout { get; private set; }
 
-        // Telemetria silnika karmiona z zewnątrz (patrz UpdateEngineTelemetry) — InSim MCI
-        // daje tylko rzeczywistą prędkość auta, więc RPM/gaz/bieg (z OutGauge) trzeba
-        // dostarczyć osobno. OutGauge.Gear: 0=wsteczny, 1=jałowy, 2=1.bieg, 3=2.bieg...
+        // Engine telemetry fed in from the outside (see UpdateEngineTelemetry) — InSim MCI only
+        // gives the car's real speed, so RPM/throttle/gear (from OutGauge) have to be supplied
+        // separately. OutGauge.Gear: 0=reverse, 1=neutral, 2=1st gear, 3=2nd gear...
         private float _lastRpm = 0f;
         private float _lastThrottle = 0f;
         private int _lastGear = 0;
 
-        // Moment od którego warunki burnoutu (prędkość<BURNOUT_MAX_REAL_SPEED_KMH, bieg≥2,
-        // gaz≥BURNOUT_MIN_THROTTLE, RPM≥BURNOUT_MIN_RPM — patrz UpdateBurnout) trzymają się
-        // nieprzerwanie. DateTime.MinValue = warunki obecnie niespełnione.
+        // Moment since which the burnout conditions (speed<BURNOUT_MAX_REAL_SPEED_KMH, gear≥2,
+        // throttle≥BURNOUT_MIN_THROTTLE, RPM≥BURNOUT_MIN_RPM — see UpdateBurnout) have held
+        // continuously. DateTime.MinValue = conditions currently not met.
         private DateTime _burnoutConditionStart = DateTime.MinValue;
 
-        // Ostatni moment doliczenia punktów za aktywny burnout — analogicznie do
-        // _lastDriftTime/_lastSpeedingTime, chroni CurrentRunPoints/ComboMultiplier
-        // przed wyzerowaniem przez ogólny blok resetu combo (patrz Update()), który
-        // inaczej zerowałby wynik co klatkę tuż po jego doliczeniu, bo burnout z
-        // definicji ma SpeedKmh poniżej progu drift/speeding. Dzięki temu samemu
-        // znacznikowi (i wspólnej właściwości ComboMultiplier) combo zdobyte podczas
-        // burnoutu przeżywa cooldown i płynnie kontynuuje się przy przejściu do
-        // driftu/szybkiej jazdy — dokładnie jak combo drift↔speeding.
+        // Last moment points were added for an active burnout — same role as
+        // _lastDriftTime/_lastSpeedingTime: protects CurrentRunPoints/ComboMultiplier from being
+        // zeroed by the general combo-reset block (see Update()), which would otherwise reset the
+        // score every frame right after awarding it, since a burnout by definition has SpeedKmh
+        // below the drift/speeding threshold. Thanks to this marker (and the shared
+        // ComboMultiplier property), combo earned during a burnout survives the cooldown and
+        // continues smoothly into drift/fast driving — exactly like drift↔speeding combo.
         private DateTime _lastBurnoutTime = DateTime.MinValue;
 
-        // Śledzenie obrotu (heading) auta — do wykrywania pełnych "bączków" 360°.
-        // Oparte WYŁĄCZNIE na prędkości kątowej (zmianie headingDeg / czas), a nie na
-        // SpeedKmh — bączek może mieć realny promień i realną prędkość liniową, więc
-        // wymaganie "auto stoi w miejscu" odrzucało większość prawdziwych bączków.
+        // Tracks the car's heading rotation to detect full 360° spins. Based SOLELY on angular
+        // speed (change in headingDeg / time), not SpeedKmh — a spin can have a real radius and
+        // real linear speed, so requiring "the car is stationary" rejected most real spins.
         private double? _lastBurnoutHeadingDeg = null;
         private double _burnoutSpinAccumDeg = 0;
         private DateTime _lastSpinActivityTime = DateTime.MinValue;
 
-        // Prędkość kątowa auta musi przekraczać ten próg, żeby liczyć to jako "kręcenie
-        // bączka" a nie zwykłe pokonywanie zakrętu na torze (nawet ciasna szpilka rzadko
-        // generuje takie tempo zmiany kierunku). Wartość do ew. dostrojenia.
-        private const double BURNOUT_SPIN_MIN_YAW_RATE_DEG_PER_SEC = 90.0;
+        // The car's angular speed must exceed this threshold to count as "spinning" rather than
+        // just taking a corner on track (even a tight hairpin rarely reaches this rate of
+        // heading change). Value may need further tuning.
+        private const double BURNOUT_SPIN_MIN_YAW_RATE_DEG_PER_SEC = 85.0;
 
-        // Jeśli prędkość kątowa spadnie poniżej progu na dłużej niż tyle sekund, uznajemy
-        // że to nie był ciągły bączek (np. zwykła jazda) i zerujemy dotychczasowy postęp —
-        // ale POJEDYNCZA wolniejsza klatka (np. przez szum odczytu) nie kasuje progresu.
+        // If angular speed drops below the threshold for longer than this many seconds, treat it
+        // as not a continuous spin (e.g. normal driving) and reset progress so far — but a SINGLE
+        // slower frame (e.g. reading noise) doesn't clear progress.
         private const double BURNOUT_SPIN_ABANDON_SEC = 1.0;
 
-        // Czy burnout był aktywny w JAKIMKOLWIEK momencie trwania bieżącego, niedokończonego
-        // jeszcze obrotu — a nie tylko dokładnie w klatce, w której akumulator przekroczy 360°.
-        // Bez tego pojedyncza klatka migotania IsBurnout (przez szum wheelDiff) dokładnie
-        // w momencie ukończenia obrotu potrafiłaby po cichu "zjeść" należny bonus.
+        // Whether a burnout was active at ANY point during the current, still-incomplete spin —
+        // not just exactly on the frame where the accumulator crosses 360°. Without this, a
+        // single frame of IsBurnout flicker (from wheelDiff noise) right at spin completion could
+        // silently "eat" the bonus that was due.
         private bool _burnoutActiveDuringSpin = false;
 
         // Consecutive spin/donut counters — tracked separately, each resets if more than
@@ -1391,9 +1333,9 @@ namespace LFSDriftBuddy
         private bool _wasDriftingPrev = false;
 
         /// <summary>
-        /// Aktualizuje telemetrię silnika (RPM, gaz, bieg) używaną do wykrywania burnoutu —
-        /// patrz MainForm.OnRevData (dane z OutGauge). Wywołuj to niezależnie od Update(car);
-        /// najświeższa wartość jest brana pod uwagę przy najbliższym wywołaniu Update().
+        /// Updates the engine telemetry (RPM, throttle, gear) used for burnout detection — see
+        /// MainForm.OnRevData (OutGauge data). Call this independently of Update(car); the
+        /// latest value is taken into account on the next call to Update().
         /// </summary>
         public void UpdateEngineTelemetry(float rpm, float throttle, int gear)
         {
@@ -1404,17 +1346,15 @@ namespace LFSDriftBuddy
 
         private void UpdateBurnout(DateTime now, bool drifting, bool speeding, double headingDeg)
         {
-            // ── Śledzenie obrotu (bączki) ───────────────────────────────────────
-            // Oparte na prędkości kątowej (deg/s), nie na SpeedKmh — bączek z realnym
-            // promieniem ma realną prędkość liniową, więc wymaganie "auto stoi w miejscu"
-            // odrzucało większość prawdziwych bączków. Prędkość kątowa naturalnie odróżnia
-            // spin od zwykłej jazdy po torze, bo nawet ciasny zakręt rzadko osiąga tak
-            // wysokie tempo zmiany kierunku na dłużej niż ułamek sekundy.
+            // ── Spin tracking ───────────────────────────────────────
+            // Based on angular speed (deg/s), not SpeedKmh — a spin with a real radius has a real
+            // linear speed, so requiring "the car is stationary" rejected most real spins.
+            // Angular speed naturally tells a spin apart from normal driving on track, since even
+            // a tight corner rarely reaches this rate of heading change for more than a fraction
+            // of a second.
             if (_lastBurnoutHeadingDeg.HasValue && _dtSec > 0.0001)
             {
-                double spinDelta = headingDeg - _lastBurnoutHeadingDeg.Value;
-                while (spinDelta > 180) spinDelta -= 360;
-                while (spinDelta < -180) spinDelta += 360;
+                double spinDelta = NormalizeAngleDelta(headingDeg - _lastBurnoutHeadingDeg.Value);
 
                 double yawRateDegPerSec = Math.Abs(spinDelta) / _dtSec;
 
@@ -1426,13 +1366,13 @@ namespace LFSDriftBuddy
                 }
                 else if ((now - _lastSpinActivityTime).TotalSeconds > BURNOUT_SPIN_ABANDON_SEC)
                 {
-                    // zbyt długo bez szybkiego obrotu — to nie był ciągły bączek, tylko
-                    // zwykła jazda; zeruj dotychczasowy, niedokończony postęp
+                    // too long without a fast rotation — this wasn't a continuous spin, just
+                    // normal driving; clear the incomplete progress so far
                     _burnoutSpinAccumDeg = 0;
                     _burnoutActiveDuringSpin = false;
                 }
-                // w przeciwnym razie: pojedyncza wolniejsza klatka w trakcie bączka
-                // (np. moment zmiany biegu) — nie kasujemy postępu, czekamy na timeout
+                // otherwise: a single slower frame mid-spin (e.g. a gear change moment) —
+                // don't clear progress, wait for the timeout instead
             }
             else
             {
@@ -1446,22 +1386,16 @@ namespace LFSDriftBuddy
 
                 if (_burnoutActiveDuringSpin)
                 {
-                    if ((now - _lastBurnoutSpinBonusTime).TotalSeconds > SPIN_COMBO_GAP_SEC)
-                        _burnoutSpinComboCount = 0;
-                    _burnoutSpinComboCount++;
-                    _lastBurnoutSpinBonusTime = now;
-
-                    string spinLabel = Localization.T("drift.label.burnout_spin")
-                        + (_burnoutSpinComboCount > 1 ? $" x{_burnoutSpinComboCount}" : "");
-                    AwardMilestoneBonus(spinLabel);
+                    AwardStreakBonus(Localization.T("drift.label.burnout_spin"),
+                        ref _burnoutSpinComboCount, ref _lastBurnoutSpinBonusTime, now);
                 }
 
-                _burnoutActiveDuringSpin = false;   // reset dla kolejnego, nowego obrotu
+                _burnoutActiveDuringSpin = false;   // reset for the next, new rotation
             }
 
-            // Bieg jałowy/wsteczny (Gear<2) wyklucza burnout niezależnie od RPM/gazu —
-            // na jałowym silnik fizycznie nie napędza kół, więc nawet trzymanie gazu do
-            // dechy na postoju to NIE jest buksowanie.
+            // Neutral/reverse gear (Gear<2) rules out a burnout regardless of RPM/throttle —
+            // in neutral the engine physically doesn't drive the wheels, so even holding full
+            // throttle at a standstill is NOT wheelspin.
             bool conditionNow = SpeedKmh < BURNOUT_MAX_REAL_SPEED_KMH
                               && _lastGear >= 2
                               && _lastThrottle >= BURNOUT_MIN_THROTTLE
@@ -1471,10 +1405,9 @@ namespace LFSDriftBuddy
             {
                 if (IsBurnout)
                 {
-                    // burnout był aktywny i właśnie się skończył (auto ruszyło albo koła przestały buksować)
+                    // burnout was active and just ended (car moved off, or the wheels stopped spinning)
                     DriftEnded?.Invoke(CurrentRunPoints);
                     RegisterRunEnd(CurrentRunPoints);
-                    
                 }
                 _burnoutConditionStart = DateTime.MinValue;
                 IsBurnout = false;
@@ -1489,7 +1422,7 @@ namespace LFSDriftBuddy
             double heldSec = (now - _burnoutConditionStart).TotalSeconds;
 
             if (heldSec < BURNOUT_ACTIVATE_SEC)
-                return;   // warunki spełnione, ale jeszcze nie od wystarczająco dawna
+                return;   // conditions met, but not for long enough yet
 
             bool justActivated = !IsBurnout;
             IsBurnout = true;
@@ -1525,16 +1458,16 @@ namespace LFSDriftBuddy
                 }
             }
 
-            // im wyższe RPM ponad próg aktywacji, tym szybciej rośnie ComboMultiplier —
-            // ten sam wzorzec co w drifcie (ComboMultiplier rośnie z angleScore co klatkę,
-            // ograniczone do 10.0). Ponieważ ComboMultiplier to ta sama, WSPÓLNA właściwość,
-            // co dla driftu/speedingu, combo zdobyte w burnoucie naturalnie kontynuuje się
-            // przy przejściu do driftu albo szybkiej jazdy (i odwrotnie), a blok resetu combo
-            // w Update() chroni je przez COMBO_TIMEOUT_SEC dzięki _lastBurnoutTime.
-            double rpmFactor = Math.Clamp(_lastRpm / BURNOUT_MIN_RPM, 1.0, 5.0);
+            // the higher the RPM above the activation threshold, the faster ComboMultiplier
+            // grows — same pattern as drifting (ComboMultiplier grows with angleScore every
+            // frame, capped at 10.0). Since ComboMultiplier is the same SHARED property as for
+            // drift/speeding, combo earned during a burnout naturally continues into drift or
+            // fast driving (and vice versa), protected through COMBO_TIMEOUT_SEC by the
+            // combo-reset block in Update() via _lastBurnoutTime.
+            double rpmFactor = Math.Clamp(_lastRpm / (BURNOUT_MIN_RPM ), 1.0, 5.0);
             ComboMultiplier = Math.Round(Math.Min(ComboMultiplier + (0.01 * rpmFactor * _dtSec), 10.0), 2);
 
-            long framePts = (long)Math.Round(BURNOUT_POINTS_PER_SECOND * ComboMultiplier * _dtSec);
+            long framePts = (long)Math.Round(BURNOUT_POINTS_PER_SECOND * ComboMultiplier * _dtSec * (_lastGear / 2));
 
             CurrentRunPoints += framePts;
             TotalScore += framePts;
@@ -1542,7 +1475,7 @@ namespace LFSDriftBuddy
             _lastBurnoutTime = now;
             SaveCurrentDriver();
 
-            var burnoutKind = GetBurnoutLabelKind(_lastRpm, heldSec);
+            var burnoutKind = GetBurnoutLabelKind(_lastRpm, heldSec, _lastGear);
             DriftScored?.Invoke(
                 CurrentRunPoints,
                 ComboMultiplier,
@@ -1617,9 +1550,7 @@ namespace LFSDriftBuddy
 
             if (_driftSpinLastHeadingDeg.HasValue)
             {
-                double delta = headingDeg - _driftSpinLastHeadingDeg.Value;
-                while (delta > 180) delta -= 360;
-                while (delta < -180) delta += 360;
+                double delta = NormalizeAngleDelta(headingDeg - _driftSpinLastHeadingDeg.Value);
                 _driftSpinAccumDeg += Math.Abs(delta);
             }
             _driftSpinLastHeadingDeg = headingDeg;
@@ -1636,13 +1567,8 @@ namespace LFSDriftBuddy
 
                 if (positionOk && crossedState)
                 {
-                    if ((now - _lastDonutBonusTime).TotalSeconds > SPIN_COMBO_GAP_SEC)
-                        _donutComboCount = 0;
-                    _donutComboCount++;
-                    _lastDonutBonusTime = now;
-
-                    string label = Localization.T("bonus.donut") + (_donutComboCount > 1 ? $" x{_donutComboCount}" : "");
-                    AwardMilestoneBonus(label);
+                    AwardStreakBonus(Localization.T("bonus.donut"),
+                        ref _donutComboCount, ref _lastDonutBonusTime, now);
                 }
 
                 _driftSpinStartWasBurnout = isBurnout;   // start state for the next loop
@@ -1653,15 +1579,15 @@ namespace LFSDriftBuddy
             }
         }
 
-        // Stopniowanie burnoutu na wzór GetLabelKind (drift/speed) — łączy nadwyżkę RPM
-        // ponad próg aktywacji z czasem trwania w jedną skalę "intensywności", tak jak
-        // tam łączy się kąt i prędkość. Dzielnik 100 dobrany tak, żeby solidne trzymanie
-        // wysokich obrotów (kilka tysięcy RPM ponad próg) dawało odczuwalną severity od
-        // razu, a nie dopiero po kilkudziesięciu sekundach — wartość do ew. dostrojenia.
-        private DriftLabelKind GetBurnoutLabelKind(float rpm, double heldSec)
+        // Burnout tiering, modeled after GetLabelKind (drift/speed) — combines RPM above the
+        // activation threshold with hold duration into one "intensity" scale, the same way that
+        // one combines angle and speed. The divisor of 100 is chosen so that solidly holding high
+        // RPM (a few thousand above the threshold) gives a noticeable severity right away, not
+        // only after tens of seconds — value may need further tuning.
+        private DriftLabelKind GetBurnoutLabelKind(float rpm, double heldSec, float _lastGear)
         {
             double rpmAboveThreshold = Math.Max(0, rpm - BURNOUT_MIN_RPM);
-            double severity = (rpmAboveThreshold / 100.0) + ((heldSec - BURNOUT_ACTIVATE_SEC) * 1.8);
+            double severity = (rpmAboveThreshold / 100.0) + ((heldSec - BURNOUT_ACTIVATE_SEC) * _lastGear);
 
             if (severity >= 80) return DriftLabelKind.BurnoutInsane;
             if (severity >= 65) return DriftLabelKind.BurnoutExtreme;
@@ -1719,8 +1645,8 @@ namespace LFSDriftBuddy
             LapScore = 0;
         }
 
-        /// <summary>Aktywuje liczenie punktów okrążenia po przejeździe przez pierwszy punkt kontrolny InSim.
-        /// Jeśli liczenie jest już aktywne — ignoruje wywołanie i zwraca false.</summary>
+        /// <summary>Activates lap-point counting after crossing InSim's first checkpoint.
+        /// If counting is already active, ignores the call and returns false.</summary>
         public bool ActivateLapCounting()
         {
             if (HasActiveLapContext) return false;
@@ -1730,15 +1656,15 @@ namespace LFSDriftBuddy
             return true;
         }
 
-        /// <summary>Wjazd na zakazany obszar — resetuje i dezaktywuje liczenie punktów okrążenia
-        /// do czasu kolejnego przejazdu przez pierwszy punkt kontrolny.</summary>
+        /// <summary>Entering a restricted area — resets and deactivates lap-point counting
+        /// until the next pass through the first checkpoint.</summary>
         public void DeactivateLapCounting()
         {
             LapScore = 0;
             HasActiveLapContext = false;
         }
 
-        /// <summary>Restart wyścigu — zeruje LapScore i chowa ramkę HUD do czasu 1. zaliczonego okrążenia.</summary>
+        /// <summary>Race restart — zeroes LapScore and hides the HUD frame until the 1st completed lap.</summary>
         public void OnRaceRestarted()
         {
             LapScore = 0;

@@ -30,6 +30,12 @@ namespace LFSDriftBuddy.InSim
         public byte PLID { get; set; }
     }
 
+    public class PlayerNameEventArgs : PlidEventArgs
+    {
+        /// <summary>LFS nickname (IS_NPL.PName), color codes stripped.</summary>
+        public string PName { get; set; }
+    }
+
     public class CheckpointCrossedEventArgs : PlidEventArgs
     {
         /// <summary>0 = finish, 1-3 = checkpoint number (per LFS layout editor).</summary>
@@ -76,6 +82,7 @@ namespace LFSDriftBuddy.InSim
         public event EventHandler<PlidEventArgs> RestrictedAreaEntered;            // IS_PEN (wrong way / restricted area)
         public event EventHandler<ObjectHitEventArgs> ObjectHit;
         public event EventHandler<byte[]> RawObjectHitDebug;
+        public event EventHandler<PlayerNameEventArgs> PlayerNamed;   // IS_NPL
 
         // ── State ─────────────────────────────────────────────
         private TcpClient _client;
@@ -88,6 +95,12 @@ namespace LFSDriftBuddy.InSim
         public StateFlags GameState => _gameState;
         public byte ViewPLID { get; private set; } = 0;
         public string CurrentTrack { get; private set; } = "";
+
+        // PLID -> LFS nickname, filled from IS_NPL as players are seen and kept current via
+        // IS_CPR (fired whenever a player renames themselves from the F12 connections screen).
+        private readonly Dictionary<byte, string> _playerNames = new();
+        private readonly Dictionary<byte, byte> _ucidToPlid = new();
+        public string GetPlayerName(byte plid) => _playerNames.TryGetValue(plid, out var n) ? n : null;
         public string CurrentLayout { get; private set; } = "";   // "" = no custom layout (.lyt)
 
         // Autocross object names (AXO_*) — from https://www.lfs.net/programmer/lyt (LYT 0.8A).
@@ -212,7 +225,7 @@ namespace LFSDriftBuddy.InSim
                 // Request MCI packets every mciInterval ms.
                 var isi = Packets.BuildISI(
                      udpPort: 0,
-                     flags: ISFlags.ISF_MCI | ISFlags.ISF_LOCAL | ISFlags.ISF_OBH,
+                     flags: ISFlags.ISF_MCI | ISFlags.ISF_LOCAL | ISFlags.ISF_OBH | ISFlags.ISF_CON,   // ISF_CON needed for IS_CPR (driver rename)
                      prefix: 33,
                      interval: mciInterval,
                      admin: adminPassword,
@@ -222,6 +235,7 @@ namespace LFSDriftBuddy.InSim
 
                 Send(Packets.BuildTiny(4, TinyType.TINY_SST));
                 Send(Packets.BuildTiny(5, TinyType.TINY_AXI));
+                Send(Packets.BuildTiny(6, TinyType.TINY_NPL));   // request IS_NPL for all current players
 
                 RaiseStatus("Połączono z LFS na " + host + ":" + port);
                 Connected?.Invoke(this, EventArgs.Empty);
@@ -291,6 +305,15 @@ namespace LFSDriftBuddy.InSim
         {
             Send(Packets.BuildBFN_DeleteAll(0));
         }
+
+        /// <summary>Requests a fresh IS_STA (refreshes ViewPLID) — LFS doesn't push it on its
+        /// own when the spectated car changes (Tab), only on request or major state changes.</summary>
+        public void RequestState() => Send(Packets.BuildTiny(8, TinyType.TINY_SST));
+
+        /// <summary>Requests a fresh IS_NPL burst for all current players — was only sent once
+        /// at Connect(), so a player who joined afterwards (or whichever car got Tab-switched to)
+        /// could stay unresolved in GetPlayerName() forever otherwise.</summary>
+        public void RequestPlayerList() => Send(Packets.BuildTiny(9, TinyType.TINY_NPL));
 
         // ─────────────────────────────────────────────────────
         //  Receive loop
@@ -415,6 +438,14 @@ namespace LFSDriftBuddy.InSim
                 case PacketType.ISP_OBH:
                     HandleObh(packet);
                     break;
+
+                case PacketType.ISP_NPL:
+                    HandleNpl(packet);
+                    break;
+
+                case PacketType.ISP_CPR:
+                    HandleCpr(packet);
+                    break;
             }
         }
 
@@ -436,6 +467,59 @@ namespace LFSDriftBuddy.InSim
                 ObjectIndex = index,
                 ObjectName = GetObjectName(index)
             });
+        }
+
+        private void HandleNpl(byte[] p)
+        {
+            // IS_NPL: PLID at offset 3, UCID at offset 4, PName[24] at offset 8 — stable across
+            // InSim versions; fields after PName (plate/car/etc.) have shifted between versions
+            // and aren't needed here, so they're intentionally not parsed.
+            if (p.Length < 32) return;
+
+            byte plid = p[3];
+            byte ucid = p[4];
+            string pname = StripLfsColorCodes(ReadNullPaddedLatin1(p, 8, 24));
+            if (string.IsNullOrWhiteSpace(pname)) return;
+
+            _ucidToPlid[ucid] = plid;
+            _playerNames[plid] = pname;
+            PlayerNamed?.Invoke(this, new PlayerNameEventArgs { PLID = plid, PName = pname });
+        }
+
+        private void HandleCpr(byte[] p)
+        {
+            // IS_CPR: player renamed themselves (F12 connections screen). UCID at offset 3,
+            // PName[24] at offset 4 — only useful once we've seen that UCID's PLID via IS_NPL.
+            if (p.Length < 28) return;
+
+            byte ucid = p[3];
+            if (!_ucidToPlid.TryGetValue(ucid, out byte plid)) return;
+
+            string pname = StripLfsColorCodes(ReadNullPaddedLatin1(p, 4, 24));
+            if (string.IsNullOrWhiteSpace(pname)) return;
+
+            _playerNames[plid] = pname;
+            PlayerNamed?.Invoke(this, new PlayerNameEventArgs { PLID = plid, PName = pname });
+        }
+
+        private static string ReadNullPaddedLatin1(byte[] d, int offset, int length)
+        {
+            int len = 0;
+            while (len < length && d[offset + len] != 0) len++;
+            return Encoding.Latin1.GetString(d, offset, len);
+        }
+
+        // Strips LFS's "^" + one-char color/format codes (e.g. "^3Name^7") from a display name.
+        private static string StripLfsColorCodes(string s)
+        {
+            if (string.IsNullOrEmpty(s)) return s;
+            var sb = new StringBuilder(s.Length);
+            for (int i = 0; i < s.Length; i++)
+            {
+                if (s[i] == '^' && i + 1 < s.Length) { i++; continue; }
+                sb.Append(s[i]);
+            }
+            return sb.ToString().Trim();
         }
 
         private void HandleUco(byte[] p)
