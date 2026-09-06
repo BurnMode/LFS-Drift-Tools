@@ -7,7 +7,7 @@ namespace LFSDriftBuddy
     {
         public bool Enabled { get; set; } = false;
 
-        private double[] _hitLevelThresholds = { 20.0, 40.0, 65.0, 95.0, 130.0 };
+        private double[] _hitLevelThresholds = { 5.0, 10.0, 30.0, 50.0, 100.0 };
         public IReadOnlyList<double> HitLevelThresholds => _hitLevelThresholds;
         public void SetHitLevelThresholds(double[] values)
         {
@@ -18,15 +18,15 @@ namespace LFSDriftBuddy
         private const double PairCooldownSec = 1.5;
         private readonly Dictionary<byte, DateTime> _pairCooldown = new();
 
-        public event Action<int, string>? ContactDetected;
+        public event Action<int, byte>? ContactDetected;
 
         public void ProcessContact(InSim.CarContactEventArgs contact, byte viewedPlid)
         {
             if (!Enabled || viewedPlid == 0 || contact?.A == null || contact.B == null) return;
 
-            InSim.DerbyCarContact self, other;
-            if (contact.A.PLID == viewedPlid) { self = contact.A; other = contact.B; }
-            else if (contact.B.PLID == viewedPlid) { self = contact.B; other = contact.A; }
+            InSim.DerbyCarContact other;
+            if (contact.A.PLID == viewedPlid) other = contact.B;
+            else if (contact.B.PLID == viewedPlid) other = contact.A;
             else return;
 
             if (other.PLID == 0 || other.PLID == viewedPlid) return;
@@ -45,19 +45,7 @@ namespace LFSDriftBuddy
                 if (closingKmh >= _hitLevelThresholds[i]) { tier = i + 1; break; }
             }
 
-            double headingDiff = Math.Abs(NormalizeAngleDelta(self.HeadingDeg - other.HeadingDeg));
-            string hitTypeKey = headingDiff >= 120 ? "derby.hittype.headon"
-                               : headingDiff >= 45 ? "derby.hittype.side"
-                               : "derby.hittype.rear";
-
-            ContactDetected?.Invoke(tier, hitTypeKey);
-        }
-
-        private static double NormalizeAngleDelta(double delta)
-        {
-            while (delta > 180) delta -= 360;
-            while (delta < -180) delta += 360;
-            return delta;
+            ContactDetected?.Invoke(tier, other.PLID);
         }
     }
 }

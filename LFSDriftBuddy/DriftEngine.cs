@@ -47,7 +47,7 @@ namespace LFSDriftBuddy
         }
         private double MIN_DRIFT_ANGLE_DEG => _angleLevelThresholds[0];
 
-        private double[] _speedLevelThresholds = { 100.0, 130.0, 160.0, 190.0, 220.0 };
+        private double[] _speedLevelThresholds = { 100.0, 150.0, 200.0, 250.0, 300.0 };
         public IReadOnlyList<double> SpeedLevelThresholds => _speedLevelThresholds;
         public void SetSpeedLevelThresholds(double[] values)
         {
@@ -55,6 +55,13 @@ namespace LFSDriftBuddy
             _speedLevelThresholds = (double[])values.Clone();
         }
         private double FAST_DRIVE_THRESHOLD => _speedLevelThresholds[0];
+
+        private double _backwardDriftAngleThreshold = 95.0;
+        public double BackwardDriftAngleThreshold => _backwardDriftAngleThreshold;
+        public void SetBackwardDriftAngleThreshold(double value)
+        {
+            _backwardDriftAngleThreshold = value;
+        }
         private const double FAST_DRIVE_POINTS = 8.0;
 
         private const double FAST_DRIVE_COMBO_STEP_PER_SEC = 0.01;
@@ -997,7 +1004,7 @@ namespace LFSDriftBuddy
             }
             if (!brake)
             {
-                if (angle > 90 && speed > 30) return DriftLabelKind.AngleBackward;
+                if (angle > _backwardDriftAngleThreshold && speed > 30) return DriftLabelKind.AngleBackward;
                 if (angle > _angleLevelThresholds[4]) return DriftLabelKind.AngleUltraExtreme;
                 if (angle > _angleLevelThresholds[3]) return DriftLabelKind.AngleExtreme;
                 if (angle > _angleLevelThresholds[2]) return DriftLabelKind.AngleHigh;
@@ -1006,7 +1013,7 @@ namespace LFSDriftBuddy
             }
             else
             {
-                if (angle > 90 && speed > 30) return DriftLabelKind.AngleBackwardE;
+                if (angle > _backwardDriftAngleThreshold && speed > 30) return DriftLabelKind.AngleBackwardE;
                 if (angle > _angleLevelThresholds[4]) return DriftLabelKind.AngleUltraExtremeE;
                 if (angle > _angleLevelThresholds[3]) return DriftLabelKind.AngleExtremeE;
                 if (angle > _angleLevelThresholds[2]) return DriftLabelKind.AngleHighE;
@@ -1080,7 +1087,7 @@ namespace LFSDriftBuddy
         // Speed (km/h) below which the car still counts as "not really moving" for burnout
         // purposes — wheelspin above this is scored as regular driving/drift instead. Configurable
         // from the Drift Score panel — see SetMaxBurnoutSpeedKmh.
-        private double _maxBurnoutSpeedKmh = 25.0;
+        private double _maxBurnoutSpeedKmh = 20.0;
         public double MaxBurnoutSpeedKmh => _maxBurnoutSpeedKmh;
         public void SetMaxBurnoutSpeedKmh(double kmh)
         {

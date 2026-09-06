@@ -30,14 +30,17 @@ namespace LFSDriftBuddy
         private readonly string RevLimiterFile =
         Path.Combine(System.Windows.Forms.Application.StartupPath, "Configs", "revlimiter.json");
 
+        private readonly string DataImagesDir =
+        Path.Combine(System.Windows.Forms.Application.StartupPath, "Data", "Images");
+
         private readonly SoundPlayer _indicatorClickOn =
-        new SoundPlayer(Path.Combine(System.Windows.Forms.Application.StartupPath, "Sounds", "indicator_click_on.wav"));
+        new SoundPlayer(Path.Combine(System.Windows.Forms.Application.StartupPath, "Data", "Sounds", "indicator_click_on.wav"));
 
         private readonly SoundPlayer _indicatorClickOff =
-        new SoundPlayer(Path.Combine(System.Windows.Forms.Application.StartupPath, "Sounds", "indicator_click_off.wav"));
+        new SoundPlayer(Path.Combine(System.Windows.Forms.Application.StartupPath, "Data", "Sounds", "indicator_click_off.wav"));
 
         private readonly SoundPlayer _indicatorCancel =
-            new SoundPlayer(Path.Combine(System.Windows.Forms.Application.StartupPath, "Sounds", "indicator_cancel.wav"));
+            new SoundPlayer(Path.Combine(System.Windows.Forms.Application.StartupPath, "Data", "Sounds", "indicator_cancel.wav"));
 
         private string _missingIndicatorSoundsWarning = null;
 
@@ -264,10 +267,26 @@ namespace LFSDriftBuddy
         private SpeedoTachoPreviewControl _speedoTachoPreview;
 
         private Color _speedoTachoRedlineColor = Color.Red;
+        private float _redlineThickness = 4f;
+        private MacSlider _redlineThicknessSlider;
         private Color _speedoTachoTextColor = Color.White;
         private Color _speedoTachoIndicatorColor = Color.FromArgb(255, 225, 225, 230);
         private Color _speedoTachoTickColor = Color.FromArgb(255, 215, 215, 218);
         private Color _speedoTachoBackgroundColor = Color.FromArgb(50, 15, 15, 20);
+
+        private Image _speedoBackgroundImage = null;
+        private string _speedoBackgroundImagePath = "";
+        private float _speedoBackgroundPanX = 0f;
+        private float _speedoBackgroundPanY = 0f;
+        private float _speedoBackgroundZoom = 1.0f;
+        private float _speedoBackgroundOpacity = 1.0f;
+        private CircularCropControl _speedoBackgroundCrop;
+        private MacSlider _speedoBackgroundOpacitySlider;
+        private MacSlider _speedoBackgroundZoomSlider;
+
+        private readonly SpeedoPresetData[] _speedoPresets = { new SpeedoPresetData(), SpeedoPresetData.Default2() };
+        private int _activeSpeedoPresetIndex = 0;
+        private Label _speedoPresetLabel;
 
         private string InSimColor1 = "^7";
         private string InSimColor2 = "^6";
@@ -493,7 +512,7 @@ namespace LFSDriftBuddy
 
             _drift.SetDriver(Environment.UserName);
             _drift.Error += msg => AppendStatusMessage(msg, StatusErrorColor);
-            _collisions.ContactDetected += (tier, hitTypeKey) => BeginInvoke((Action)(() => OnCollisionDetected(tier, hitTypeKey)));
+            _collisions.ContactDetected += (tier, otherPlid) => BeginInvoke((Action)(() => OnCollisionDetected(tier, otherPlid)));
             _outGauge.DataReceived += OnRevData;
             _outGauge.Error += msg => AppendStatusMessage(msg, StatusErrorColor);
 
@@ -515,7 +534,7 @@ namespace LFSDriftBuddy
                 _indicatorClickOff.LoadAsync();
                 _indicatorCancel.LoadAsync();
 
-                string soundsDir = Path.Combine(System.Windows.Forms.Application.StartupPath, "Sounds");
+                string soundsDir = Path.Combine(System.Windows.Forms.Application.StartupPath, "Data", "Sounds");
                 var missingSoundFiles = new List<string>();
                 foreach (var fileName in new[] { "indicator_click_on.wav", "indicator_click_off.wav", "indicator_cancel.wav" })
                 {
@@ -615,6 +634,7 @@ namespace LFSDriftBuddy
         {
             if (_speedoTachoPreview == null) return;
             _speedoTachoPreview.RedlineColor = _speedoTachoRedlineColor;
+            _speedoTachoPreview.RedlineThickness = _redlineThickness;
             _speedoTachoPreview.TextColor = _speedoTachoTextColor;
             _speedoTachoPreview.IndicatorColor = _speedoTachoIndicatorColor;
             _speedoTachoPreview.TickColor = _speedoTachoTickColor;
@@ -817,6 +837,8 @@ namespace LFSDriftBuddy
                     _outGaugeConnectionSwitch.SetCheckedSilent(true);
                     ApplyOutGaugeConnectionState(true);
 
+                    UpdateSpeedoPresetLabel();
+
                     return;
                 }
 
@@ -941,6 +963,30 @@ namespace LFSDriftBuddy
                     if (_speedUnitToggle != null) _speedUnitToggle.SetCheckedSilent(_useMph);
                     UpdateSpeedUnitLabels();
 
+                    // Preset A migrates from the old flat fields (pre-preset settings.json) when
+                    // there's no saved preset yet, so upgrading doesn't reset anyone's HUD.
+                    _speedoPresets[0] = settings.SpeedoPresetA ?? new SpeedoPresetData
+                    {
+                        ShowRpmDigits = settings.SpeedoTachoShowRpmDigits,
+                        ShowUnit = settings.SpeedoTachoShowUnit,
+                        ShowMinorTicks = settings.SpeedoTachoShowMinorTicks,
+                        ShowMajorTicks = settings.SpeedoTachoShowMajorTicks,
+                        RedlineThickness = settings.RedlineThickness <= 0 ? 4f : settings.RedlineThickness,
+                        BackgroundImagePath = settings.SpeedoBackgroundImagePath ?? "",
+                        BackgroundPanX = settings.SpeedoBackgroundPanX,
+                        BackgroundPanY = settings.SpeedoBackgroundPanY,
+                        BackgroundZoom = settings.SpeedoBackgroundZoom <= 0 ? 1f : settings.SpeedoBackgroundZoom,
+                        BackgroundOpacity = Math.Clamp(settings.SpeedoBackgroundOpacity, 0f, 1f),
+                        RedlineColorArgb = _speedoTachoRedlineColor.ToArgb(),
+                        TextColorArgb = _speedoTachoTextColor.ToArgb(),
+                        IndicatorColorArgb = _speedoTachoIndicatorColor.ToArgb(),
+                        TickColorArgb = _speedoTachoTickColor.ToArgb(),
+                        BackgroundColorArgb = _speedoTachoBackgroundColor.ToArgb(),
+                    };
+                    _speedoPresets[1] = settings.SpeedoPresetB ?? SpeedoPresetData.Default2();
+                    _activeSpeedoPresetIndex = Math.Clamp(settings.ActiveSpeedoPreset, 0, 1);
+                    ApplySpeedoPreset(_speedoPresets[_activeSpeedoPresetIndex]);
+
                     if (_advancedOutGaugeCheck != null)
                     {
                         _advancedOutGaugeCheck.SetCheckedSilent(settings.AdvancedOutGaugeEnabled);
@@ -960,6 +1006,7 @@ namespace LFSDriftBuddy
 
                     _drift.SetAngleLevelThresholds(settings.AngleLevelThresholds);
                     _drift.SetSpeedLevelThresholds(settings.SpeedLevelThresholds);
+                    _drift.SetBackwardDriftAngleThreshold(settings.BackwardDriftAngleThreshold);
 
                     _drift.SetMinDriftSpeedKmh(settings.MinDriftSpeedKmh);
                     _drift.SetMaxBurnoutSpeedKmh(settings.MaxBurnoutSpeedKmh);
@@ -997,6 +1044,8 @@ namespace LFSDriftBuddy
 
                 SavedMSCUT = (int)_revCutMS.Value;
 
+                _speedoPresets[_activeSpeedoPresetIndex] = CaptureSpeedoPreset();
+
                 AppSettings settings = new AppSettings()
                 {
                     Language = Localization.CurrentLanguage.ToString(),
@@ -1023,6 +1072,22 @@ namespace LFSDriftBuddy
                     SpeedoTachoScale = (float)_speedoTachoScaleNumeric.Value,
                     SpeedoTachoUseMph = _useMph,
 
+                    SpeedoTachoShowRpmDigits = _overlay.SpeedoTachoShowRpmDigits,
+                    SpeedoTachoShowUnit = _overlay.SpeedoTachoShowUnit,
+                    SpeedoTachoShowMinorTicks = _overlay.SpeedoTachoShowMinorTicks,
+                    SpeedoTachoShowMajorTicks = _overlay.SpeedoTachoShowMajorTicks,
+                    RedlineThickness = _redlineThickness,
+
+                    SpeedoBackgroundImagePath = _speedoBackgroundImagePath,
+                    SpeedoBackgroundPanX = _speedoBackgroundPanX,
+                    SpeedoBackgroundPanY = _speedoBackgroundPanY,
+                    SpeedoBackgroundZoom = _speedoBackgroundZoom,
+                    SpeedoBackgroundOpacity = _speedoBackgroundOpacity,
+
+                    ActiveSpeedoPreset = _activeSpeedoPresetIndex,
+                    SpeedoPresetA = _speedoPresets[0],
+                    SpeedoPresetB = _speedoPresets[1],
+
                     AdvancedOutGaugeEnabled = _advancedOutGaugeCheckedBeforeOutGaugeOff,
 
                     OutGaugeConnectionEnabled = _outGaugeConnectionSwitch?.Checked ?? false,
@@ -1033,6 +1098,7 @@ namespace LFSDriftBuddy
 
                     AngleLevelThresholds = _drift.AngleLevelThresholds.ToArray(),
                     SpeedLevelThresholds = _drift.SpeedLevelThresholds.ToArray(),
+                    BackwardDriftAngleThreshold = _drift.BackwardDriftAngleThreshold,
 
                     MinDriftSpeedKmh = _drift.MinDriftSpeedKmh,
                     MaxBurnoutSpeedKmh = _drift.MaxBurnoutSpeedKmh,
@@ -1602,7 +1668,7 @@ namespace LFSDriftBuddy
             speedometerPanel.Controls.Add(_speedoTachoEnabledCheck);
             _localizedControls.Add((_speedoTachoEnabledCheck, "speedometer.showhud"));
 
-            MakeLabel(speedometerPanel, Localization.T("speedometer.preview"), 24, 48, 100, 16,
+            MakeLabel(speedometerPanel, Localization.T("speedometer.preview"), 24, 48, 85, 16,
                 Color.FromArgb(140, 140, 170), new Font("Segoe UI", 7.5f), ContentAlignment.MiddleLeft, locKey: "speedometer.preview");
             _speedoTachoPreview = new SpeedoTachoPreviewControl
             {
@@ -1610,6 +1676,27 @@ namespace LFSDriftBuddy
                 Size = new Size(200, 160)
             };
             speedometerPanel.Controls.Add(_speedoTachoPreview);
+
+            _speedoPresetLabel = MakeLabel(speedometerPanel, "", 296, 48, 100, 16,
+                Color.FromArgb(140, 140, 170), new Font("Segoe UI", 7.5f), ContentAlignment.MiddleRight);
+
+            var speedoPresetPrevBtn = MakeButton(speedometerPanel, "‹", 70, 126, 28, 28, ApplePalette.Blue);
+            speedoPresetPrevBtn.Click += (s, e) => SwitchSpeedoPreset(_activeSpeedoPresetIndex == 0 ? 1 : 0);
+
+            var speedoPresetNextBtn = MakeButton(speedometerPanel, "›", 316, 126, 28, 28, ApplePalette.Blue);
+            speedoPresetNextBtn.Click += (s, e) => SwitchSpeedoPreset(_activeSpeedoPresetIndex == 0 ? 1 : 0);
+
+            var speedoPresetResetBtn = MakeButton(speedometerPanel, Localization.T("speedometer.preset.reset"), 320, 165, 85, 60, Color.FromArgb(200, 20, 20));
+            speedoPresetResetBtn.Click += (s, e) =>
+            {
+                var defaults = _activeSpeedoPresetIndex == 0 ? new SpeedoPresetData() : SpeedoPresetData.Default2();
+                _speedoPresets[_activeSpeedoPresetIndex] = defaults;
+                ApplySpeedoPreset(defaults);
+                SaveSettings();
+            };
+            _localizedControls.Add((speedoPresetResetBtn, "speedometer.preset.reset"));
+
+            UpdateSpeedoPresetLabel();
 
             MakeLabel(speedometerPanel, "Offset X:", 24, 268, 155, 30,
                 Color.FromArgb(60, 60, 60), new Font("Segoe UI", 12f), ContentAlignment.MiddleLeft, locKey: "speedometer.offsetx");
@@ -1652,9 +1739,17 @@ namespace LFSDriftBuddy
             };
             UpdateSpeedUnitLabels();
 
-            var hudColorsBtn = MakeButton(speedometerPanel, Localization.T("hud.colors"), 90, 230, 250, 32, ApplePalette.Blue);
+            var hudColorsBtn = MakeButton(speedometerPanel, Localization.T("hud.colors"), 24, 230, 124, 30, ApplePalette.Blue);
             hudColorsBtn.Click += (s, e) => ShowHudColorsMenu();
             _localizedControls.Add((hudColorsBtn, "hud.colors"));
+
+            var speedoBackgroundBtn = MakeButton(speedometerPanel, Localization.T("speedometer.background.button"), 152, 230, 124, 30, ApplePalette.Blue);
+            speedoBackgroundBtn.Click += (s, e) => ShowSpeedoBackgroundMenu();
+            _localizedControls.Add((speedoBackgroundBtn, "speedometer.background.button"));
+
+            var speedoElementsBtn = MakeButton(speedometerPanel, Localization.T("speedometer.elements.button"), 280, 230, 124, 30, ApplePalette.Blue);
+            speedoElementsBtn.Click += (s, e) => ShowSpeedoElementsMenu();
+            _localizedControls.Add((speedoElementsBtn, "speedometer.elements.button"));
 
             var marginSide = 20;
 
@@ -2356,7 +2451,7 @@ namespace LFSDriftBuddy
             _statusLabel = new NoWheelRichTextBox
             {
                 Location = new Point(20, 14),
-                Size = new Size(385, 130),
+                Size = new Size(385, 120),
                 ReadOnly = true,
                 BorderStyle = BorderStyle.None,
                 ScrollBars = RichTextBoxScrollBars.Vertical,
@@ -2847,9 +2942,24 @@ namespace LFSDriftBuddy
                     var btn = _owner.MakeButton(_content, d.Name, 0, y, _content.Width, 34);
 
                     var guid = d.Guid;
+                    var name = d.Name;
                     btn.Click += (s, e) =>
                     {
                         SelectedDeviceGuid = guid;
+
+                        // Xbox/XInput pads always steer off LeftThumbX regardless of which axis
+                        // is "selected" (see SteeringWheelInput.PollXInput) — the calibration
+                        // screen has nothing real to detect for them, so just confirm X directly
+                        // instead of making the user sit through it or click a button.
+                        if (SteeringWheelInput.IsXInputPad(name))
+                        {
+                            SelectedAxis = JoystickOffset.X;
+                            _wheelInput.ConnectToDevice(SelectedDeviceGuid, JoystickOffset.X);
+                            DialogResult = DialogResult.OK;
+                            Close();
+                            return;
+                        }
+
                         ShowAxisCalibration();
                     };
 
@@ -3263,7 +3373,7 @@ namespace LFSDriftBuddy
         private void ShowAngleLevelsMenu()
         {
             Form popup = new Form { StartPosition = FormStartPosition.CenterParent };
-            var card = BuildPopupChrome(popup, 340, 320, out _);
+            var card = BuildPopupChrome(popup, 340, 356, out _);
 
             MakeLabel(card, Localization.T("score.levels.title"), 20, 15, 290, 24,
                 ApplePalette.Title, new Font("Segoe UI Semibold", 11f));
@@ -3295,6 +3405,15 @@ namespace LFSDriftBuddy
             AddAngleRow(Localization.T("drift.label.angle_high"), 2);
             AddAngleRow(Localization.T("drift.label.angle_extreme"), 3);
             AddAngleRow(Localization.T("drift.label.angle_ultraextreme"), 4);
+
+            MakeLabel(card, Localization.T("score.levels.angle_backward"), 20, y + 5, 190, 20, ApplePalette.Text);
+            MakeNumericUpDown(card, 220, y, 90, 26, 0, 180, (decimal)_drift.BackwardDriftAngleThreshold, 1,
+                v =>
+                {
+                    _drift.SetBackwardDriftAngleThreshold((double)v);
+                    SaveSettings();
+                });
+            y += 36;
 
             ShowModalPopup(popup);
         }
@@ -3375,6 +3494,347 @@ namespace LFSDriftBuddy
             AddHitRow(Localization.T("derby.levels.tier5"), 4);
 
             ShowModalPopup(popup);
+        }
+
+        private void ShowSpeedoElementsMenu()
+        {
+            Form popup = new Form { StartPosition = FormStartPosition.CenterParent };
+            var card = BuildPopupChrome(popup, 340, 330, out _);
+
+            MakeLabel(card, Localization.T("speedometer.elements.title"), 20, 15, 290, 24,
+                ApplePalette.Title, new Font("Segoe UI Semibold", 11f));
+            MakeLabel(card, Localization.T("speedometer.elements.subtitle"), 20, 40, 300, 32,
+                Color.FromArgb(140, 140, 170), new Font("Segoe UI", 7.5f), ContentAlignment.TopLeft);
+
+            int y = 84;
+            void AddToggleRow(string labelKey, bool initial, Action<bool> onChange)
+            {
+                MakeLabel(card, Localization.T(labelKey), 20, y + 4, 220, 22, ApplePalette.Text);
+                var toggle = new MacToggleSwitch { Location = new Point(280, y), Size = new Size(40, 20), Checked = initial };
+                toggle.CheckedChanged += (s, e) =>
+                {
+                    onChange(toggle.Checked);
+                    SaveSettings();
+                };
+                card.Controls.Add(toggle);
+                y += 40;
+            }
+
+            AddToggleRow("speedometer.elements.rpmdigits", _overlay.SpeedoTachoShowRpmDigits, v =>
+            {
+                _overlay.SpeedoTachoShowRpmDigits = v;
+                _speedoTachoPreview.ShowRpmDigits = v;
+                _speedoTachoPreview.Invalidate();
+            });
+            AddToggleRow("speedometer.elements.unit", _overlay.SpeedoTachoShowUnit, v =>
+            {
+                _overlay.SpeedoTachoShowUnit = v;
+                _speedoTachoPreview.ShowUnit = v;
+                _speedoTachoPreview.Invalidate();
+            });
+            AddToggleRow("speedometer.elements.minorticks", _overlay.SpeedoTachoShowMinorTicks, v =>
+            {
+                _overlay.SpeedoTachoShowMinorTicks = v;
+                _speedoTachoPreview.ShowMinorTicks = v;
+                _speedoTachoPreview.Invalidate();
+            });
+            AddToggleRow("speedometer.elements.majorticks", _overlay.SpeedoTachoShowMajorTicks, v =>
+            {
+                _overlay.SpeedoTachoShowMajorTicks = v;
+                _speedoTachoPreview.ShowMajorTicks = v;
+                _speedoTachoPreview.Invalidate();
+            });
+
+            MakeLabel(card, Localization.T("speedometer.elements.redlinethickness"), 20, y, 250, 20, ApplePalette.Text);
+            y += 20;
+            _redlineThicknessSlider = new MacSlider
+            {
+                Location = new Point(20, y),
+                Size = new Size(300, 22),
+                Minimum = 10,
+                Maximum = 145,
+                Value = (int)Math.Round(_redlineThickness * 10),
+            };
+            _redlineThicknessSlider.ValueChanged += (s, e) =>
+            {
+                _redlineThickness = _redlineThicknessSlider.Value / 10f;
+                _overlay.RedlineThickness = _redlineThickness;
+                _speedoTachoPreview.RedlineThickness = _redlineThickness;
+                _speedoTachoPreview.Invalidate();
+                SaveSettings();
+            };
+            card.Controls.Add(_redlineThicknessSlider);
+            y += 40;
+
+            try { ShowModalPopup(popup); }
+            finally { _redlineThicknessSlider = null; }
+        }
+
+        // Image.FromFile keeps its source file locked for the image's whole lifetime, which
+        // breaks re-importing a new background over the same file later (GDI+ "generic error").
+        // Load through a stream and copy into a detached Bitmap instead, releasing the handle
+        // immediately.
+        private static Image LoadDetachedImage(string path)
+        {
+            using var fs = new FileStream(path, FileMode.Open, FileAccess.Read);
+            using var temp = Image.FromStream(fs);
+            return new Bitmap(temp);
+        }
+
+        private void ApplySpeedoBackgroundToOverlay()
+        {
+            _overlay.SpeedoBackgroundImage = _speedoBackgroundImage;
+            _overlay.SpeedoBackgroundPanX = _speedoBackgroundPanX;
+            _overlay.SpeedoBackgroundPanY = _speedoBackgroundPanY;
+            _overlay.SpeedoBackgroundZoom = _speedoBackgroundZoom;
+            _overlay.SpeedoBackgroundOpacity = _speedoBackgroundOpacity;
+
+            if (_speedoTachoPreview == null) return;
+            _speedoTachoPreview.SpeedoBackgroundImage = _speedoBackgroundImage;
+            _speedoTachoPreview.SpeedoBackgroundPanX = _speedoBackgroundPanX;
+            _speedoTachoPreview.SpeedoBackgroundPanY = _speedoBackgroundPanY;
+            _speedoTachoPreview.SpeedoBackgroundZoom = _speedoBackgroundZoom;
+            _speedoTachoPreview.SpeedoBackgroundOpacity = _speedoBackgroundOpacity;
+            _speedoTachoPreview.Invalidate();
+        }
+
+        private SpeedoPresetData CaptureSpeedoPreset() => new SpeedoPresetData
+        {
+            ShowRpmDigits = _overlay.SpeedoTachoShowRpmDigits,
+            ShowUnit = _overlay.SpeedoTachoShowUnit,
+            ShowMinorTicks = _overlay.SpeedoTachoShowMinorTicks,
+            ShowMajorTicks = _overlay.SpeedoTachoShowMajorTicks,
+            RedlineThickness = _redlineThickness,
+            BackgroundImagePath = _speedoBackgroundImagePath,
+            BackgroundPanX = _speedoBackgroundPanX,
+            BackgroundPanY = _speedoBackgroundPanY,
+            BackgroundZoom = _speedoBackgroundZoom,
+            BackgroundOpacity = _speedoBackgroundOpacity,
+            RedlineColorArgb = _speedoTachoRedlineColor.ToArgb(),
+            TextColorArgb = _speedoTachoTextColor.ToArgb(),
+            IndicatorColorArgb = _speedoTachoIndicatorColor.ToArgb(),
+            TickColorArgb = _speedoTachoTickColor.ToArgb(),
+            BackgroundColorArgb = _speedoTachoBackgroundColor.ToArgb(),
+        };
+
+        private void ApplySpeedoPreset(SpeedoPresetData preset)
+        {
+            _overlay.SpeedoTachoShowRpmDigits = preset.ShowRpmDigits;
+            _overlay.SpeedoTachoShowUnit = preset.ShowUnit;
+            _overlay.SpeedoTachoShowMinorTicks = preset.ShowMinorTicks;
+            _overlay.SpeedoTachoShowMajorTicks = preset.ShowMajorTicks;
+            if (_speedoTachoPreview != null)
+            {
+                _speedoTachoPreview.ShowRpmDigits = preset.ShowRpmDigits;
+                _speedoTachoPreview.ShowUnit = preset.ShowUnit;
+                _speedoTachoPreview.ShowMinorTicks = preset.ShowMinorTicks;
+                _speedoTachoPreview.ShowMajorTicks = preset.ShowMajorTicks;
+            }
+
+            _redlineThickness = preset.RedlineThickness <= 0 ? 4f : preset.RedlineThickness;
+            _overlay.RedlineThickness = _redlineThickness;
+            if (_speedoTachoPreview != null) _speedoTachoPreview.RedlineThickness = _redlineThickness;
+            _redlineThicknessSlider?.SetValueSilent((int)Math.Round(_redlineThickness * 10));
+
+            _speedoTachoRedlineColor = Color.FromArgb(preset.RedlineColorArgb);
+            _speedoTachoTextColor = Color.FromArgb(preset.TextColorArgb);
+            _speedoTachoIndicatorColor = Color.FromArgb(preset.IndicatorColorArgb);
+            _speedoTachoTickColor = Color.FromArgb(preset.TickColorArgb);
+            _speedoTachoBackgroundColor = Color.FromArgb(preset.BackgroundColorArgb);
+            _overlay.RedlineColor = _speedoTachoRedlineColor;
+            _overlay.SpeedoTachoTextColor = _speedoTachoTextColor;
+            _overlay.SpeedoTachoIndicatorColor = _speedoTachoIndicatorColor;
+            _overlay.SpeedoTachoTickColor = _speedoTachoTickColor;
+            _overlay.SpeedoTachoBackgroundColor = _speedoTachoBackgroundColor;
+            RefreshSpeedoPreview();
+
+            _overlay.SpeedoBackgroundImage = null;
+            _speedoBackgroundImage?.Dispose();
+            _speedoBackgroundImage = null;
+
+            _speedoBackgroundImagePath = preset.BackgroundImagePath ?? "";
+            _speedoBackgroundPanX = preset.BackgroundPanX;
+            _speedoBackgroundPanY = preset.BackgroundPanY;
+            _speedoBackgroundZoom = preset.BackgroundZoom <= 0 ? 1f : preset.BackgroundZoom;
+            _speedoBackgroundOpacity = Math.Clamp(preset.BackgroundOpacity, 0f, 1f);
+
+            if (!string.IsNullOrEmpty(_speedoBackgroundImagePath) && File.Exists(_speedoBackgroundImagePath))
+            {
+                try { _speedoBackgroundImage = LoadDetachedImage(_speedoBackgroundImagePath); }
+                catch { _speedoBackgroundImage = null; }
+            }
+
+            ApplySpeedoBackgroundToOverlay();
+            _speedoTachoPreview?.Invalidate();
+            UpdateSpeedoPresetLabel();
+        }
+
+        private void UpdateSpeedoPresetLabel()
+        {
+            if (_speedoPresetLabel == null) return;
+            _speedoPresetLabel.Text = string.Format(Localization.T("speedometer.preset.label"), _activeSpeedoPresetIndex + 1);
+        }
+
+        private void SwitchSpeedoPreset(int newIndex)
+        {
+            if (newIndex == _activeSpeedoPresetIndex) return;
+            _speedoPresets[_activeSpeedoPresetIndex] = CaptureSpeedoPreset();
+            _activeSpeedoPresetIndex = newIndex;
+            ApplySpeedoPreset(_speedoPresets[_activeSpeedoPresetIndex]);
+            SaveSettings();
+        }
+
+        private void ShowSpeedoBackgroundMenu()
+        {
+            Form popup = new Form { StartPosition = FormStartPosition.CenterParent };
+            var card = BuildPopupChrome(popup, 360, 470, out _);
+
+            MakeLabel(card, Localization.T("speedometer.background.title"), 20, 15, 300, 24,
+                ApplePalette.Title, new Font("Segoe UI Semibold", 11f));
+            MakeLabel(card, Localization.T("speedometer.background.subtitle"), 20, 40, 320, 32,
+                Color.FromArgb(140, 140, 170), new Font("Segoe UI", 7.5f), ContentAlignment.TopLeft);
+
+            _speedoBackgroundCrop = new CircularCropControl
+            {
+                Location = new Point((360 - 220) / 2, 80),
+                Size = new Size(220, 220),
+                SourceImage = _speedoBackgroundImage,
+                PanX = _speedoBackgroundPanX,
+                PanY = _speedoBackgroundPanY,
+                Zoom = _speedoBackgroundZoom,
+            };
+            card.Controls.Add(_speedoBackgroundCrop);
+
+            int y = 312;
+
+            MakeLabel(card, Localization.T("speedometer.background.zoom"), 20, y, 150, 20, ApplePalette.Text);
+            _speedoBackgroundZoomSlider = new MacSlider
+            {
+                Location = new Point(20, y + 20),
+                Size = new Size(320, 22),
+                Minimum = 50,
+                Maximum = 300,
+                Value = (int)Math.Round(_speedoBackgroundZoom * 100),
+            };
+            _speedoBackgroundZoomSlider.ValueChanged += (s, e) =>
+            {
+                _speedoBackgroundZoom = _speedoBackgroundZoomSlider.Value / 100f;
+                _speedoBackgroundCrop.Zoom = _speedoBackgroundZoom;
+                ApplySpeedoBackgroundToOverlay();
+                SaveSettings();
+            };
+            card.Controls.Add(_speedoBackgroundZoomSlider);
+            y += 50;
+
+            MakeLabel(card, Localization.T("speedometer.background.opacity"), 20, y, 150, 20, ApplePalette.Text);
+            _speedoBackgroundOpacitySlider = new MacSlider
+            {
+                Location = new Point(20, y + 20),
+                Size = new Size(320, 22),
+                Minimum = 0,
+                Maximum = 100,
+                Value = (int)Math.Round(_speedoBackgroundOpacity * 100),
+            };
+            _speedoBackgroundOpacitySlider.ValueChanged += (s, e) =>
+            {
+                _speedoBackgroundOpacity = _speedoBackgroundOpacitySlider.Value / 100f;
+                ApplySpeedoBackgroundToOverlay();
+                SaveSettings();
+            };
+            card.Controls.Add(_speedoBackgroundOpacitySlider);
+            y += 50;
+
+            _speedoBackgroundCrop.PanZoomChanged += (s, e) =>
+            {
+                _speedoBackgroundPanX = _speedoBackgroundCrop.PanX;
+                _speedoBackgroundPanY = _speedoBackgroundCrop.PanY;
+                _speedoBackgroundZoom = _speedoBackgroundCrop.Zoom;
+                _speedoBackgroundZoomSlider.SetValueSilent((int)Math.Round(_speedoBackgroundZoom * 100));
+                ApplySpeedoBackgroundToOverlay();
+                SaveSettings();
+            };
+
+            var importBtn = MakeButton(card, Localization.T("speedometer.background.import"), 20, y, 150, 32, ApplePalette.Blue);
+            importBtn.Click += (s, e) =>
+            {
+                using var dlg = new OpenFileDialog
+                {
+                    Filter = "PNG image|*.png",
+                    Title = Localization.T("speedometer.background.import"),
+                };
+                if (dlg.ShowDialog(popup) != DialogResult.OK) return;
+
+                try
+                {
+                    Directory.CreateDirectory(DataImagesDir);
+                    string destPath = Path.Combine(DataImagesDir, "speedo_background.png");
+
+                    _overlay.SpeedoBackgroundImage = null;
+                    _speedoBackgroundCrop.SourceImage = null;
+                    _speedoBackgroundImage?.Dispose();
+                    _speedoBackgroundImage = null;
+
+                    // Read the source fully into memory before touching destPath — the picked
+                    // file may BE destPath (re-importing the same photo already sitting in
+                    // Data\Images), and Image.FromFile keeps a lock on it that would make
+                    // saving back to that same path fail with a GDI+ "generic error".
+                    byte[] sourceBytes = File.ReadAllBytes(dlg.FileName);
+                    using (var ms = new MemoryStream(sourceBytes))
+                    using (var src = Image.FromStream(ms))
+                    using (var bmp = new Bitmap(src))
+                        bmp.Save(destPath, System.Drawing.Imaging.ImageFormat.Png);
+
+                    _speedoBackgroundImage = LoadDetachedImage(destPath);
+                    _speedoBackgroundImagePath = destPath;
+                    _speedoBackgroundPanX = 0f;
+                    _speedoBackgroundPanY = 0f;
+                    _speedoBackgroundZoom = 1f;
+
+                    _speedoBackgroundCrop.SourceImage = _speedoBackgroundImage;
+                    _speedoBackgroundCrop.PanX = 0f;
+                    _speedoBackgroundCrop.PanY = 0f;
+                    _speedoBackgroundCrop.Zoom = 1f;
+                    _speedoBackgroundZoomSlider.SetValueSilent(100);
+
+                    ApplySpeedoBackgroundToOverlay();
+                    SaveSettings();
+                }
+                catch (Exception ex)
+                {
+                    AppendStatusMessage(ex.Message, StatusErrorColor);
+                }
+            };
+
+            var removeBtn = MakeButton(card, Localization.T("speedometer.background.remove"), 190, y, 150, 32, Color.FromArgb(200, 20, 20));
+            removeBtn.Click += (s, e) =>
+            {
+                _overlay.SpeedoBackgroundImage = null;
+                _speedoBackgroundCrop.SourceImage = null;
+                _speedoBackgroundImage?.Dispose();
+                _speedoBackgroundImage = null;
+                _speedoBackgroundImagePath = "";
+                _speedoBackgroundPanX = 0f;
+                _speedoBackgroundPanY = 0f;
+                _speedoBackgroundZoom = 1f;
+
+                _speedoBackgroundCrop.PanX = 0f;
+                _speedoBackgroundCrop.PanY = 0f;
+                _speedoBackgroundCrop.Zoom = 1f;
+                _speedoBackgroundZoomSlider.SetValueSilent(100);
+
+                try
+                {
+                    string destPath = Path.Combine(DataImagesDir, "speedo_background.png");
+                    if (File.Exists(destPath)) File.Delete(destPath);
+                }
+                catch { }
+
+                ApplySpeedoBackgroundToOverlay();
+                SaveSettings();
+            };
+
+            try { ShowModalPopup(popup); }
+            finally { _speedoBackgroundCrop = null; _speedoBackgroundZoomSlider = null; _speedoBackgroundOpacitySlider = null; }
         }
 
         private void OpenRevLimiterBindings()
@@ -4071,11 +4531,11 @@ namespace LFSDriftBuddy
         private const long CollisionKissBonusPoints = 150;
         private const long CollisionPenaltyPoints = 250;
 
-        private void OnCollisionDetected(int tier, string hitTypeKey)
+        private void OnCollisionDetected(int tier, byte otherPlid)
         {
             string tierName = Localization.T($"derby.levels.tier{tier}");
-            string hitTypeName = Localization.T(hitTypeKey);
-            string hitDesc = $"{tierName} ({hitTypeName})";
+            string driverName = _insim.GetPlayerName(otherPlid) ?? $"#{otherPlid}";
+            string hitDesc = $"{tierName} ({driverName})";
 
             if (!_drift.IsDrifting)
             {
@@ -4091,12 +4551,12 @@ namespace LFSDriftBuddy
             {
                 timer.Stop();
                 timer.Dispose();
-                ResolveDriftCollision(tier, hitDesc, angleAtContact, speedAtContact);
+                ResolveDriftCollision(tier, tierName, driverName, angleAtContact, speedAtContact);
             };
             timer.Start();
         }
 
-        private void ResolveDriftCollision(int tier, string hitDesc, double angleAtContact, double speedAtContact)
+        private void ResolveDriftCollision(int tier, string tierName, string driverName, double angleAtContact, double speedAtContact)
         {
             bool stillStable = _drift.IsDrifting
                 && Math.Abs(_drift.DriftAngleDeg - angleAtContact) <= CollisionKissAngleToleranceDeg
@@ -4106,12 +4566,12 @@ namespace LFSDriftBuddy
             if (stillStable)
             {
                 _drift.ApplyCollisionPoints(CollisionKissBonusPoints,
-                    string.Format(Localization.T("collision.kiss"), hitDesc, CollisionKissBonusPoints));
+                    string.Format(Localization.T("collision.car_kiss"), driverName, CollisionKissBonusPoints));
             }
             else
             {
                 _drift.ApplyCollisionPoints(-CollisionPenaltyPoints,
-                    string.Format(Localization.T("collision.hit"), hitDesc, CollisionPenaltyPoints));
+                    string.Format(Localization.T("collision.car_penalty"), driverName, tierName, CollisionPenaltyPoints));
                 _drift.RegisterCollisionPenalty();
             }
 
@@ -4429,7 +4889,7 @@ namespace LFSDriftBuddy
                     btn.Font,
                     rect,
                     btn.ForeColor,
-                    TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter);
+                    TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.WordBreak);
             };
 
             btn.MouseEnter += (s, e) => { isHover = true; btn.Invalidate(); };
@@ -4845,6 +5305,7 @@ namespace LFSDriftBuddy
             _hud?.Dispose();
             _shadow?.Close();
             _revLimiterCalibrationPrompt?.Close();
+            _speedoBackgroundImage?.Dispose();
             base.OnFormClosing(e);
         }
 
@@ -5873,7 +6334,18 @@ namespace LFSDriftBuddy
         public Color IndicatorColor { get; set; } = Color.FromArgb(255, 225, 225, 230);
         public Color TickColor { get; set; } = Color.FromArgb(255, 215, 215, 218);
         public Color RedlineColor { get; set; } = Color.Red;
+        public float RedlineThickness { get; set; } = 4f;
         public bool UseMph { get; set; } = false;
+        public bool ShowRpmDigits { get; set; } = true;
+        public bool ShowUnit { get; set; } = true;
+        public bool ShowMinorTicks { get; set; } = true;
+        public bool ShowMajorTicks { get; set; } = true;
+
+        public Image SpeedoBackgroundImage { get; set; } = null;
+        public float SpeedoBackgroundPanX { get; set; } = 0f;
+        public float SpeedoBackgroundPanY { get; set; } = 0f;
+        public float SpeedoBackgroundZoom { get; set; } = 1.0f;
+        public float SpeedoBackgroundOpacity { get; set; } = 1.0f;
 
         private const float DemoCalibratedMaxRpm = 8000f;
         private const string DemoGear = "3";
@@ -5904,7 +6376,7 @@ namespace LFSDriftBuddy
         {
             try
             {
-                string fontPath = Path.Combine(System.Windows.Forms.Application.StartupPath, "Fonts", "active.otf");
+                string fontPath = Path.Combine(System.Windows.Forms.Application.StartupPath, "Data", "Fonts", "active.otf");
                 if (File.Exists(fontPath))
                 {
                     _fontCollection.AddFontFile(fontPath);
@@ -5917,6 +6389,31 @@ namespace LFSDriftBuddy
 
         private static Font MakeFont(float size) =>
             _activeFontFamily != null ? new Font(_activeFontFamily, size, FontStyle.Bold) : new Font("Segoe UI", size, FontStyle.Bold);
+
+        // Fixed, non-configurable backdrop behind the settings-panel preview only — purely
+        // decorative context for this widget, never shown in the real in-game overlay.
+        private static readonly Image _previewWallpaper = LoadPreviewWallpaper();
+
+        private static Image LoadPreviewWallpaper()
+        {
+            try
+            {
+                string path = Path.Combine(System.Windows.Forms.Application.StartupPath, "Data", "Images", "speedo_preview_background.png");
+                if (File.Exists(path))
+                {
+                    // Image.FromFile keeps the source file locked for the image's whole lifetime.
+                    // This field lives for the entire process, so load through a stream and copy
+                    // into a detached Bitmap instead — otherwise re-importing a background to that
+                    // same path later fails with a GDI+ "generic error" because the file is still
+                    // held open here.
+                    using var fs = new FileStream(path, FileMode.Open, FileAccess.Read);
+                    using var temp = Image.FromStream(fs);
+                    return new Bitmap(temp);
+                }
+            }
+            catch { }
+            return null;
+        }
 
         public SpeedoTachoPreviewControl()
         {
@@ -5969,6 +6466,32 @@ namespace LFSDriftBuddy
             return Color.FromArgb((int)(c.A * alpha), c.R, c.G, c.B);
         }
 
+        private void DrawSpeedoBackgroundImage(Graphics g, RectangleF dialRect)
+        {
+            var img = SpeedoBackgroundImage;
+            if (img == null || SpeedoBackgroundOpacity <= 0.001f) return;
+
+            float diameter = dialRect.Width;
+            float coverScale = diameter / Math.Min(img.Width, img.Height) * Math.Max(0.1f, SpeedoBackgroundZoom);
+            float drawW = img.Width * coverScale;
+            float drawH = img.Height * coverScale;
+            float drawX = dialRect.X + diameter / 2f - drawW / 2f + SpeedoBackgroundPanX * diameter;
+            float drawY = dialRect.Y + diameter / 2f - drawH / 2f + SpeedoBackgroundPanY * diameter;
+
+            using var path = new GraphicsPath();
+            path.AddEllipse(dialRect);
+            var oldClip = g.Clip;
+            g.SetClip(path, CombineMode.Intersect);
+
+            using var attrs = new System.Drawing.Imaging.ImageAttributes();
+            var matrix = new System.Drawing.Imaging.ColorMatrix { Matrix33 = Math.Clamp(SpeedoBackgroundOpacity, 0f, 1f) };
+            attrs.SetColorMatrix(matrix, System.Drawing.Imaging.ColorMatrixFlag.Default, System.Drawing.Imaging.ColorAdjustType.Bitmap);
+            g.DrawImage(img, new Rectangle((int)drawX, (int)drawY, (int)drawW, (int)drawH),
+                0, 0, img.Width, img.Height, GraphicsUnit.Pixel, attrs);
+
+            g.Clip = oldClip;
+        }
+
         private static void DrawShadowedText(Graphics g, string text, Font font, float x, float y, Color fill, Color shadow)
         {
             if (string.IsNullOrEmpty(text)) return;
@@ -5983,6 +6506,22 @@ namespace LFSDriftBuddy
             Graphics g = e.Graphics;
             g.SmoothingMode = SmoothingMode.AntiAlias;
             g.TextRenderingHint = System.Drawing.Text.TextRenderingHint.AntiAliasGridFit;
+
+            if (_previewWallpaper != null)
+            {
+                float coverScale = Math.Max((float)Width / _previewWallpaper.Width, (float)Height / _previewWallpaper.Height);
+                float wpW = _previewWallpaper.Width * coverScale;
+                float wpH = _previewWallpaper.Height * coverScale;
+                float wpX = (Width - wpW) / 2f;
+                float wpY = (Height - wpH) / 2f;
+
+                using var wallpaperPath = new GraphicsPath();
+                wallpaperPath.AddRectangle(ClientRectangle);
+                var oldWallpaperClip = g.Clip;
+                g.SetClip(wallpaperPath, CombineMode.Intersect);
+                g.DrawImage(_previewWallpaper, wpX, wpY, wpW, wpH);
+                g.Clip = oldWallpaperClip;
+            }
 
             const float contentSize = Radius * 2f;
             float scale = Math.Min(Width, Height) / contentSize;
@@ -6003,15 +6542,23 @@ namespace LFSDriftBuddy
             using (var bgBrush = new SolidBrush(BackgroundColor))
                 g.FillEllipse(bgBrush, dialRect);
 
+            DrawSpeedoBackgroundImage(g, dialRect);
+
             if (DemoCalibratedMaxRpm > 0 && DemoCalibratedMaxRpm < gaugeMaxRpm)
             {
                 float redlineStartFrac = DemoCalibratedMaxRpm / gaugeMaxRpm;
                 float redlineStartAngle = startAngle + redlineStartFrac * sweepAngle;
                 float redlineSweep = sweepAngle - redlineStartFrac * sweepAngle;
 
-                using var redlinePen = new Pen(WithAlpha(RedlineColor, 0.9), 6f)
+                // Keep the outer edge pinned to the dial's true edge and let extra thickness eat
+                // inward only, instead of the stroke growing outward past the dial too.
+                float redlineWidth = Math.Max(1f, RedlineThickness);
+                float redlineRadius = radius - redlineWidth / 2f;
+                var redlineRect = new RectangleF(cx - redlineRadius, cy - redlineRadius, redlineRadius * 2, redlineRadius * 2);
+
+                using var redlinePen = new Pen(WithAlpha(RedlineColor, 0.9), redlineWidth)
                 { StartCap = LineCap.Round, EndCap = LineCap.Round };
-                g.DrawArc(redlinePen, dialRect, redlineStartAngle, redlineSweep);
+                g.DrawArc(redlinePen, redlineRect, redlineStartAngle, redlineSweep);
             }
 
             using Font tickFont = MakeFont(12f);
@@ -6026,23 +6573,33 @@ namespace LFSDriftBuddy
 
                 float outerR = radius;
                 float innerR = radius - 14;
-                float x1 = cx + (float)Math.Cos(angleRad) * outerR;
-                float y1 = cy + (float)Math.Sin(angleRad) * outerR;
-                float x2 = cx + (float)Math.Cos(angleRad) * innerR;
-                float y2 = cy + (float)Math.Sin(angleRad) * innerR;
 
-                using (var tickPen = new Pen(tickColor, 2.8f) { StartCap = LineCap.Round, EndCap = LineCap.Round })
-                    g.DrawLine(tickPen, x1, y1, x2, y2);
+                if (ShowMajorTicks)
+                {
+                    float x1 = cx + (float)Math.Cos(angleRad) * outerR;
+                    float y1 = cy + (float)Math.Sin(angleRad) * outerR;
+                    float x2 = cx + (float)Math.Cos(angleRad) * innerR;
+                    float y2 = cy + (float)Math.Sin(angleRad) * innerR;
 
-                string label = i.ToString();
-                var labelSize = g.MeasureString(label, tickFont);
-                float labelR = innerR - 15;
-                float lx = cx + (float)Math.Cos(angleRad) * labelR - labelSize.Width / 2f;
-                float ly = cy + (float)Math.Sin(angleRad) * labelR - labelSize.Height / 2f;
-                using (var labelBrush = new SolidBrush(WithAlpha(TextColor, (double)TextColor.A / 255.0 * 0.85)))
-                    g.DrawString(label, tickFont, labelBrush, lx, ly);
+                    using (var shadowPen = new Pen(Color.FromArgb(150, 0, 0, 0), 2.8f) { StartCap = LineCap.Round, EndCap = LineCap.Round })
+                        g.DrawLine(shadowPen, x1 + 1.5f, y1 + 1.5f, x2 + 1.5f, y2 + 1.5f);
 
-                if (i < majorTicks)
+                    using (var tickPen = new Pen(tickColor, 2.8f) { StartCap = LineCap.Round, EndCap = LineCap.Round })
+                        g.DrawLine(tickPen, x1, y1, x2, y2);
+                }
+
+                if (ShowRpmDigits)
+                {
+                    string label = i.ToString();
+                    var labelSize = g.MeasureString(label, tickFont);
+                    float labelR = innerR - 15;
+                    float lx = cx + (float)Math.Cos(angleRad) * labelR - labelSize.Width / 2f;
+                    float ly = cy + (float)Math.Sin(angleRad) * labelR - labelSize.Height / 2f;
+                    DrawShadowedText(g, label, tickFont, lx, ly,
+                        WithAlpha(TextColor, (double)TextColor.A / 255.0 * 0.85), Color.FromArgb(180, 0, 0, 0));
+                }
+
+                if (i < majorTicks && ShowMinorTicks)
                 {
                     float midFrac = (i + 0.5f) / majorTicks;
                     float midAngleDeg = startAngle + midFrac * sweepAngle;
@@ -6052,6 +6609,10 @@ namespace LFSDriftBuddy
                     float my1 = cy + (float)Math.Sin(midAngleRad) * outerR;
                     float mx2 = cx + (float)Math.Cos(midAngleRad) * mInnerR;
                     float my2 = cy + (float)Math.Sin(midAngleRad) * mInnerR;
+
+                    using (var shadowPen = new Pen(Color.FromArgb(120, 0, 0, 0), 1.4f))
+                        g.DrawLine(shadowPen, mx1 + 1.2f, my1 + 1.2f, mx2 + 1.2f, my2 + 1.2f);
+
                     using var minorPen = new Pen(WithAlpha(TickColor, 0.65), 1.4f);
                     g.DrawLine(minorPen, mx1, my1, mx2, my2);
                 }
@@ -6063,6 +6624,9 @@ namespace LFSDriftBuddy
             float needleLen = radius - 5;
             float nx = cx + (float)Math.Cos(needleAngleRad) * needleLen;
             float ny = cy + (float)Math.Sin(needleAngleRad) * needleLen;
+
+            using (var needleShadowPen = new Pen(Color.FromArgb(190, 0, 0, 0), 4f) { StartCap = LineCap.Round, EndCap = LineCap.Round })
+                g.DrawLine(needleShadowPen, cx + 1.5f, cy + 1.5f, nx + 1.5f, ny + 1.5f);
 
             using (var needlePen = new Pen(stateColor, 4f) { StartCap = LineCap.Round, EndCap = LineCap.Round })
                 g.DrawLine(needlePen, cx, cy, nx, ny);
@@ -6094,11 +6658,14 @@ namespace LFSDriftBuddy
             DrawShadowedText(g, speedText, speedFont, speedX, speedY,
                 TextColor, Color.FromArgb(200, 0, 0, 0));
 
-            string unitText = UseMph ? "MPH" : Localization.T("speedometer.unit").ToUpperInvariant();
-            var unitSize = g.MeasureString(unitText, unitFont);
-            DrawShadowedText(g, unitText, unitFont,
-                cx + speedSize.Width / 2.5f - unitSize.Width, speedY,
-                WithAlpha(TextColor, (double)TextColor.A / 255.0 * 0.8), Color.FromArgb(180, 0, 0, 0));
+            if (ShowUnit)
+            {
+                string unitText = UseMph ? "MPH" : Localization.T("speedometer.unit").ToUpperInvariant();
+                var unitSize = g.MeasureString(unitText, unitFont);
+                DrawShadowedText(g, unitText, unitFont,
+                    cx + speedSize.Width / 2.5f - unitSize.Width, speedY,
+                    WithAlpha(TextColor, (double)TextColor.A / 255.0 * 0.8), Color.FromArgb(180, 0, 0, 0));
+            }
 
             g.Restore(savedState);
         }
@@ -6141,7 +6708,7 @@ namespace LFSDriftBuddy
         {
             try
             {
-                string fontPath = Path.Combine(System.Windows.Forms.Application.StartupPath, "Fonts", "active.otf");
+                string fontPath = Path.Combine(System.Windows.Forms.Application.StartupPath, "Data", "Fonts", "active.otf");
                 if (File.Exists(fontPath))
                 {
                     _fontCollection.AddFontFile(fontPath);
@@ -6332,6 +6899,46 @@ namespace LFSDriftBuddy
         public int CutMs { get; set; }
     }
 
+    public class SpeedoPresetData
+    {
+        public bool ShowRpmDigits { get; set; } = true;
+        public bool ShowUnit { get; set; } = true;
+        public bool ShowMinorTicks { get; set; } = true;
+        public bool ShowMajorTicks { get; set; } = true;
+        public float RedlineThickness { get; set; } = 4f;
+        public string BackgroundImagePath { get; set; } = "";
+        public float BackgroundPanX { get; set; } = 0f;
+        public float BackgroundPanY { get; set; } = 0f;
+        public float BackgroundZoom { get; set; } = 1f;
+        public float BackgroundOpacity { get; set; } = 1f;
+
+        public int RedlineColorArgb { get; set; } = Color.Red.ToArgb();
+        public int TextColorArgb { get; set; } = Color.White.ToArgb();
+        public int IndicatorColorArgb { get; set; } = Color.FromArgb(255, 225, 225, 230).ToArgb();
+        public int TickColorArgb { get; set; } = Color.FromArgb(255, 215, 215, 218).ToArgb();
+        public int BackgroundColorArgb { get; set; } = Color.FromArgb(50, 15, 15, 20).ToArgb();
+
+        public static SpeedoPresetData Default2() => new SpeedoPresetData
+        {
+            ShowRpmDigits = true,
+            ShowUnit = false,
+            ShowMinorTicks = true,
+            ShowMajorTicks = true,
+            RedlineThickness = 14.5f,
+            BackgroundImagePath = Path.Combine(System.Windows.Forms.Application.StartupPath, "Data", "Images", "speedo_default_background.png"),
+            BackgroundPanX = 0f,
+            BackgroundPanY = 0f,
+            BackgroundZoom = 2.22f,
+            BackgroundOpacity = 0.4f,
+
+            RedlineColorArgb = Color.FromArgb(255, 255, 0, 70).ToArgb(),
+            TextColorArgb = Color.White.ToArgb(),
+            IndicatorColorArgb = Color.FromArgb(255, 255, 255, 255).ToArgb(),
+            TickColorArgb = Color.FromArgb(255, 255, 255, 255).ToArgb(),
+            BackgroundColorArgb = Color.FromArgb(0, 15, 15, 15).ToArgb(),
+    };
+    }
+
     public class AppSettings
     {
         public string Language { get; set; } = "English";
@@ -6351,7 +6958,7 @@ namespace LFSDriftBuddy
         public bool IndicatorSoundsEnabled { get; set; } = true;
         public int IndicatorSoundsVolume { get; set; } = 100;
         public bool IndicatorAutoCancelOnCenter { get; set; } = true;
-        public int IndicatorArmThresholdPct { get; set; } = 25;
+        public int IndicatorArmThresholdPct { get; set; } = 35;
         public int IndicatorCenterThresholdPct { get; set; } = 5;
 
         public bool SpeedoTachoEnabled { get; set; } = true;
@@ -6360,6 +6967,22 @@ namespace LFSDriftBuddy
         public float SpeedoTachoScale { get; set; } = 1.0f;
         public bool SpeedoTachoUseMph { get; set; } = false;
 
+        public bool SpeedoTachoShowRpmDigits { get; set; } = true;
+        public bool SpeedoTachoShowUnit { get; set; } = true;
+        public bool SpeedoTachoShowMinorTicks { get; set; } = true;
+        public bool SpeedoTachoShowMajorTicks { get; set; } = true;
+        public float RedlineThickness { get; set; } = 4f;
+
+        public string SpeedoBackgroundImagePath { get; set; } = "";
+        public float SpeedoBackgroundPanX { get; set; } = 0f;
+        public float SpeedoBackgroundPanY { get; set; } = 0f;
+        public float SpeedoBackgroundZoom { get; set; } = 1.0f;
+        public float SpeedoBackgroundOpacity { get; set; } = 1.0f;
+
+        public int ActiveSpeedoPreset { get; set; } = 0;
+        public SpeedoPresetData SpeedoPresetA { get; set; } = null;
+        public SpeedoPresetData SpeedoPresetB { get; set; } = null;
+
         public bool AdvancedOutGaugeEnabled { get; set; } = true;
 
         public bool ShowRPMHudEnabled { get; set; } = false;
@@ -6367,13 +6990,14 @@ namespace LFSDriftBuddy
         public bool IndicatorsMasterEnabled { get; set; } = true;
 
         public double[] AngleLevelThresholds { get; set; } = { 25.0, 40.0, 50.0, 60.0, 70.0 };
-        public double[] SpeedLevelThresholds { get; set; } = { 100.0, 130.0, 160.0, 190.0, 220.0 };
+        public double[] SpeedLevelThresholds { get; set; } = { 100.0, 150.0, 200.0, 250.0, 300.0 };
+        public double BackwardDriftAngleThreshold { get; set; } = 95.0;
 
         public double MinDriftSpeedKmh { get; set; } = 20.0;
-        public double MaxBurnoutSpeedKmh { get; set; } = 25.0;
+        public double MaxBurnoutSpeedKmh { get; set; } = 20.0;
 
         public bool CollisionDetectionEnabled { get; set; } = false;
-        public double[] HitLevelThresholds { get; set; } = { 20.0, 40.0, 65.0, 95.0, 130.0 };
+        public double[] HitLevelThresholds { get; set; } = { 5.0, 10.0, 30.0, 50.0, 100.0 };
         public bool ObjectCollisionDetectionEnabled { get; set; } = true;
     }
 

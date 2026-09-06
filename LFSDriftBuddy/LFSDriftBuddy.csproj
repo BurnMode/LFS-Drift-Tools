@@ -9,9 +9,9 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>disable</ImplicitUsings>
     <ApplicationIcon>app.ico</ApplicationIcon>
-	<Version>0.700.0906</Version>
-	<AssemblyVersion>0.700.0906.0</AssemblyVersion>
-	<FileVersion>0.700.0906.0</FileVersion>
+	<Version>0.711.0906</Version>
+	<AssemblyVersion>0.711.0906.0</AssemblyVersion>
+	<FileVersion>0.711.0906.0</FileVersion>
   </PropertyGroup>
 
   <ItemGroup>
@@ -29,13 +29,13 @@
     <None Update="app.ico">
       <CopyToOutputDirectory>Always</CopyToOutputDirectory>
     </None>
-    <None Update="Fonts\active.otf">
+    <None Update="Data\Fonts\active.otf">
       <CopyToOutputDirectory>Always</CopyToOutputDirectory>
     </None>
-    <None Update="Fonts\active.ttf">
+    <None Update="Data\Fonts\active.ttf">
       <CopyToOutputDirectory>Always</CopyToOutputDirectory>
     </None>
-    <None Update="Fonts\idle.otf">
+    <None Update="Data\Fonts\idle.otf">
       <CopyToOutputDirectory>Always</CopyToOutputDirectory>
     </None>
     <None Update="indicator_cancel.wav">
@@ -44,16 +44,19 @@
     <None Update="indicator_click.wav">
       <CopyToOutputDirectory>Never</CopyToOutputDirectory>
     </None>
-    <None Update="Sounds\indicator_cancel.wav">
+    <None Update="Data\Sounds\indicator_cancel.wav">
       <CopyToOutputDirectory>Always</CopyToOutputDirectory>
     </None>
-    <None Update="Sounds\indicator_click.wav">
+    <None Update="Data\Sounds\indicator_click.wav">
       <CopyToOutputDirectory>Always</CopyToOutputDirectory>
     </None>
-    <None Update="Sounds\indicator_click_off.wav">
+    <None Update="Data\Sounds\indicator_click_off.wav">
       <CopyToOutputDirectory>Always</CopyToOutputDirectory>
     </None>
-    <None Update="Sounds\indicator_click_on.wav">
+    <None Update="Data\Sounds\indicator_click_on.wav">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </None>
+    <None Update="Data\Images\*.png">
       <CopyToOutputDirectory>Always</CopyToOutputDirectory>
     </None>
   </ItemGroup>

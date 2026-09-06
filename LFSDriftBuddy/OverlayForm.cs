@@ -41,7 +41,7 @@ namespace LFSDriftBuddy
 
         private void LoadFonts()
         {
-            string fontPath = Path.Combine(Application.StartupPath, "Fonts");
+            string fontPath = Path.Combine(Application.StartupPath, "Data", "Fonts");
             _fontCollection.AddFontFile(Path.Combine(fontPath, "active.otf"));
             FontFamily active = _fontCollection.Families[0];
 
@@ -144,14 +144,26 @@ namespace LFSDriftBuddy
         public float SpeedoTachoOffsetY { get; set; } = 0f;
         public float SpeedoTachoScale { get; set; } = 1.0f;
         public Color RedlineColor { get; set; } = Color.Red;
+        public float RedlineThickness { get; set; } = 4f;
 
         public bool SpeedoTachoUseMph { get; set; } = false;
         private const double KmhToMph = 0.621371;
+
+        public bool SpeedoTachoShowRpmDigits { get; set; } = true;
+        public bool SpeedoTachoShowUnit { get; set; } = true;
+        public bool SpeedoTachoShowMinorTicks { get; set; } = true;
+        public bool SpeedoTachoShowMajorTicks { get; set; } = true;
 
         public Color SpeedoTachoTextColor { get; set; } = Color.White;
         public Color SpeedoTachoIndicatorColor { get; set; } = Color.FromArgb(255, 225, 225, 230);
         public Color SpeedoTachoTickColor { get; set; } = Color.FromArgb(255, 215, 215, 218);
         public Color SpeedoTachoBackgroundColor { get; set; } = Color.FromArgb(50, 15, 15, 20);
+
+        public Image SpeedoBackgroundImage { get; set; } = null;
+        public float SpeedoBackgroundPanX { get; set; } = 0f;
+        public float SpeedoBackgroundPanY { get; set; } = 0f;
+        public float SpeedoBackgroundZoom { get; set; } = 1.0f;
+        public float SpeedoBackgroundOpacity { get; set; } = 1.0f;
 
         private double _targetSpeedKmh = 0;
         private double _displayedSpeedKmh = 0;
@@ -592,7 +604,7 @@ namespace LFSDriftBuddy
             idlebarY = size.Height;
             if (alpha <= 0.01) return;
             float x = centerX - size.Width / 2f + slideX;
-            DrawRevCutGlow(g, new RectangleF(x, 5, size.Width, size.Height), alpha * 0.55);
+            DrawRevCutTextGlow(g, text, font, x, 5);
 
             DrawOutlinedText(g, text, font, x, 5, WithAlpha(_accentColor, alpha), WithAlpha(_accentColorBack, alpha), outline: false);
         }
@@ -621,9 +633,9 @@ namespace LFSDriftBuddy
 
             float startX = centerX - totalW / 2f + slideX;
 
-            DrawOutlinedText(g, scoreText, scoreFont, startX, 5, WithAlpha(_accentColor, alpha), WithAlpha(_accentColorBack, alpha), outline: false);
+            DrawRevCutTextGlow(g, scoreText, scoreFont, startX, 5);
 
-            DrawRevCutGlow(g, new RectangleF(startX, 5, scoreSize.Width, scoreSize.Height), alpha * 0.55);
+            DrawOutlinedText(g, scoreText, scoreFont, startX, 5, WithAlpha(_accentColor, alpha), WithAlpha(_accentColorBack, alpha), outline: false);
 
             var labelFont = _activeFont22;
             var runFont = _activeFont22;
@@ -1149,6 +1161,32 @@ namespace LFSDriftBuddy
             }
         }
 
+        private void DrawSpeedoBackgroundImage(Graphics g, RectangleF dialRect)
+        {
+            var img = SpeedoBackgroundImage;
+            if (img == null || SpeedoBackgroundOpacity <= 0.001f) return;
+
+            float diameter = dialRect.Width;
+            float coverScale = diameter / Math.Min(img.Width, img.Height) * Math.Max(0.1f, SpeedoBackgroundZoom);
+            float drawW = img.Width * coverScale;
+            float drawH = img.Height * coverScale;
+            float drawX = dialRect.X + diameter / 2f - drawW / 2f + SpeedoBackgroundPanX * diameter;
+            float drawY = dialRect.Y + diameter / 2f - drawH / 2f + SpeedoBackgroundPanY * diameter;
+
+            using var path = new GraphicsPath();
+            path.AddEllipse(dialRect);
+            var oldClip = g.Clip;
+            g.SetClip(path, CombineMode.Intersect);
+
+            using var attrs = new ImageAttributes();
+            var matrix = new ColorMatrix { Matrix33 = Math.Clamp(SpeedoBackgroundOpacity, 0f, 1f) };
+            attrs.SetColorMatrix(matrix, ColorMatrixFlag.Default, ColorAdjustType.Bitmap);
+            g.DrawImage(img, new Rectangle((int)drawX, (int)drawY, (int)drawW, (int)drawH),
+                0, 0, img.Width, img.Height, GraphicsUnit.Pixel, attrs);
+
+            g.Clip = oldClip;
+        }
+
         private void DrawSpeedoTachoContent(Graphics g)
         {
             const float cx = 140f, cy = 118f, radius = 102f;
@@ -1163,17 +1201,25 @@ namespace LFSDriftBuddy
             _scratchBrush.Color = SpeedoTachoBackgroundColor;
             g.FillEllipse(_scratchBrush, dialRect);
 
+            DrawSpeedoBackgroundImage(g, dialRect);
+
             if (_calibratedMaxRpm > 0 && _calibratedMaxRpm < gaugeMaxRpm)
             {
                 float redlineStartFrac = _calibratedMaxRpm / gaugeMaxRpm;
                 float redlineStartAngle = startAngle + redlineStartFrac * sweepAngle;
                 float redlineSweep = sweepAngle - redlineStartFrac * sweepAngle;
 
+                // Keep the outer edge pinned to the dial's true edge and let extra thickness eat
+                // inward only, instead of the stroke growing outward past the dial too.
+                float redlineWidth = Math.Max(1f, RedlineThickness);
+                float redlineRadius = radius - redlineWidth / 2f;
+                var redlineRect = new RectangleF(cx - redlineRadius, cy - redlineRadius, redlineRadius * 2, redlineRadius * 2);
+
                 _scratchPen.Color = WithAlpha(RedlineColor, 0.9);
-                _scratchPen.Width = 6f;
+                _scratchPen.Width = redlineWidth;
                 _scratchPen.StartCap = LineCap.Round;
                 _scratchPen.EndCap = LineCap.Round;
-                g.DrawArc(_scratchPen, dialRect, redlineStartAngle, redlineSweep);
+                g.DrawArc(_scratchPen, redlineRect, redlineStartAngle, redlineSweep);
             }
 
             Font tickFont = _tachoTickFont;
@@ -1188,26 +1234,37 @@ namespace LFSDriftBuddy
 
                 float outerR = radius;
                 float innerR = radius - 14;
-                float x1 = cx + (float)Math.Cos(angleRad) * outerR;
-                float y1 = cy + (float)Math.Sin(angleRad) * outerR;
-                float x2 = cx + (float)Math.Cos(angleRad) * innerR;
-                float y2 = cy + (float)Math.Sin(angleRad) * innerR;
 
-                _scratchPen.Color = tickColor;
-                _scratchPen.Width = 2.8f;
-                _scratchPen.StartCap = LineCap.Round;
-                _scratchPen.EndCap = LineCap.Round;
-                g.DrawLine(_scratchPen, x1, y1, x2, y2);
+                if (SpeedoTachoShowMajorTicks)
+                {
+                    float x1 = cx + (float)Math.Cos(angleRad) * outerR;
+                    float y1 = cy + (float)Math.Sin(angleRad) * outerR;
+                    float x2 = cx + (float)Math.Cos(angleRad) * innerR;
+                    float y2 = cy + (float)Math.Sin(angleRad) * innerR;
 
-                string label = i.ToString();
-                var labelSize = g.MeasureString(label, tickFont);
-                float labelR = innerR - 15;
-                float lx = cx + (float)Math.Cos(angleRad) * labelR - labelSize.Width / 2f;
-                float ly = cy + (float)Math.Sin(angleRad) * labelR - labelSize.Height / 2f;
-                _scratchBrush.Color = WithAlpha(SpeedoTachoTextColor, (double)SpeedoTachoTextColor.A / 255.0 * 0.85);
-                g.DrawString(label, tickFont, _scratchBrush, lx, ly);
+                    _scratchPen.Color = Color.FromArgb(150, 0, 0, 0);
+                    _scratchPen.Width = 2.8f;
+                    _scratchPen.StartCap = LineCap.Round;
+                    _scratchPen.EndCap = LineCap.Round;
+                    g.DrawLine(_scratchPen, x1 + 1.5f, y1 + 1.5f, x2 + 1.5f, y2 + 1.5f);
 
-                if (i < majorTicks)
+                    _scratchPen.Color = tickColor;
+                    g.DrawLine(_scratchPen, x1, y1, x2, y2);
+                }
+
+                if (SpeedoTachoShowRpmDigits)
+                {
+                    string label = i.ToString();
+                    var labelSize = g.MeasureString(label, tickFont);
+                    float labelR = innerR - 15;
+                    float lx = cx + (float)Math.Cos(angleRad) * labelR - labelSize.Width / 2f;
+                    float ly = cy + (float)Math.Sin(angleRad) * labelR - labelSize.Height / 2f;
+                    DrawOutlinedText(g, label, tickFont, lx, ly,
+                        WithAlpha(SpeedoTachoTextColor, (double)SpeedoTachoTextColor.A / 255.0 * 0.85),
+                        Color.FromArgb(180, 0, 0, 0), outline: false);
+                }
+
+                if (i < majorTicks && SpeedoTachoShowMinorTicks)
                 {
                     float midFrac = (i + 0.5f) / majorTicks;
                     float midAngleDeg = startAngle + midFrac * sweepAngle;
@@ -1217,14 +1274,18 @@ namespace LFSDriftBuddy
                     float my1 = cy + (float)Math.Sin(midAngleRad) * outerR;
                     float mx2 = cx + (float)Math.Cos(midAngleRad) * mInnerR;
                     float my2 = cy + (float)Math.Sin(midAngleRad) * mInnerR;
-                    _scratchPen.Color = WithAlpha(SpeedoTachoTickColor, 0.65);
+
+                    _scratchPen.Color = Color.FromArgb(120, 0, 0, 0);
                     _scratchPen.Width = 1.4f;
                     _scratchPen.StartCap = LineCap.Flat;
                     _scratchPen.EndCap = LineCap.Flat;
+                    g.DrawLine(_scratchPen, mx1 + 1.2f, my1 + 1.2f, mx2 + 1.2f, my2 + 1.2f);
+
+                    _scratchPen.Color = WithAlpha(SpeedoTachoTickColor, 0.65);
                     g.DrawLine(_scratchPen, mx1, my1, mx2, my2);
                 }
             }
-
+            DrawRevCutRingGlow(g, dialRect);
             float rpmFrac = Math.Clamp(_currentRpm / gaugeMaxRpm, 0f, 1f);
             float needleAngleDeg = startAngle + rpmFrac * sweepAngle;
             double needleAngleRad = needleAngleDeg * Math.PI / 180.0;
@@ -1232,10 +1293,13 @@ namespace LFSDriftBuddy
             float nx = cx + (float)Math.Cos(needleAngleRad) * needleLen;
             float ny = cy + (float)Math.Sin(needleAngleRad) * needleLen;
 
-            _scratchPen.Color = stateColor;
+            _scratchPen.Color = Color.FromArgb(190, 0, 0, 0);
             _scratchPen.Width = 4f;
             _scratchPen.StartCap = LineCap.Round;
             _scratchPen.EndCap = LineCap.Round;
+            g.DrawLine(_scratchPen, cx + 1.5f, cy + 1.5f, nx + 1.5f, ny + 1.5f);
+
+            _scratchPen.Color = stateColor;
             g.DrawLine(_scratchPen, cx, cy, nx, ny);
 
             const float gearRadius = 32f;
@@ -1271,11 +1335,16 @@ namespace LFSDriftBuddy
             DrawOutlinedText(g, speedText, speedFont, speedX, speedY,
                 SpeedoTachoTextColor, Color.FromArgb(200, 0, 0, 0), outline: false);
 
-            string unitText = SpeedoTachoUseMph ? "MPH" : Localization.T("speedometer.unit").ToUpperInvariant();
-            var unitSize = g.MeasureString(unitText, unitFont);
-            DrawOutlinedText(g, unitText, unitFont,
-                cx + speedSize.Width / 2.5f - unitSize.Width, speedY,
-                WithAlpha(SpeedoTachoTextColor, (double)SpeedoTachoTextColor.A / 255.0 * 0.8), Color.FromArgb(180, 0, 0, 0), outline: false);
+            if (SpeedoTachoShowUnit)
+            {
+                string unitText = SpeedoTachoUseMph ? "MPH" : Localization.T("speedometer.unit").ToUpperInvariant();
+                var unitSize = g.MeasureString(unitText, unitFont);
+                DrawOutlinedText(g, unitText, unitFont,
+                    cx + speedSize.Width / 2.5f - unitSize.Width, speedY,
+                    WithAlpha(SpeedoTachoTextColor, (double)SpeedoTachoTextColor.A / 255.0 * 0.8), Color.FromArgb(180, 0, 0, 0), outline: false);
+            }
+
+            
         }
 
         private double GetRevCutGlowIntensity()
@@ -1286,26 +1355,43 @@ namespace LFSDriftBuddy
             return _revCutBlend * pulse;
         }
 
-        private void DrawRevCutGlow(Graphics g, RectangleF bounds, double baseAlpha)
+        // Soft red glow ring for the rev-limiter cut effect, hugging the gauge's own edge and
+        // fading outward — layered concentric strokes instead of one crisp pen line.
+        private void DrawRevCutRingGlow(Graphics g, RectangleF dialRect, float baseInflate = -1f, float spread = 20f, int layers = 10)
         {
             double glowStrength = GetRevCutGlowIntensity();
-            if (glowStrength <= 0.01 || baseAlpha <= 0.01) return;
-
-            double alpha = baseAlpha * glowStrength;
-
-            const int layers = 16;
-            const float spread = 50f;
-
-            RectangleF inflated = RectangleF.Inflate(bounds, -30, -30);
+            if (glowStrength <= 0.01) return;
 
             for (int i = layers; i >= 1; i--)
             {
-                float grow = (spread / layers) * i;
-                double layerAlpha = alpha * (0.7 - (double)i / (layers + 1)) * 0.35;
+                spread--;
+                float grow = baseInflate + (spread / layers) * i;
+                double layerAlpha = glowStrength * (1.0 - (double)i / (layers + 1)) * 0.50;
 
-                using var path = RoundedRect(RectangleF.Inflate(inflated, grow, grow), 10 + grow / 2f);
-                _scratchBrush.Color = WithAlpha(Color.FromArgb(255, 40, 40), layerAlpha);
-                g.FillPath(_scratchBrush, path);
+                _scratchPen.Color = WithAlpha(RedlineColor, layerAlpha);
+                _scratchPen.Width = 3f;
+                g.DrawEllipse(_scratchPen, RectangleF.Inflate(dialRect, grow, grow));
+            }
+        }
+
+        // Soft red glow that traces the shape of the number itself (many faint offset copies of
+        // the same string), used for the rev-limiter cut effect on the total score — drawn
+        // underneath the crisp score text.
+        private void DrawRevCutTextGlow(Graphics g, string text, Font font, float x, float y)
+        {
+            double glowStrength = GetRevCutGlowIntensity();
+            if (glowStrength <= 0.01 || string.IsNullOrEmpty(text)) return;
+
+            const int radius = 5;
+            _scratchBrush.Color = WithAlpha(Color.FromArgb(255, 40, 40), glowStrength * 0.05);
+            for (int ox = -radius; ox <= radius; ox++)
+            {
+                for (int oy = -radius; oy <= radius; oy++)
+                {
+                    if (ox == 0 && oy == 0) continue;
+                    if (Math.Sqrt(ox * ox + oy * oy) > radius) continue;
+                    g.DrawString(text, font, _scratchBrush, x + ox, y + oy);
+                }
             }
         }
 

@@ -365,11 +365,147 @@ namespace LFSDriftBuddy
                 },
                 ["speedometer.preview"] = new()
                 {
-                    [AppLanguage.English] = "Live preview",
-                    [AppLanguage.Polish] = "Podgląd na żywo",
-                    [AppLanguage.Turkish] = "Canlı önizleme",
-                    [AppLanguage.German] = "Live-Vorschau",
-                    [AppLanguage.Spanish] = "Vista previa en vivo",
+                    [AppLanguage.English] = "Preview",
+                    [AppLanguage.Polish] = "Podgląd",
+                    [AppLanguage.Turkish] = "Canlı",
+                    [AppLanguage.German] = "Vorschau",
+                    [AppLanguage.Spanish] = "Vista previa",
+                },
+                ["speedometer.preset.label"] = new()
+                {
+                    [AppLanguage.English] = "PRESET {0}",
+                    [AppLanguage.Polish] = "PRESET {0}",
+                    [AppLanguage.Turkish] = "PRESET {0}",
+                    [AppLanguage.German] = "PRESET {0}",
+                    [AppLanguage.Spanish] = "AJUSTE {0}",
+                },
+                ["speedometer.preset.reset"] = new()
+                {
+                    [AppLanguage.English] = "Reset Preset",
+                    [AppLanguage.Polish] = "Resetuj preset",
+                    [AppLanguage.Turkish] = "Ön Ayarı Sıfırla",
+                    [AppLanguage.German] = "Preset zurücksetzen",
+                    [AppLanguage.Spanish] = "Restablecer ajuste",
+                },
+                ["speedometer.background.button"] = new()
+                {
+                    [AppLanguage.English] = "Background",
+                    [AppLanguage.Polish] = "Tło",
+                    [AppLanguage.Turkish] = "Arka Plan",
+                    [AppLanguage.German] = "Hintergrund",
+                    [AppLanguage.Spanish] = "Fondo",
+                },
+                ["speedometer.background.title"] = new()
+                {
+                    [AppLanguage.English] = "Speedometer Background",
+                    [AppLanguage.Polish] = "Tło prędkościomierza",
+                    [AppLanguage.Turkish] = "Hız Göstergesi Arka Planı",
+                    [AppLanguage.German] = "Tacho-Hintergrund",
+                    [AppLanguage.Spanish] = "Fondo del velocímetro",
+                },
+                ["speedometer.background.subtitle"] = new()
+                {
+                    [AppLanguage.English] = "Import a PNG, drag to reposition and scroll to zoom, then pick the framing shown inside the circle.",
+                    [AppLanguage.Polish] = "Zaimportuj PNG, przeciągnij aby przesunąć i użyj scrolla aby przybliżyć, wybierz kadr widoczny w kole.",
+                    [AppLanguage.Turkish] = "Bir PNG içe aktarın, konumlandırmak için sürükleyin ve yakınlaştırmak için kaydırın; çember içinde görünen kadrajı seçin.",
+                    [AppLanguage.German] = "Importiere ein PNG, ziehe es zum Verschieben und scrolle zum Zoomen, wähle den im Kreis sichtbaren Ausschnitt.",
+                    [AppLanguage.Spanish] = "Importa un PNG, arrastra para reposicionar y usa el scroll para hacer zoom; elige el encuadre visible dentro del círculo.",
+                },
+                ["speedometer.background.zoom"] = new()
+                {
+                    [AppLanguage.English] = "Zoom",
+                    [AppLanguage.Polish] = "Przybliżenie",
+                    [AppLanguage.Turkish] = "Yakınlaştırma",
+                    [AppLanguage.German] = "Zoom",
+                    [AppLanguage.Spanish] = "Zoom",
+                },
+                ["speedometer.background.opacity"] = new()
+                {
+                    [AppLanguage.English] = "Opacity",
+                    [AppLanguage.Polish] = "Przezroczystość",
+                    [AppLanguage.Turkish] = "Opaklık",
+                    [AppLanguage.German] = "Deckkraft",
+                    [AppLanguage.Spanish] = "Opacidad",
+                },
+                ["speedometer.background.import"] = new()
+                {
+                    [AppLanguage.English] = "Import PNG",
+                    [AppLanguage.Polish] = "Importuj PNG",
+                    [AppLanguage.Turkish] = "PNG İçe Aktar",
+                    [AppLanguage.German] = "PNG importieren",
+                    [AppLanguage.Spanish] = "Importar PNG",
+                },
+                ["speedometer.background.remove"] = new()
+                {
+                    [AppLanguage.English] = "Remove Image",
+                    [AppLanguage.Polish] = "Usuń obraz",
+                    [AppLanguage.Turkish] = "Görseli Kaldır",
+                    [AppLanguage.German] = "Bild entfernen",
+                    [AppLanguage.Spanish] = "Quitar imagen",
+                },
+                ["speedometer.elements.button"] = new()
+                {
+                    [AppLanguage.English] = "UI Elements",
+                    [AppLanguage.Polish] = "Elementy UI",
+                    [AppLanguage.Turkish] = "Arayüz Öğeleri",
+                    [AppLanguage.German] = "UI-Elemente",
+                    [AppLanguage.Spanish] = "Elementos de la UI",
+                },
+                ["speedometer.elements.title"] = new()
+                {
+                    [AppLanguage.English] = "Speedometer UI Elements",
+                    [AppLanguage.Polish] = "Elementy UI prędkościomierza",
+                    [AppLanguage.Turkish] = "Hız Göstergesi Arayüz Öğeleri",
+                    [AppLanguage.German] = "Tacho-UI-Elemente",
+                    [AppLanguage.Spanish] = "Elementos de la UI del velocímetro",
+                },
+                ["speedometer.elements.subtitle"] = new()
+                {
+                    [AppLanguage.English] = "Show or hide individual parts of the gauge.",
+                    [AppLanguage.Polish] = "Pokaż lub ukryj poszczególne elementy zegara.",
+                    [AppLanguage.Turkish] = "Göstergenin ayrı ayrı bölümlerini gösterin veya gizleyin.",
+                    [AppLanguage.German] = "Einzelne Teile der Anzeige ein- oder ausblenden.",
+                    [AppLanguage.Spanish] = "Muestra u oculta partes individuales del indicador.",
+                },
+                ["speedometer.elements.rpmdigits"] = new()
+                {
+                    [AppLanguage.English] = "RPM digits",
+                    [AppLanguage.Polish] = "Cyfry obrotów",
+                    [AppLanguage.Turkish] = "Devir rakamları",
+                    [AppLanguage.German] = "Drehzahlziffern",
+                    [AppLanguage.Spanish] = "Dígitos de RPM",
+                },
+                ["speedometer.elements.unit"] = new()
+                {
+                    [AppLanguage.English] = "Speed unit (km/h / mph)",
+                    [AppLanguage.Polish] = "Jednostka prędkości (km/h / mph)",
+                    [AppLanguage.Turkish] = "Hız birimi (km/sa / mph)",
+                    [AppLanguage.German] = "Geschwindigkeitseinheit (km/h / mph)",
+                    [AppLanguage.Spanish] = "Unidad de velocidad (km/h / mph)",
+                },
+                ["speedometer.elements.minorticks"] = new()
+                {
+                    [AppLanguage.English] = "Minor tick marks",
+                    [AppLanguage.Polish] = "Kreski mniejszych obrotów",
+                    [AppLanguage.Turkish] = "Küçük çizgiler",
+                    [AppLanguage.German] = "Kleine Skalenstriche",
+                    [AppLanguage.Spanish] = "Marcas menores",
+                },
+                ["speedometer.elements.majorticks"] = new()
+                {
+                    [AppLanguage.English] = "Major tick marks",
+                    [AppLanguage.Polish] = "Kreski większych obrotów",
+                    [AppLanguage.Turkish] = "Büyük çizgiler",
+                    [AppLanguage.German] = "Große Skalenstriche",
+                    [AppLanguage.Spanish] = "Marcas mayores",
+                },
+                ["speedometer.elements.redlinethickness"] = new()
+                {
+                    [AppLanguage.English] = "Redline thickness",
+                    [AppLanguage.Polish] = "Grubość redline",
+                    [AppLanguage.Turkish] = "Kırmızı çizgi kalınlığı",
+                    [AppLanguage.German] = "Rote-Linie-Dicke",
+                    [AppLanguage.Spanish] = "Grosor de la zona roja",
                 },
                 ["score.title"] = new()
                 {
@@ -564,6 +700,14 @@ namespace LFSDriftBuddy
                     [AppLanguage.German] = "Drift-Einstiegsschwelle",
                     [AppLanguage.Spanish] = "Umbral de entrada al derrape",
                 },
+                ["score.levels.angle_backward"] = new()
+                {
+                    [AppLanguage.English] = "Backward drift threshold",
+                    [AppLanguage.Polish] = "Próg driftu tyłem",
+                    [AppLanguage.Turkish] = "Geriye drift eşiği",
+                    [AppLanguage.German] = "Rückwärtsdrift-Schwelle",
+                    [AppLanguage.Spanish] = "Umbral de derrape hacia atrás",
+                },
                 ["score.levels.speed_header"] = new()
                 {
                     [AppLanguage.English] = "SPEED (KM/H)",
@@ -683,30 +827,6 @@ namespace LFSDriftBuddy
                     [AppLanguage.Turkish] = "YOK ETME",
                     [AppLanguage.German] = "VERNICHTUNG",
                     [AppLanguage.Spanish] = "DEMOLICIÓN",
-                },
-                ["derby.hittype.headon"] = new()
-                {
-                    [AppLanguage.English] = "HEAD-ON",
-                    [AppLanguage.Polish] = "CZOŁOWE",
-                    [AppLanguage.Turkish] = "KAFA KAFAYA",
-                    [AppLanguage.German] = "FRONTAL",
-                    [AppLanguage.Spanish] = "FRONTAL",
-                },
-                ["derby.hittype.side"] = new()
-                {
-                    [AppLanguage.English] = "SIDE",
-                    [AppLanguage.Polish] = "BOCZNE",
-                    [AppLanguage.Turkish] = "YANDAN",
-                    [AppLanguage.German] = "SEITLICH",
-                    [AppLanguage.Spanish] = "LATERAL",
-                },
-                ["derby.hittype.rear"] = new()
-                {
-                    [AppLanguage.English] = "REAR",
-                    [AppLanguage.Polish] = "OD TYŁU",
-                    [AppLanguage.Turkish] = "ARKADAN",
-                    [AppLanguage.German] = "HECK",
-                    [AppLanguage.Spanish] = "TRASERO",
                 },
                 ["hud.title"] = new()
                 {
@@ -839,11 +959,11 @@ namespace LFSDriftBuddy
                 },
                 ["hud.livepreview"] = new()
                 {
-                    [AppLanguage.English] = "Live preview",
-                    [AppLanguage.Polish] = "Podgląd na żywo",
-                    [AppLanguage.Turkish] = "Canlı önizleme",
-                    [AppLanguage.German] = "Live-Vorschau",
-                    [AppLanguage.Spanish] = "Vista previa en vivo",
+                    [AppLanguage.English] = "Preview",
+                    [AppLanguage.Polish] = "Podgląd",
+                    [AppLanguage.Turkish] = "Canlı",
+                    [AppLanguage.German] = "Vorschau",
+                    [AppLanguage.Spanish] = "Vista previa",
                 },
                 ["rev.title"] = new()
                 {
@@ -1913,6 +2033,22 @@ namespace LFSDriftBuddy
                     [AppLanguage.Turkish] = "{0} SIYIRMA! +{1}",
                     [AppLanguage.German] = "{0} STREIFER! +{1}",
                     [AppLanguage.Spanish] = "{0} ¡ROCE! +{1}",
+                },
+                ["collision.car_kiss"] = new()
+                {
+                    [AppLanguage.English] = "{0} KISS! +{1}",
+                    [AppLanguage.Polish] = "{0} MUŚNIĘCIE! +{1}",
+                    [AppLanguage.Turkish] = "{0} SIYIRMA! +{1}",
+                    [AppLanguage.German] = "{0} STREIFER! +{1}",
+                    [AppLanguage.Spanish] = "{0} ¡ROCE! +{1}",
+                },
+                ["collision.car_penalty"] = new()
+                {
+                    [AppLanguage.English] = "{0} {1}! -{2}",
+                    [AppLanguage.Polish] = "{0} {1}! -{2}",
+                    [AppLanguage.Turkish] = "{0} {1}! -{2}",
+                    [AppLanguage.German] = "{0} {1}! -{2}",
+                    [AppLanguage.Spanish] = "{0} ¡{1}! -{2}",
                 },
                 ["indicators.sound_error"] = new()
                 {

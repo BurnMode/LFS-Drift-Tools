@@ -197,7 +197,7 @@ public class SteeringWheelInput : IDisposable
         Log?.Invoke($"{text}{axis}");
     }
 
-    private static bool IsXInputPad(string productName) =>
+    public static bool IsXInputPad(string productName) =>
        productName.IndexOf("XBOX", StringComparison.OrdinalIgnoreCase) >= 0 ||
        productName.IndexOf("XInput", StringComparison.OrdinalIgnoreCase) >= 0 ||
        productName.IndexOf("Controller (X", StringComparison.OrdinalIgnoreCase) >= 0;
