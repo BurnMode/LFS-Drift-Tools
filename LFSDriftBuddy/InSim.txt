@@ -1,9 +1,0 @@
-InSim allows communication between up to 8 external programs and LFS
-
-To initialise the InSim system, type into LFS: /insim xxxxx
-or start LFS with the command line option: LFS /insim=xxxxx
-where xxxxx is the port for LFS to open (e.g. 29999)
-
-Documentation: https://www.lfs.net/programmer
-
-Programmer forum: https://www.lfs.net/forum/9

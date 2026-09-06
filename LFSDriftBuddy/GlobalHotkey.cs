@@ -26,7 +26,6 @@ public class GlobalHotkey : IDisposable
     private LowLevelKeyboardProc proc;
     private IntPtr hook;
 
-    // Takes (key, callback) pairs, e.g. new GlobalHotkey((Keys.K, () => Foo())).
     public GlobalHotkey(params (Keys key, Action callback)[] bindings)
     {
         foreach (var b in bindings)
@@ -109,18 +108,19 @@ public class GlobalHotkey : IDisposable
     static extern IntPtr CallNextHookEx(IntPtr hhk, int nCode, IntPtr wParam, IntPtr lParam);
 
     [DllImport("kernel32.dll")]
-    static extern IntPtr GetModuleHandle(string lpModuleName);
+    static extern IntPtr GetModuleHandle(string? lpModuleName);
 
     private static IntPtr SetHook(LowLevelKeyboardProc proc)
     {
-        using (Process curProcess = Process.GetCurrentProcess())
-        using (ProcessModule curModule = curProcess.MainModule)
-        {
-            return SetWindowsHookEx(
-                WH_KEYBOARD_LL,
-                proc,
-                GetModuleHandle(curModule.ModuleName),
-                0);
-        }
+        using Process curProcess = Process.GetCurrentProcess();
+        using ProcessModule? curModule = curProcess.MainModule;
+
+        // MainModule can be null (missing permissions, etc.) — GetModuleHandle(null) is a valid
+        // Win32 call in that case too: it just returns a handle to the calling process's own exe.
+        return SetWindowsHookEx(
+            WH_KEYBOARD_LL,
+            proc,
+            GetModuleHandle(curModule?.ModuleName),
+            0);
     }
 }

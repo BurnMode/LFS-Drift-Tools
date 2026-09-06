@@ -6,9 +6,7 @@ using System.Windows.Forms;
 
 namespace LFSDriftBuddy
 {
-    /// <summary>Manages turn signals (left/right/hazard): key handling, bindings,
-    /// auto-cancel, and sending commands to LFS.</summary>
-    public class IndicatorManager : IDisposable
+        public class IndicatorManager : IDisposable
     {
         public enum IndicatorState { Off, Left, Right, Hazard }
         public IndicatorState CurrentState { get; private set; } = IndicatorState.Off;
@@ -17,14 +15,26 @@ namespace LFSDriftBuddy
         public int RightKeyCode { get; set; } = (int)Keys.D8;
         public int HazardKeyCode { get; set; } = (int)Keys.D9;
 
-        // Bound wheel buttons (null = unbound).
         public int? LeftWheelButton { get; set; } = null;
         public int? RightWheelButton { get; set; } = null;
         public int? HazardWheelButton { get; set; } = null;
 
         public bool AutoReturnEnabled { get; set; } = true;
         private DateTime _lastIndicatorChangeTime = DateTime.UtcNow;
-        private const double INDICATOR_TIMEOUT_SEC = 160.0;   // auto-off after this many seconds
+        private const double INDICATOR_TIMEOUT_SEC = 160.0;
+
+        private bool _enabled = true;
+        public bool Enabled
+        {
+            get => _enabled;
+            set
+            {
+                if (_enabled == value) return;
+                _enabled = value;
+                if (!_enabled && CurrentState != IndicatorState.Off)
+                    SetState(IndicatorState.Off);
+            }
+        }
 
         [DllImport("user32.dll", SetLastError = true)]
         private static extern IntPtr FindWindow(string? lpClassName, string lpWindowName);
@@ -35,33 +45,23 @@ namespace LFSDriftBuddy
         private const uint WM_KEYDOWN = 0x0100;
         private const uint WM_KEYUP = 0x0101;
 
-        // LFS's own default indicator key codes.
-        private const int VK_7 = 0x37;  // Left
-        private const int VK_8 = 0x38;  // Right
-        private const int VK_9 = 0x39;  // Hazard
-        private const int VK_0 = 0x30;  // Off
+        private const int VK_7 = 0x37;
+        private const int VK_8 = 0x38;
+        private const int VK_9 = 0x39;
+        private const int VK_0 = 0x30;
 
         public event Action<IndicatorState>? StateChanged;
 
-        // Real lamp state from OutGauge (ShowLights) — the dashboard's own truth, which can
-        // differ from CurrentState (our toggle intent), e.g. if LFS cancels it itself. Sounds
-        // (click/cancel) should sync to THIS, not CurrentState.
         public bool LeftLampOn { get; private set; } = false;
         public bool RightLampOn { get; private set; } = false;
 
-        // Some cars only expose the combined DL_SIGNAL_ANY bit, not separate L/R bits —
-        // without this, those cars would never show a detected lamp even while blinking.
         public bool AnySignalLampOn { get; private set; } = false;
 
         public bool AnyLampOn => LeftLampOn || RightLampOn || AnySignalLampOn;
 
-        /// <summary>Fires only on an actual lamp state change (on/off) from OutGauge — the only
-        /// correct source for syncing indicator_click_on/off.wav.</summary>
-        public event Action<bool>? LampStateChanged;
+                public event Action<bool>? LampStateChanged;
 
-        /// <summary>Called on every OutGauge packet — updates real lamp state and fires
-        /// LampStateChanged only on an actual change, not every UDP packet.</summary>
-        public void UpdateFromOutGauge(bool leftOn, bool rightOn, bool anyOn)
+                public void UpdateFromOutGauge(bool leftOn, bool rightOn, bool anyOn)
         {
             bool wasOn = AnyLampOn;
 
@@ -104,6 +104,7 @@ namespace LFSDriftBuddy
 
         public void ToggleLeft()
         {
+            if (!Enabled) return;
             if (CurrentState == IndicatorState.Left)
                 SetState(IndicatorState.Off);
             else if (CurrentState != IndicatorState.Hazard)
@@ -112,6 +113,7 @@ namespace LFSDriftBuddy
 
         public void ToggleRight()
         {
+            if (!Enabled) return;
             if (CurrentState == IndicatorState.Right)
                 SetState(IndicatorState.Off);
             else if (CurrentState != IndicatorState.Hazard)
@@ -120,6 +122,7 @@ namespace LFSDriftBuddy
 
         public void ToggleHazard()
         {
+            if (!Enabled) return;
             if (CurrentState == IndicatorState.Hazard)
                 SetState(IndicatorState.Off);
             else
@@ -170,8 +173,7 @@ namespace LFSDriftBuddy
             return IntPtr.Zero;
         }
 
-        /// <summary>Call every telemetry tick — auto-cancels after INDICATOR_TIMEOUT_SEC.</summary>
-        public void Update()
+                public void Update()
         {
             if (!AutoReturnEnabled || CurrentState == IndicatorState.Off) return;
 
@@ -198,8 +200,7 @@ namespace LFSDriftBuddy
         }
     }
 
-    /// <summary>System-wide low-level keyboard hook.</summary>
-    public class LowLevelKeyboardHook : IDisposable
+        public class LowLevelKeyboardHook : IDisposable
     {
         private const int WH_KEYBOARD_LL = 13;
         private const int WM_KEYDOWN = 0x0100;
@@ -222,7 +223,7 @@ namespace LFSDriftBuddy
         private static extern IntPtr CallNextHookEx(IntPtr hhk, int nCode, IntPtr wParam, IntPtr lParam);
 
         [DllImport("kernel32.dll", CharSet = CharSet.Auto, SetLastError = true)]
-        private static extern IntPtr GetModuleHandle(string lpModuleName);
+        private static extern IntPtr GetModuleHandle(string? lpModuleName);
 
         [StructLayout(LayoutKind.Sequential)]
         private struct KBDLLHOOKSTRUCT
@@ -242,12 +243,11 @@ namespace LFSDriftBuddy
 
         private IntPtr SetupHook()
         {
-            using (Process curProcess = Process.GetCurrentProcess())
-            using (ProcessModule curModule = curProcess.MainModule)
-            {
-                return SetWindowsHookEx(WH_KEYBOARD_LL, _hookProc,
-                    GetModuleHandle(curModule.ModuleName), 0);
-            }
+            using Process curProcess = Process.GetCurrentProcess();
+            using ProcessModule? curModule = curProcess.MainModule;
+
+            return SetWindowsHookEx(WH_KEYBOARD_LL, _hookProc,
+                GetModuleHandle(curModule?.ModuleName), 0);
         }
 
         private IntPtr HookCallback(int nCode, IntPtr wParam, IntPtr lParam)

@@ -6,19 +6,19 @@ using static LFSDriftBuddy.DriftEngine;
 
 namespace LFSDriftBuddy
 {
-    // In-game IS_BTN HUD: score, run points, combo, drift label, indicator flash text, RPM limiter readout.
+
     public class InGameHudManager : IDisposable
     {
-        private const byte BTN_SCORE = 1;   // total score top-center
-        private const byte BTN_RUN = 2;   // current run points
-        private const byte BTN_COMBO = 3;   // combo multiplier
-        private const byte BTN_LABEL = 4;   // drift label text
-        private const byte BTN_AWARD = 5;   // flash on drift end
-        private const byte BTN_RIGHTIND = 6;   // right indicator flash
-        private const byte BTN_LEFTIND = 7;   // left indicator flash
-        private const byte BTN_RPMLIMIT = 8;   // rev limiter value
-        private const byte BTN_RPMLIMITSTATUS = 9;   // rev limiter status
-        private const byte BTN_RPMLIMITINFO = 10;   // rev limiter info
+        private const byte BTN_SCORE = 1;
+        private const byte BTN_RUN = 2;
+        private const byte BTN_COMBO = 3;
+        private const byte BTN_LABEL = 4;
+        private const byte BTN_AWARD = 5;
+        private const byte BTN_RIGHTIND = 6;
+        private const byte BTN_LEFTIND = 7;
+        private const byte BTN_RPMLIMIT = 8;
+        private const byte BTN_RPMLIMITSTATUS = 9;
+        private const byte BTN_RPMLIMITINFO = 10;
 
         private const byte xPos = 108;
         private const byte xPosSec = 80;
@@ -27,24 +27,18 @@ namespace LFSDriftBuddy
         private readonly InSimConnection _insim;
         private readonly DriftEngine _drift;
         private readonly RevLimiter _revLimiter;
-        private readonly MacCheckBox _showHudCheck;
-        private readonly MacCheckBox _showRpmHudCheck;
-        private readonly NumericUpDown _revLimiterNumeric;
+        private readonly MacToggleSwitch _showHudCheck;
+        private readonly MacToggleSwitch _showRpmHudCheck;
+        private readonly MinimalNumericUpDown _revLimiterNumeric;
         private readonly Label _angleValueLabel;
 
         private readonly System.Windows.Forms.Timer _awardTimer;
         private int _awardTick;
         private string _colorCurrentMain = "^7";
 
-        // Grace period that suppresses HUD flicker: "active" is computed raw per telemetry frame,
-        // so a single noisy frame near a threshold (e.g. MIN_DRIFT_ANGLE_DEG) would clear these
-        // buttons and resend them a moment later. Shorter than DriftEngine.COMBO_TIMEOUT_SEC on
-        // purpose — this is just frame-noise suppression, not combo UX.
         private const int ActiveGraceMs = 450;
         private DateTime _lastActiveUtc = DateTime.MinValue;
 
-        // Cache of the last sent state per button — skips resending unchanged text/position/style.
-        // Without it, UpdateInGameHUD() (called every telemetry tick) would flood InSim.
         private readonly Dictionary<byte, string> _lastSent = new();
 
         private void Send(byte id, string text, byte l, byte t, byte w, byte h, byte bStyle)
@@ -57,18 +51,28 @@ namespace LFSDriftBuddy
             _insim.ShowButton(id, text, l: l, t: t, w: w, h: h, bStyle: bStyle);
         }
 
-        // Call after _insim.DeleteAllButtons() — otherwise the cache thinks unchanged buttons are
-        // still on the server and skips resending them after they were actually cleared.
         public void InvalidateCache() => _lastSent.Clear();
 
-        // Updated by MainForm whenever the InSim color palette changes.
         public string InSimColor1 = "^7";
         public string InSimColor2 = "^6";
         public string InSimColor3 = "^3";
         public string InSimColor4 = "^5";
         public string InSimColor5 = "^1";
 
-        // Pushed by MainForm before every UpdateInGameHUD call (see OnDriftScored).
+        public string InSimColor6 = "^2";
+
+        private string InSimColorForTier(int tier) => tier switch
+        {
+            2 => InSimColor2,
+            3 => InSimColor3,
+            4 => InSimColor4,
+            5 => InSimColor5,
+            6 => InSimColor6,
+            _ => InSimColor1,
+        };
+
+        public string InSimColorIdle = "^7";
+
         public string DriftLabel = "";
         public string IndicatorLabelRight = "";
         public string IndicatorLabelLeft = "";
@@ -78,9 +82,9 @@ namespace LFSDriftBuddy
             InSimConnection insim,
             DriftEngine drift,
             RevLimiter revLimiter,
-            MacCheckBox showHudCheck,
-            MacCheckBox showRpmHudCheck,
-            NumericUpDown revLimiterNumeric,
+            MacToggleSwitch showHudCheck,
+            MacToggleSwitch showRpmHudCheck,
+            MinimalNumericUpDown revLimiterNumeric,
             Label angleValueLabel)
         {
             _insim = insim;
@@ -99,7 +103,7 @@ namespace LFSDriftBuddy
         {
             if (_showHudCheck.Checked)
             {
-                Send(BTN_SCORE, InSimColor1 + _drift.TotalScore.ToString("N0") + InSimColor1,
+                Send(BTN_SCORE, InSimColorIdle + _drift.TotalScore.ToString("N0") + InSimColorIdle,
                     l: 70, t: 3, w: 60, h: 15, bStyle: 5);
             }
             ShowInGameRPMLimitter(_revLimiterNumeric.Value.ToString());
@@ -114,40 +118,17 @@ namespace LFSDriftBuddy
             bool activeNow = _drift.IsDrifting || _drift.IsSpeeding || _drift.IsBurnout;
             if (activeNow) _lastActiveUtc = DateTime.UtcNow;
 
-            // See ActiveGraceMs — don't drop to idle on a single quiet frame right after activity.
             bool active = activeNow || (DateTime.UtcNow - _lastActiveUtc).TotalMilliseconds < ActiveGraceMs;
 
-            // Total score stays visible whenever the HUD is on, active or not — the idle
-            // branch below used to also clear BTN_SCORE, making it disappear outside drifts.
             if (_showHudCheck.Checked && !active)
             {
-                Send(BTN_SCORE, $"{InSimColor1}{_drift.TotalScore:N0}{InSimColor1}",
+                Send(BTN_SCORE, $"{InSimColorIdle}{_drift.TotalScore:N0}{InSimColorIdle}",
                     l: 70, t: 3, w: 60, h: 15, bStyle: 5);
             }
 
             if (active)
             {
-                string angleCol = CurrentLabelKind switch
-                {
-                    DriftLabelKind.AngleHigh => InSimColor3,
-                    DriftLabelKind.AngleExtreme => InSimColor4,
-                    DriftLabelKind.AngleBackward => InSimColor3,
-                    DriftLabelKind.AngleUltraExtreme => InSimColor5,
-                    DriftLabelKind.AngleHighE => InSimColor3,
-                    DriftLabelKind.AngleExtremeE => InSimColor4,
-                    DriftLabelKind.AngleBackwardE => InSimColor3,
-                    DriftLabelKind.AngleUltraExtremeE => InSimColor5,
-                    DriftLabelKind.Fast2 => InSimColor3,
-                    DriftLabelKind.Fast3 => InSimColor4,
-                    DriftLabelKind.AngleGood => InSimColor2,
-                    DriftLabelKind.AngleGoodE => InSimColor2,
-                    DriftLabelKind.Fast1 => InSimColor2,
-                    DriftLabelKind.BurnoutGood => InSimColor2,
-                    DriftLabelKind.BurnoutHigh => InSimColor3,
-                    DriftLabelKind.BurnoutExtreme => InSimColor4,
-                    DriftLabelKind.BurnoutInsane => InSimColor5,
-                    _ => InSimColor1,
-                };
+                string angleCol = InSimColorForTier(DriftEngine.GetColorTier(CurrentLabelKind));
 
                 _colorCurrentMain = angleCol;
 
@@ -209,8 +190,6 @@ namespace LFSDriftBuddy
                 return;
             }
 
-            // Always shows exactly the passed text; color matches the drift-label color only
-            // when it equals DriftEngine's current award text, a fixed color otherwise.
             if (string.IsNullOrEmpty(text))
             {
                 Send(BTN_AWARD, "", l: 60, t: 22, w: 80, h: 6, bStyle: 5);
@@ -227,7 +206,7 @@ namespace LFSDriftBuddy
 
             if (_showRpmHudCheck.Checked && _revLimiter.Enabled)
             {
-                Send(BTN_RPMLIMIT, "^6RPM LIMIT: " + text, l: 0, t: 196, w: 25, h: 5, bStyle: 65);
+                Send(BTN_RPMLIMIT, "^6" + Localization.T("rev.limit") + text, l: 0, t: 196, w: 25, h: 5, bStyle: 65);
             }
             else
             {
@@ -237,7 +216,6 @@ namespace LFSDriftBuddy
             }
         }
 
-        // Called when a drift ends — shows the award, then hides it after a moment (see AwardTimer_Tick).
         public void StartAwardFlash()
         {
             _awardTick = 0;

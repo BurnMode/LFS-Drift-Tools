@@ -34,7 +34,6 @@ namespace LFSDriftBuddy
                 translations.TryGetValue(CurrentLanguage, out var value))
                 return value;
 
-            // fallback: angielski, potem sam klucz
             if (_strings.TryGetValue(key, out var t2) && t2.TryGetValue(AppLanguage.English, out var en))
                 return en;
 
@@ -46,11 +45,11 @@ namespace LFSDriftBuddy
             {
                 ["header.title"] = new()
                 {
-                    [AppLanguage.English] = "Live For Speed - Drift Tools",
-                    [AppLanguage.Polish] = "Live For Speed - Drift Tools",
-                    [AppLanguage.Turkish] = "Live For Speed - Drift Tools",
-                    [AppLanguage.German] = "Live For Speed - Drift Tools",
-                    [AppLanguage.Spanish] = "Live For Speed - Drift Tools",
+                    [AppLanguage.English] = "General",
+                    [AppLanguage.Polish] = "Ogólne",
+                    [AppLanguage.Turkish] = "Genel",
+                    [AppLanguage.German] = "Allgemein",
+                    [AppLanguage.Spanish] = "General",
                 },
                 ["header.colors"] = new()
                 {
@@ -62,51 +61,203 @@ namespace LFSDriftBuddy
                 },
                 ["header.theme"] = new()
                 {
-                    [AppLanguage.English] = "THEME",
-                    [AppLanguage.Polish] = "MOTYW",
-                    [AppLanguage.Turkish] = "TEMA",
-                    [AppLanguage.German] = "DESIGN",
-                    [AppLanguage.Spanish] = "TEMA",
+                    [AppLanguage.English] = "Dark mode",
+                    [AppLanguage.Polish] = "Czarny motyw",
+                    [AppLanguage.Turkish] = "Karanlık mod",
+                    [AppLanguage.German] = "Dunkler Modus",
+                    [AppLanguage.Spanish] = "Modo oscuro",
                 },
                 ["header.language"] = new()
                 {
-                    [AppLanguage.English] = "LANGUAGE",
-                    [AppLanguage.Polish] = "JĘZYK",
-                    [AppLanguage.Turkish] = "DİL",
-                    [AppLanguage.German] = "SPRACHE",
-                    [AppLanguage.Spanish] = "IDIOMA",
+                    [AppLanguage.English] = "Language",
+                    [AppLanguage.Polish] = "Język",
+                    [AppLanguage.Turkish] = "Dil",
+                    [AppLanguage.German] = "Sprache",
+                    [AppLanguage.Spanish] = "Idioma",
+                },
+                ["header.appversion"] = new()
+                {
+                    [AppLanguage.English] = "App Version",
+                    [AppLanguage.Polish] = "Wersja aplikacji",
+                    [AppLanguage.Turkish] = "Uygulama Sürümü",
+                    [AppLanguage.German] = "App-Version",
+                    [AppLanguage.Spanish] = "Versión de la app",
                 },
                 ["status.disconnected"] = new()
                 {
-                    [AppLanguage.English] = "⬤  Disconnected",
-                    [AppLanguage.Polish] = "⬤  Rozłączono",
-                    [AppLanguage.Turkish] = "⬤  Bağlantı Kesildi",
-                    [AppLanguage.German] = "⬤  Getrennt",
-                    [AppLanguage.Spanish] = "⬤  Desconectado",
+                    [AppLanguage.English] = "⬤  Disconnected InSim",
+                    [AppLanguage.Polish] = "⬤  Rozłączono InSim",
+                    [AppLanguage.Turkish] = "⬤  InSim Bağlantısı Kesildi",
+                    [AppLanguage.German] = "⬤  InSim getrennt",
+                    [AppLanguage.Spanish] = "⬤  InSim desconectado",
                 },
                 ["status.connected"] = new()
                 {
-                    [AppLanguage.English] = "⬤  Connected with LFS",
-                    [AppLanguage.Polish] = "⬤  Połączono z LFS",
-                    [AppLanguage.Turkish] = "⬤  LFS ile Bağlandı",
-                    [AppLanguage.German] = "⬤  Mit LFS verbunden",
-                    [AppLanguage.Spanish] = "⬤  Conectado con LFS",
+                    [AppLanguage.English] = "⬤  Connected InSim",
+                    [AppLanguage.Polish] = "⬤  Połączono InSim",
+                    [AppLanguage.Turkish] = "⬤  InSim Bağlandı",
+                    [AppLanguage.German] = "⬤  InSim verbunden",
+                    [AppLanguage.Spanish] = "⬤  InSim conectado",
+                },
+                ["status.outgauge.disconnected"] = new()
+                {
+                    [AppLanguage.English] = "⬤  Disconnected OutGauge",
+                    [AppLanguage.Polish] = "⬤  Rozłączono OutGauge",
+                    [AppLanguage.Turkish] = "⬤  OutGauge Bağlantısı Kesildi",
+                    [AppLanguage.German] = "⬤  OutGauge getrennt",
+                    [AppLanguage.Spanish] = "⬤  OutGauge desconectado",
+                },
+                ["status.outgauge.connected"] = new()
+                {
+                    [AppLanguage.English] = "⬤  Connected OutGauge",
+                    [AppLanguage.Polish] = "⬤  Połączono OutGauge",
+                    [AppLanguage.Turkish] = "⬤  OutGauge Bağlandı",
+                    [AppLanguage.German] = "⬤  OutGauge verbunden",
+                    [AppLanguage.Spanish] = "⬤  OutGauge conectado",
                 },
                 ["status.hint"] = new()
                 {
                     [AppLanguage.English] = "Type /insim 29999 in LFS, and click CONNECT.",
-                    [AppLanguage.Polish] = "Wpisz /insim 29999 w LFS, i kliknij CONNECT.",
+                    [AppLanguage.Polish] = "Wpisz /insim 29999 w LFS i kliknij CONNECT.",
                     [AppLanguage.Turkish] = "LFS içinde /insim 29999 yazın ve CONNECT'e tıklayın.",
                     [AppLanguage.German] = "Gib /insim 29999 in LFS ein und klicke auf CONNECT.",
                     [AppLanguage.Spanish] = "Escribe /insim 29999 en LFS y haz clic en CONNECT.",
                 },
+                ["status.insim.connect_timeout"] = new()
+                {
+                    [AppLanguage.English] = "Failed to connect to {0}:{1} — timed out ({2}s).",
+                    [AppLanguage.Polish] = "Nie udało się połączyć z {0}:{1} — przekroczono limit czasu ({2}s).",
+                    [AppLanguage.Turkish] = "{0}:{1} adresine bağlanılamadı — zaman aşımı ({2}s).",
+                    [AppLanguage.German] = "Verbindung zu {0}:{1} fehlgeschlagen — Zeitüberschreitung ({2}s).",
+                    [AppLanguage.Spanish] = "No se pudo conectar a {0}:{1} — tiempo de espera agotado ({2}s).",
+                },
+                ["status.insim.connect_error"] = new()
+                {
+                    [AppLanguage.English] = "Connection error: {0}",
+                    [AppLanguage.Polish] = "Błąd połączenia: {0}",
+                    [AppLanguage.Turkish] = "Bağlantı hatası: {0}",
+                    [AppLanguage.German] = "Verbindungsfehler: {0}",
+                    [AppLanguage.Spanish] = "Error de conexión: {0}",
+                },
+                ["status.insim.connected"] = new()
+                {
+                    [AppLanguage.English] = "Connected to LFS on {0}:{1}",
+                    [AppLanguage.Polish] = "Połączono z LFS na {0}:{1}",
+                    [AppLanguage.Turkish] = "LFS'e {0}:{1} üzerinden bağlanıldı",
+                    [AppLanguage.German] = "Mit LFS verbunden auf {0}:{1}",
+                    [AppLanguage.Spanish] = "Conectado a LFS en {0}:{1}",
+                },
+                ["status.insim.disconnected"] = new()
+                {
+                    [AppLanguage.English] = "Disconnected.",
+                    [AppLanguage.Polish] = "Rozłączono.",
+                    [AppLanguage.Turkish] = "Bağlantı kesildi.",
+                    [AppLanguage.German] = "Getrennt.",
+                    [AppLanguage.Spanish] = "Desconectado.",
+                },
+                ["status.insim.send_error"] = new()
+                {
+                    [AppLanguage.English] = "Send error: {0}",
+                    [AppLanguage.Polish] = "Błąd wysyłania: {0}",
+                    [AppLanguage.Turkish] = "Gönderme hatası: {0}",
+                    [AppLanguage.German] = "Sendefehler: {0}",
+                    [AppLanguage.Spanish] = "Error al enviar: {0}",
+                },
+                ["status.insim.receive_error"] = new()
+                {
+                    [AppLanguage.English] = "Receive error: {0}",
+                    [AppLanguage.Polish] = "Błąd odbioru: {0}",
+                    [AppLanguage.Turkish] = "Alma hatası: {0}",
+                    [AppLanguage.German] = "Empfangsfehler: {0}",
+                    [AppLanguage.Spanish] = "Error al recibir: {0}",
+                },
+                ["status.insim.axi_no_layout"] = new()
+                {
+                    [AppLanguage.English] = "InSim: no layout name reported (it may have been loaded by the host, not locally).",
+                    [AppLanguage.Polish] = "InSim: brak nazwy layoutu (mógł zostać wgrany przez hosta, nie lokalnie).",
+                    [AppLanguage.Turkish] = "InSim: layout adı bildirilmedi (host tarafından yüklenmiş olabilir, yerel olarak değil).",
+                    [AppLanguage.German] = "InSim: kein Layout-Name gemeldet (könnte vom Host geladen worden sein, nicht lokal).",
+                    [AppLanguage.Spanish] = "InSim: no se informó el nombre del layout (puede haberlo cargado el host, no localmente).",
+                },
+                ["status.insim.axi_layout_detected"] = new()
+                {
+                    [AppLanguage.English] = "InSim: detected layout '{0}'",
+                    [AppLanguage.Polish] = "InSim: wykryto layout '{0}'",
+                    [AppLanguage.Turkish] = "InSim: layout algılandı '{0}'",
+                    [AppLanguage.German] = "InSim: Layout erkannt '{0}'",
+                    [AppLanguage.Spanish] = "InSim: layout detectado '{0}'",
+                },
+                ["status.outgauge.udp_open_error"] = new()
+                {
+                    [AppLanguage.English] = "Could not open UDP {0}: {1}",
+                    [AppLanguage.Polish] = "Nie można otworzyć UDP {0}: {1}",
+                    [AppLanguage.Turkish] = "UDP {0} açılamadı: {1}",
+                    [AppLanguage.German] = "UDP {0} konnte nicht geöffnet werden: {1}",
+                    [AppLanguage.Spanish] = "No se pudo abrir UDP {0}: {1}",
+                },
+                ["status.outgauge.receive_error"] = new()
+                {
+                    [AppLanguage.English] = "OutGauge error: {0}",
+                    [AppLanguage.Polish] = "Błąd OutGauge: {0}",
+                    [AppLanguage.Turkish] = "OutGauge hatası: {0}",
+                    [AppLanguage.German] = "OutGauge-Fehler: {0}",
+                    [AppLanguage.Spanish] = "Error de OutGauge: {0}",
+                },
+                ["status.revlimiter.forced_restore"] = new()
+                {
+                    [AppLanguage.English] = "Rev limiter: forcing ignition back on ({0}) — engine got stuck off.",
+                    [AppLanguage.Polish] = "Rev limiter: wymuszam przywrócenie zapłonu ({0}) — silnik utknął zgaszony.",
+                    [AppLanguage.Turkish] = "Devir limiteri: kontak zorla açılıyor ({0}) — motor kapalı takıldı.",
+                    [AppLanguage.German] = "Drehzahlbegrenzer: erzwinge Zündung wieder ein ({0}) — Motor blieb aus.",
+                    [AppLanguage.Spanish] = "Limitador de revoluciones: forzando el encendido ({0}) — el motor se quedó apagado.",
+                },
+                ["status.revlimiter.no_window"] = new()
+                {
+                    [AppLanguage.English] = "LFS window not found (rev limiter)",
+                    [AppLanguage.Polish] = "Nie znaleziono okna LFS (rev limiter)",
+                    [AppLanguage.Turkish] = "LFS penceresi bulunamadı (devir limiteri)",
+                    [AppLanguage.German] = "LFS-Fenster nicht gefunden (Drehzahlbegrenzer)",
+                    [AppLanguage.Spanish] = "No se encontró la ventana de LFS (limitador de revoluciones)",
+                },
+                ["status.driver_load_error"] = new()
+                {
+                    [AppLanguage.English] = "Could not load save data for driver '{0}': {1}",
+                    [AppLanguage.Polish] = "Nie udało się wczytać zapisu kierowcy '{0}': {1}",
+                    [AppLanguage.Turkish] = "'{0}' sürücüsünün kayıt verisi yüklenemedi: {1}",
+                    [AppLanguage.German] = "Speicherdaten für Fahrer '{0}' konnten nicht geladen werden: {1}",
+                    [AppLanguage.Spanish] = "No se pudieron cargar los datos guardados del piloto '{0}': {1}",
+                },
+                ["status.driver_save_error"] = new()
+                {
+                    [AppLanguage.English] = "Could not save data for driver '{0}': {1}",
+                    [AppLanguage.Polish] = "Nie udało się zapisać danych kierowcy '{0}': {1}",
+                    [AppLanguage.Turkish] = "'{0}' sürücüsünün verisi kaydedilemedi: {1}",
+                    [AppLanguage.German] = "Daten für Fahrer '{0}' konnten nicht gespeichert werden: {1}",
+                    [AppLanguage.Spanish] = "No se pudieron guardar los datos del piloto '{0}': {1}",
+                },
                 ["connection.title"] = new()
                 {
-                    [AppLanguage.English] = "Connection",
-                    [AppLanguage.Polish] = "Połączenie",
-                    [AppLanguage.Turkish] = "Bağlantı",
-                    [AppLanguage.German] = "Verbindung",
-                    [AppLanguage.Spanish] = "Conexión",
+                    [AppLanguage.English] = "InSim Connection",
+                    [AppLanguage.Polish] = "Połączenie InSim",
+                    [AppLanguage.Turkish] = "InSim Bağlantısı",
+                    [AppLanguage.German] = "InSim-Verbindung",
+                    [AppLanguage.Spanish] = "Conexión InSim",
+                },
+                ["connection.outgauge.title"] = new()
+                {
+                    [AppLanguage.English] = "OutGauge Listening",
+                    [AppLanguage.Polish] = "Nasłuchiwanie OutGauge",
+                    [AppLanguage.Turkish] = "OutGauge Dinleme",
+                    [AppLanguage.German] = "OutGauge-Abhören",
+                    [AppLanguage.Spanish] = "Escucha de OutGauge",
+                },
+                ["connection.outgauge.subtitle"] = new()
+                {
+                    [AppLanguage.English] = "Listens locally for LFS's OutGauge broadcast (no host needed) — match the port to OutGauge Port in LFS cfg.txt.",
+                    [AppLanguage.Polish] = "Nasłuchuje lokalnie transmisji OutGauge z LFS (host nie jest potrzebny) — dopasuj port do OutGauge Port w cfg.txt LFS.",
+                    [AppLanguage.Turkish] = "LFS'in OutGauge yayınını yerel olarak dinler (host gerekmez) — portu LFS cfg.txt dosyasındaki OutGauge Port ile eşleştirin.",
+                    [AppLanguage.German] = "Empfängt lokal die OutGauge-Übertragung von LFS (kein Host nötig) — den Port an OutGauge Port in der LFS cfg.txt anpassen.",
+                    [AppLanguage.Spanish] = "Escucha localmente la transmisión OutGauge de LFS (no se necesita host); haz coincidir el puerto con OutGauge Port en cfg.txt de LFS.",
                 },
                 ["connection.status"] = new()
                 {
@@ -118,27 +269,27 @@ namespace LFSDriftBuddy
                 },
                 ["connection.host"] = new()
                 {
-                    [AppLanguage.English] = "Host:",
-                    [AppLanguage.Polish] = "Host:",
-                    [AppLanguage.Turkish] = "Host:",
-                    [AppLanguage.German] = "Host:",
-                    [AppLanguage.Spanish] = "Host:",
+                    [AppLanguage.English] = "Host",
+                    [AppLanguage.Polish] = "Host",
+                    [AppLanguage.Turkish] = "Host",
+                    [AppLanguage.German] = "Host",
+                    [AppLanguage.Spanish] = "Host",
                 },
                 ["connection.port"] = new()
                 {
-                    [AppLanguage.English] = "Port:",
-                    [AppLanguage.Polish] = "Port:",
-                    [AppLanguage.Turkish] = "Port:",
-                    [AppLanguage.German] = "Port:",
-                    [AppLanguage.Spanish] = "Puerto:",
+                    [AppLanguage.English] = "Port",
+                    [AppLanguage.Polish] = "Port",
+                    [AppLanguage.Turkish] = "Port",
+                    [AppLanguage.German] = "Port",
+                    [AppLanguage.Spanish] = "Puerto",
                 },
                 ["connection.adminpass"] = new()
                 {
-                    [AppLanguage.English] = "Admin password:",
-                    [AppLanguage.Polish] = "Hasło admina:",
-                    [AppLanguage.Turkish] = "Yönetici şifresi:",
-                    [AppLanguage.German] = "Admin-Passwort:",
-                    [AppLanguage.Spanish] = "Contraseña de administrador:",
+                    [AppLanguage.English] = "Admin password",
+                    [AppLanguage.Polish] = "Hasło admina",
+                    [AppLanguage.Turkish] = "Yönetici şifresi",
+                    [AppLanguage.German] = "Admin-Passwort",
+                    [AppLanguage.Spanish] = "Contraseña de administrador",
                 },
                 ["speedometer.title"] = new()
                 {
@@ -174,19 +325,19 @@ namespace LFSDriftBuddy
                 },
                 ["speedometer.offsetx"] = new()
                 {
-                    [AppLanguage.English] = "X:",
-                    [AppLanguage.Polish] = "X:",
-                    [AppLanguage.Turkish] = "X:",
-                    [AppLanguage.German] = "X:",
-                    [AppLanguage.Spanish] = "X:",
+                    [AppLanguage.English] = "Offset X:",
+                    [AppLanguage.Polish] = "Przesunięcie X:",
+                    [AppLanguage.Turkish] = "Kaydırma X:",
+                    [AppLanguage.German] = "Versatz X:",
+                    [AppLanguage.Spanish] = "Desplazamiento X:",
                 },
                 ["speedometer.offsety"] = new()
                 {
-                    [AppLanguage.English] = "Y:",
-                    [AppLanguage.Polish] = "Y:",
-                    [AppLanguage.Turkish] = "Y:",
-                    [AppLanguage.German] = "Y:",
-                    [AppLanguage.Spanish] = "Y:",
+                    [AppLanguage.English] = "Offset Y:",
+                    [AppLanguage.Polish] = "Przesunięcie Y:",
+                    [AppLanguage.Turkish] = "Kaydırma Y:",
+                    [AppLanguage.German] = "Versatz Y:",
+                    [AppLanguage.Spanish] = "Desplazamiento Y:",
                 },
                 ["speedometer.scale"] = new()
                 {
@@ -195,6 +346,30 @@ namespace LFSDriftBuddy
                     [AppLanguage.Turkish] = "Ölçek:",
                     [AppLanguage.German] = "Skalierung:",
                     [AppLanguage.Spanish] = "Escala:",
+                },
+                ["speedometer.usemph"] = new()
+                {
+                    [AppLanguage.English] = "Use MPH",
+                    [AppLanguage.Polish] = "Użyj MPH",
+                    [AppLanguage.Turkish] = "MPH kullan",
+                    [AppLanguage.German] = "MPH verwenden",
+                    [AppLanguage.Spanish] = "Usar MPH",
+                },
+                ["speedometer.usemph.subtitle"] = new()
+                {
+                    [AppLanguage.English] = "Switches the speed unit from km/h to mph, both here and on the in-game HUD.",
+                    [AppLanguage.Polish] = "Przełącza jednostkę prędkości z km/h na mph, zarówno tutaj, jak i w HUD-zie w grze.",
+                    [AppLanguage.Turkish] = "Hız birimini hem burada hem de oyun içi HUD'da km/sa'den mph'ye çevirir.",
+                    [AppLanguage.German] = "Wechselt die Geschwindigkeitseinheit von km/h zu mph, sowohl hier als auch im Ingame-HUD.",
+                    [AppLanguage.Spanish] = "Cambia la unidad de velocidad de km/h a mph, tanto aquí como en el HUD del juego.",
+                },
+                ["speedometer.preview"] = new()
+                {
+                    [AppLanguage.English] = "Live preview",
+                    [AppLanguage.Polish] = "Podgląd na żywo",
+                    [AppLanguage.Turkish] = "Canlı önizleme",
+                    [AppLanguage.German] = "Live-Vorschau",
+                    [AppLanguage.Spanish] = "Vista previa en vivo",
                 },
                 ["score.title"] = new()
                 {
@@ -260,37 +435,286 @@ namespace LFSDriftBuddy
                     [AppLanguage.German] = "PUNKTZAHL ZURÜCKSETZEN",
                     [AppLanguage.Spanish] = "REINICIAR PUNTUACIÓN",
                 },
+
+                ["score.driver"] = new()
+                {
+                    [AppLanguage.English] = "Driver: {0}",
+                    [AppLanguage.Polish] = "Kierowca: {0}",
+                    [AppLanguage.Turkish] = "Sürücü: {0}",
+                    [AppLanguage.German] = "Fahrer: {0}",
+                    [AppLanguage.Spanish] = "Piloto: {0}",
+                },
                 ["score.bestrun"] = new()
                 {
-                    [AppLanguage.English] = "Best Run",
-                    [AppLanguage.Polish] = "Najlepszy przejazd",
-                    [AppLanguage.Turkish] = "En İyi Koşu",
-                    [AppLanguage.German] = "Bester Lauf",
-                    [AppLanguage.Spanish] = "Mejor tirada",
+                    [AppLanguage.English] = "BEST RUN",
+                    [AppLanguage.Polish] = "NAJLEPSZY PRZEJAZD",
+                    [AppLanguage.Turkish] = "EN İYİ KOŞU",
+                    [AppLanguage.German] = "BESTER LAUF",
+                    [AppLanguage.Spanish] = "MEJOR TIRADA",
                 },
                 ["score.bestdrift"] = new()
                 {
-                    [AppLanguage.English] = "Best Drift",
-                    [AppLanguage.Polish] = "Najdłuższy drift",
-                    [AppLanguage.Turkish] = "En Uzun Drift",
-                    [AppLanguage.German] = "Längster Drift",
-                    [AppLanguage.Spanish] = "Derrape más largo",
+                    [AppLanguage.English] = "BEST DRIFT",
+                    [AppLanguage.Polish] = "NAJDŁUŻSZY DRIFT",
+                    [AppLanguage.Turkish] = "EN UZUN DRİFT",
+                    [AppLanguage.German] = "LÄNGSTER DRIFT",
+                    [AppLanguage.Spanish] = "DERRAPE MÁS LARGO",
                 },
                 ["score.bestdeepdrift"] = new()
                 {
-                    [AppLanguage.English] = "Best Deep Drift",
-                    [AppLanguage.Polish] = "Najdłuższy głęboki drift",
-                    [AppLanguage.Turkish] = "En Uzun Derin Drift",
-                    [AppLanguage.German] = "Längster tiefer Drift",
-                    [AppLanguage.Spanish] = "Derrape profundo más largo",
+                    [AppLanguage.English] = "BEST DEEP DRIFT",
+                    [AppLanguage.Polish] = "NAJDŁUŻSZY GŁĘBOKI DRIFT",
+                    [AppLanguage.Turkish] = "EN UZUN DERİN DRİFT",
+                    [AppLanguage.German] = "LÄNGSTER TIEFER DRIFT",
+                    [AppLanguage.Spanish] = "DERRAPE PROFUNDO MÁS LARGO",
+                },
+                ["score.mindriftspeed"] = new()
+                {
+                    [AppLanguage.English] = "Minimum drift speed:",
+                    [AppLanguage.Polish] = "Minimalna prędkość driftu:",
+                    [AppLanguage.Turkish] = "Minimum drift hızı:",
+                    [AppLanguage.German] = "Mindest-Driftgeschwindigkeit:",
+                    [AppLanguage.Spanish] = "Velocidad mínima de derrape:",
+                },
+                ["score.mindriftspeed.subtitle"] = new()
+                {
+                    [AppLanguage.English] = "Below this speed, a drift won't be detected at all, no matter the slip angle.",
+                    [AppLanguage.Polish] = "Poniżej tej prędkości drift w ogóle nie zostanie wykryty, niezależnie od kąta poślizgu.",
+                    [AppLanguage.Turkish] = "Bu hızın altında, kayma açısı ne olursa olsun drift hiç algılanmaz.",
+                    [AppLanguage.German] = "Unterhalb dieser Geschwindigkeit wird ein Drift gar nicht erkannt, unabhängig vom Schräglaufwinkel.",
+                    [AppLanguage.Spanish] = "Por debajo de esta velocidad, no se detectará ningún derrape, sin importar el ángulo de deslizamiento.",
+                },
+                ["score.maxburnoutspeed"] = new()
+                {
+                    [AppLanguage.English] = "Maximum burnout speed:",
+                    [AppLanguage.Polish] = "Maksymalna prędkość burnoutu:",
+                    [AppLanguage.Turkish] = "Maksimum yakış (burnout) hızı:",
+                    [AppLanguage.German] = "Maximale Burnout-Geschwindigkeit:",
+                    [AppLanguage.Spanish] = "Velocidad máxima de burnout:",
+                },
+                ["score.maxburnoutspeed.subtitle"] = new()
+                {
+                    [AppLanguage.English] = "Above this speed, wheelspin counts as regular driving/drift instead of a burnout.",
+                    [AppLanguage.Polish] = "Powyżej tej prędkości buksowanie liczy się jako zwykła jazda/drift, a nie jako burnout.",
+                    [AppLanguage.Turkish] = "Bu hızın üzerinde patinaj, yakış (burnout) yerine normal sürüş/drift olarak sayılır.",
+                    [AppLanguage.German] = "Oberhalb dieser Geschwindigkeit zählt Durchdrehen als normales Fahren/Driften statt als Burnout.",
+                    [AppLanguage.Spanish] = "Por encima de esta velocidad, el patinaje cuenta como conducción/derrape normal en vez de burnout.",
+                },
+                ["score.levels.button"] = new()
+                {
+                    [AppLanguage.English] = "DRIFT LEVELS",
+                    [AppLanguage.Polish] = "POZIOMY DRIFTU",
+                    [AppLanguage.Turkish] = "DRİFT SEVİYELERİ",
+                    [AppLanguage.German] = "DRIFT-STUFEN",
+                    [AppLanguage.Spanish] = "NIVELES DE DERRAPE",
+                },
+                ["score.levels.title"] = new()
+                {
+                    [AppLanguage.English] = "Drift Level Settings",
+                    [AppLanguage.Polish] = "Ustawienia poziomów driftu",
+                    [AppLanguage.Turkish] = "Drift Seviyesi Ayarları",
+                    [AppLanguage.German] = "Drift-Stufen-Einstellungen",
+                    [AppLanguage.Spanish] = "Ajustes de niveles de derrape",
+                },
+                ["score.levels.angle_subtitle"] = new()
+                {
+                    [AppLanguage.English] = "Set the angle at which each drift level starts.",
+                    [AppLanguage.Polish] = "Ustaw kąt, przy którym zaczyna się każdy poziom driftu.",
+                    [AppLanguage.Turkish] = "Her drift seviyesinin başladığı açıyı ayarlayın.",
+                    [AppLanguage.German] = "Lege den Winkel fest, bei dem jede Drift-Stufe beginnt.",
+                    [AppLanguage.Spanish] = "Define el ángulo al que empieza cada nivel de derrape.",
+                },
+                ["score.levels.speed_button"] = new()
+                {
+                    [AppLanguage.English] = "SPEED LEVELS",
+                    [AppLanguage.Polish] = "POZIOMY PRĘDKOŚCI",
+                    [AppLanguage.Turkish] = "HIZ SEVİYELERİ",
+                    [AppLanguage.German] = "GESCHWINDIGKEITSSTUFEN",
+                    [AppLanguage.Spanish] = "NIVELES DE VELOCIDAD",
+                },
+                ["score.levels.speed_title"] = new()
+                {
+                    [AppLanguage.English] = "Speed Level Settings",
+                    [AppLanguage.Polish] = "Ustawienia poziomów prędkości",
+                    [AppLanguage.Turkish] = "Hız Seviyesi Ayarları",
+                    [AppLanguage.German] = "Geschwindigkeitsstufen-Einstellungen",
+                    [AppLanguage.Spanish] = "Ajustes de niveles de velocidad",
+                },
+                ["score.levels.speed_subtitle"] = new()
+                {
+                    [AppLanguage.English] = "Set the speed at which each speed level starts.",
+                    [AppLanguage.Polish] = "Ustaw prędkość, przy której zaczyna się każdy poziom prędkości.",
+                    [AppLanguage.Turkish] = "Her hız seviyesinin başladığı hızı ayarlayın.",
+                    [AppLanguage.German] = "Lege die Geschwindigkeit fest, bei der jede Geschwindigkeitsstufe beginnt.",
+                    [AppLanguage.Spanish] = "Define la velocidad a la que empieza cada nivel de velocidad.",
+                },
+                ["score.levels.angle_header"] = new()
+                {
+                    [AppLanguage.English] = "ANGLE (DEGREES)",
+                    [AppLanguage.Polish] = "KĄT (STOPNIE)",
+                    [AppLanguage.Turkish] = "AÇI (DERECE)",
+                    [AppLanguage.German] = "WINKEL (GRAD)",
+                    [AppLanguage.Spanish] = "ÁNGULO (GRADOS)",
+                },
+                ["score.levels.angle_base"] = new()
+                {
+                    [AppLanguage.English] = "Drift entry threshold",
+                    [AppLanguage.Polish] = "Próg wejścia w drift",
+                    [AppLanguage.Turkish] = "Drift başlangıç eşiği",
+                    [AppLanguage.German] = "Drift-Einstiegsschwelle",
+                    [AppLanguage.Spanish] = "Umbral de entrada al derrape",
+                },
+                ["score.levels.speed_header"] = new()
+                {
+                    [AppLanguage.English] = "SPEED (KM/H)",
+                    [AppLanguage.Polish] = "PRĘDKOŚĆ (KM/H)",
+                    [AppLanguage.Turkish] = "HIZ (KM/SA)",
+                    [AppLanguage.German] = "GESCHWINDIGKEIT (KM/H)",
+                    [AppLanguage.Spanish] = "VELOCIDAD (KM/H)",
+                },
+                ["score.levels.speed_base"] = new()
+                {
+                    [AppLanguage.English] = "Fast driving threshold",
+                    [AppLanguage.Polish] = "Próg szybkiej jazdy",
+                    [AppLanguage.Turkish] = "Hızlı sürüş eşiği",
+                    [AppLanguage.German] = "Schwelle für schnelles Fahren",
+                    [AppLanguage.Spanish] = "Umbral de conducción rápida",
+                },
+                ["score.levels.speed_level"] = new()
+                {
+                    [AppLanguage.English] = "Speed level {0}",
+                    [AppLanguage.Polish] = "Poziom prędkości {0}",
+                    [AppLanguage.Turkish] = "Hız seviyesi {0}",
+                    [AppLanguage.German] = "Geschwindigkeitsstufe {0}",
+                    [AppLanguage.Spanish] = "Nivel de velocidad {0}",
+                },
+                ["score.collisiondetect"] = new()
+                {
+                    [AppLanguage.English] = "Car collision detection",
+                    [AppLanguage.Polish] = "Wykrywanie uderzeń w pojazdy",
+                    [AppLanguage.Turkish] = "Araç çarpışma algılama",
+                    [AppLanguage.German] = "Fahrzeugkollisionserkennung",
+                    [AppLanguage.Spanish] = "Detección de colisiones con vehículos",
+                },
+                ["score.collisiondetect.subtitle"] = new()
+                {
+                    [AppLanguage.English] = "A light touch that doesn't break a stable drift scores a bonus; a hit that ends it, spins you, or is simply too hard costs points.",
+                    [AppLanguage.Polish] = "Lekkie muśnięcie, które nie przerywa stabilnego driftu, daje bonus; uderzenie które go kończy, obraca auto lub jest po prostu za mocne, kosztuje punkty.",
+                    [AppLanguage.Turkish] = "Stabil bir driftı bozmayan hafif bir dokunuş bonus kazandırır; driftı bitiren, döndüren veya çok sert olan bir çarpma puan kaybettirir.",
+                    [AppLanguage.German] = "Eine leichte Berührung, die einen stabilen Drift nicht unterbricht, gibt einen Bonus; ein Treffer, der ihn beendet, dich dreht oder einfach zu hart ist, kostet Punkte.",
+                    [AppLanguage.Spanish] = "Un roce leve que no rompe un derrape estable da un bono; un golpe que lo termina, te hace girar o es simplemente demasiado fuerte cuesta puntos.",
+                },
+                ["score.objectcollisiondetect"] = new()
+                {
+                    [AppLanguage.English] = "Object collision detection",
+                    [AppLanguage.Polish] = "Wykrywanie uderzeń w obiekty",
+                    [AppLanguage.Turkish] = "Nesne çarpışma algılama",
+                    [AppLanguage.German] = "Objektkollisionserkennung",
+                    [AppLanguage.Spanish] = "Detección de colisiones con objetos",
+                },
+                ["score.objectcollisiondetect.subtitle"] = new()
+                {
+                    [AppLanguage.English] = "Detects hits against track objects (walls, cones, etc.) and applies the existing kiss/penalty scoring.",
+                    [AppLanguage.Polish] = "Wykrywa uderzenia w obiekty na torze (ściany, pachołki itp.) i nalicza istniejące punkty za muśnięcie/karę.",
+                    [AppLanguage.Turkish] = "Pist nesnelerine (duvarlar, koniler vb.) çarpmaları algılar ve mevcut sıyırma/ceza puanlamasını uygular.",
+                    [AppLanguage.German] = "Erkennt Treffer gegen Streckenobjekte (Wände, Pylonen usw.) und wendet die bestehende Streifer-/Strafpunktevergabe an.",
+                    [AppLanguage.Spanish] = "Detecta golpes contra objetos del circuito (muros, conos, etc.) y aplica la puntuación existente de roce/penalización.",
+                },
+                ["derby.levels.button"] = new()
+                {
+                    [AppLanguage.English] = "HIT LEVELS",
+                    [AppLanguage.Polish] = "POZIOMY UDERZEŃ",
+                    [AppLanguage.Turkish] = "ÇARPMA SEVİYELERİ",
+                    [AppLanguage.German] = "AUFPRALLSTUFEN",
+                    [AppLanguage.Spanish] = "NIVELES DE IMPACTO",
+                },
+                ["derby.levels.title"] = new()
+                {
+                    [AppLanguage.English] = "Hit Level Settings",
+                    [AppLanguage.Polish] = "Ustawienia poziomów uderzeń",
+                    [AppLanguage.Turkish] = "Çarpma Seviyesi Ayarları",
+                    [AppLanguage.German] = "Aufprallstufen-Einstellungen",
+                    [AppLanguage.Spanish] = "Ajustes de niveles de impacto",
+                },
+                ["derby.levels.subtitle"] = new()
+                {
+                    [AppLanguage.English] = "Set the closing speed at which each hit level starts.",
+                    [AppLanguage.Polish] = "Ustaw prędkość zderzenia, przy której zaczyna się każdy poziom uderzenia.",
+                    [AppLanguage.Turkish] = "Her çarpma seviyesinin başladığı yaklaşma hızını ayarlayın.",
+                    [AppLanguage.German] = "Lege die Aufprallgeschwindigkeit fest, bei der jede Stufe beginnt.",
+                    [AppLanguage.Spanish] = "Define la velocidad de choque a la que empieza cada nivel de impacto.",
+                },
+                ["derby.levels.tier1"] = new()
+                {
+                    [AppLanguage.English] = "TOUCH",
+                    [AppLanguage.Polish] = "STYK",
+                    [AppLanguage.Turkish] = "DOKUNMA",
+                    [AppLanguage.German] = "BERÜHRUNG",
+                    [AppLanguage.Spanish] = "ROCE",
+                },
+                ["derby.levels.tier2"] = new()
+                {
+                    [AppLanguage.English] = "BUMP",
+                    [AppLanguage.Polish] = "ZDERZENIE",
+                    [AppLanguage.Turkish] = "ÇARPMA",
+                    [AppLanguage.German] = "STOSS",
+                    [AppLanguage.Spanish] = "GOLPE",
+                },
+                ["derby.levels.tier3"] = new()
+                {
+                    [AppLanguage.English] = "HIT",
+                    [AppLanguage.Polish] = "UDERZENIE",
+                    [AppLanguage.Turkish] = "VURUŞ",
+                    [AppLanguage.German] = "TREFFER",
+                    [AppLanguage.Spanish] = "IMPACTO",
+                },
+                ["derby.levels.tier4"] = new()
+                {
+                    [AppLanguage.English] = "SMASH",
+                    [AppLanguage.Polish] = "ROZBICIE",
+                    [AppLanguage.Turkish] = "PARÇALAMA",
+                    [AppLanguage.German] = "ZERSCHMETTERN",
+                    [AppLanguage.Spanish] = "DESTROZO",
+                },
+                ["derby.levels.tier5"] = new()
+                {
+                    [AppLanguage.English] = "DEMOLISH",
+                    [AppLanguage.Polish] = "ZNISZCZENIE",
+                    [AppLanguage.Turkish] = "YOK ETME",
+                    [AppLanguage.German] = "VERNICHTUNG",
+                    [AppLanguage.Spanish] = "DEMOLICIÓN",
+                },
+                ["derby.hittype.headon"] = new()
+                {
+                    [AppLanguage.English] = "HEAD-ON",
+                    [AppLanguage.Polish] = "CZOŁOWE",
+                    [AppLanguage.Turkish] = "KAFA KAFAYA",
+                    [AppLanguage.German] = "FRONTAL",
+                    [AppLanguage.Spanish] = "FRONTAL",
+                },
+                ["derby.hittype.side"] = new()
+                {
+                    [AppLanguage.English] = "SIDE",
+                    [AppLanguage.Polish] = "BOCZNE",
+                    [AppLanguage.Turkish] = "YANDAN",
+                    [AppLanguage.German] = "SEITLICH",
+                    [AppLanguage.Spanish] = "LATERAL",
+                },
+                ["derby.hittype.rear"] = new()
+                {
+                    [AppLanguage.English] = "REAR",
+                    [AppLanguage.Polish] = "OD TYŁU",
+                    [AppLanguage.Turkish] = "ARKADAN",
+                    [AppLanguage.German] = "HECK",
+                    [AppLanguage.Spanish] = "TRASERO",
                 },
                 ["hud.title"] = new()
                 {
-                    [AppLanguage.English] = "HUD Settings",
-                    [AppLanguage.Polish] = "Ustawienia HUD",
-                    [AppLanguage.Turkish] = "HUD Ayarları",
-                    [AppLanguage.German] = "HUD-Einstellungen",
-                    [AppLanguage.Spanish] = "Configuración del HUD",
+                    [AppLanguage.English] = "Forza-like HUD Settings",
+                    [AppLanguage.Polish] = "Ustawienia HUD w stylu Forza",
+                    [AppLanguage.Turkish] = "Forza Tarzı HUD Ayarları",
+                    [AppLanguage.German] = "Forza-artige HUD-Einstellungen",
+                    [AppLanguage.Spanish] = "Configuración del HUD estilo Forza",
                 },
                 ["hud.colors"] = new()
                 {
@@ -300,6 +724,71 @@ namespace LFSDriftBuddy
                     [AppLanguage.German] = "HUD-Farben",
                     [AppLanguage.Spanish] = "Colores del HUD",
                 },
+                ["hud.scorecolors"] = new()
+                {
+                    [AppLanguage.English] = "Forza-like HUD Colors",
+                    [AppLanguage.Polish] = "Kolory HUD w stylu Forza",
+                    [AppLanguage.Turkish] = "Forza Tarzı HUD Renkleri",
+                    [AppLanguage.German] = "Forza-artige HUD-Farben",
+                    [AppLanguage.Spanish] = "Colores del HUD estilo Forza",
+                },
+                ["hud.scorecolors.subtitle"] = new()
+                {
+                    [AppLanguage.English] = "Colors by drift angle tier",
+                    [AppLanguage.Polish] = "Kolory wg poziomu kąta driftu",
+                    [AppLanguage.Turkish] = "Drift açısı seviyesine göre renkler",
+                    [AppLanguage.German] = "Farben nach Driftwinkel-Stufe",
+                    [AppLanguage.Spanish] = "Colores por nivel de ángulo de derrape",
+                },
+                ["hud.colorlevel"] = new()
+                {
+                    [AppLanguage.English] = "Color lvl. {0}: {1}",
+                    [AppLanguage.Polish] = "Kolor poz. {0}: {1}",
+                    [AppLanguage.Turkish] = "Renk sv. {0}: {1}",
+                    [AppLanguage.German] = "Farbe Stufe {0}: {1}",
+                    [AppLanguage.Spanish] = "Color niv. {0}: {1}",
+                },
+                ["hud.scorecolor.default"] = new()
+                {
+                    [AppLanguage.English] = "Default / other",
+                    [AppLanguage.Polish] = "Domyślny / inne",
+                    [AppLanguage.Turkish] = "Varsayılan / diğer",
+                    [AppLanguage.German] = "Standard / sonstige",
+                    [AppLanguage.Spanish] = "Predeterminado / otro",
+                },
+                ["hud.scorecolor.idle"] = new()
+                {
+                    [AppLanguage.English] = "Idle (no activity)",
+                    [AppLanguage.Polish] = "Bezczynność (brak aktywności)",
+                    [AppLanguage.Turkish] = "Boşta (etkinlik yok)",
+                    [AppLanguage.German] = "Leerlauf (keine Aktivität)",
+                    [AppLanguage.Spanish] = "Inactivo (sin actividad)",
+                },
+                ["hud.scorecolor.backward"] = new()
+                {
+                    [AppLanguage.English] = "Backward drift",
+                    [AppLanguage.Polish] = "Drift tyłem",
+                    [AppLanguage.Turkish] = "Geri drift",
+                    [AppLanguage.German] = "Rückwärtsdrift",
+                    [AppLanguage.Spanish] = "Derrape hacia atrás",
+                },
+                ["hud.advanced_outgauge"] = new()
+                {
+                    [AppLanguage.English] = "Advanced OutGauge Activities",
+                    [AppLanguage.Polish] = "Zaawansowane aktywności z OutGauge",
+                    [AppLanguage.Turkish] = "Gelişmiş OutGauge Etkinlikleri",
+                    [AppLanguage.German] = "Erweiterte OutGauge-Aktivitäten",
+                    [AppLanguage.Spanish] = "Actividades avanzadas de OutGauge",
+                },
+
+                ["hud.advanced_outgauge.subtitle"] = new()
+                {
+                    [AppLanguage.English] = "Turns off burnout detection and its bonuses (360° Spin, Stationary Burnout, transitions).",
+                    [AppLanguage.Polish] = "Wyłącza wykrywanie burnoutu i jego bonusy (360° Spin, burnout w miejscu, przejścia).",
+                    [AppLanguage.Turkish] = "Lastik yakma tespitini ve bonuslarını kapatır (360° Dönüş, sabit lastik yakma, geçişler).",
+                    [AppLanguage.German] = "Deaktiviert die Burnout-Erkennung und ihre Boni (360°-Dreh, stehender Burnout, Übergänge).",
+                    [AppLanguage.Spanish] = "Desactiva la detección de quema de neumáticos y sus bonos (giro de 360°, quema estática, transiciones).",
+                },
                 ["hud.show"] = new()
                 {
                     [AppLanguage.English] = "Show ingame HUD (IS_BTN)",
@@ -307,6 +796,14 @@ namespace LFSDriftBuddy
                     [AppLanguage.Turkish] = "Oyun içi HUD'u göster (IS_BTN)",
                     [AppLanguage.German] = "Ingame-HUD anzeigen (IS_BTN)",
                     [AppLanguage.Spanish] = "Mostrar HUD en el juego (IS_BTN)",
+                },
+                ["hud.show.subtitle"] = new()
+                {
+                    [AppLanguage.English] = "Uses LFS's native IS_BTN buttons instead — works even without a transparent overlay window, but only supports 10 fixed colors.",
+                    [AppLanguage.Polish] = "Używa natywnych przycisków IS_BTN z LFS zamiast nakładki — działa nawet bez przezroczystego okna, ale obsługuje tylko 10 stałych kolorów.",
+                    [AppLanguage.Turkish] = "Bunun yerine LFS'in yerel IS_BTN düğmelerini kullanır — şeffaf katman olmadan da çalışır, ancak yalnızca 10 sabit rengi destekler.",
+                    [AppLanguage.German] = "Verwendet stattdessen die nativen IS_BTN-Schaltflächen von LFS — funktioniert auch ohne transparentes Overlay-Fenster, unterstützt aber nur 10 feste Farben.",
+                    [AppLanguage.Spanish] = "Usa los botones nativos IS_BTN de LFS en su lugar: funciona incluso sin una ventana de superposición transparente, pero solo admite 10 colores fijos.",
                 },
                 ["hud.show-disabled"] = new()
                 {
@@ -318,11 +815,35 @@ namespace LFSDriftBuddy
                 },
                 ["hud.REVLimitter"] = new()
                 {
-                    [AppLanguage.English] = "Show ingame REV Limitter HUD",
-                    [AppLanguage.Polish] = "Pokaż REV Limitter HUD w grze",
-                    [AppLanguage.Turkish] = "Oyun içi REV Limiter HUD'unu",
+                    [AppLanguage.English] = "Show ingame REV Limiter HUD",
+                    [AppLanguage.Polish] = "Pokaż REV Limiter HUD w grze",
+                    [AppLanguage.Turkish] = "Oyun içi REV Limiter HUD'unu göster",
                     [AppLanguage.German] = "Ingame-Drehzahlbegrenzer-HUD anzeigen",
                     [AppLanguage.Spanish] = "Mostrar HUD del limitador de RPM en el juego",
+                },
+                ["hud.REVLimitter.subtitle"] = new()
+                {
+                    [AppLanguage.English] = "Shows the current RPM in the bottom-left corner while the rev limiter is cutting ignition.",
+                    [AppLanguage.Polish] = "Pokazuje aktualne obroty silnika w lewym dolnym rogu podczas cięcia zapłonu przez ogranicznik obrotów.",
+                    [AppLanguage.Turkish] = "Devir sınırlayıcı ateşlemeyi keserken mevcut RPM'i sol alt köşede gösterir.",
+                    [AppLanguage.German] = "Zeigt die aktuelle Drehzahl unten links an, während der Drehzahlbegrenzer die Zündung unterbricht.",
+                    [AppLanguage.Spanish] = "Muestra las RPM actuales en la esquina inferior izquierda mientras el limitador de RPM corta el encendido.",
+                },
+                ["hud.master"] = new()
+                {
+                    [AppLanguage.English] = "Show HUD",
+                    [AppLanguage.Polish] = "Pokaż HUD",
+                    [AppLanguage.Turkish] = "HUD'u göster",
+                    [AppLanguage.German] = "HUD anzeigen",
+                    [AppLanguage.Spanish] = "Mostrar HUD",
+                },
+                ["hud.livepreview"] = new()
+                {
+                    [AppLanguage.English] = "Live preview",
+                    [AppLanguage.Polish] = "Podgląd na żywo",
+                    [AppLanguage.Turkish] = "Canlı önizleme",
+                    [AppLanguage.German] = "Live-Vorschau",
+                    [AppLanguage.Spanish] = "Vista previa en vivo",
                 },
                 ["rev.title"] = new()
                 {
@@ -332,13 +853,46 @@ namespace LFSDriftBuddy
                     [AppLanguage.German] = "Drehzahlbegrenzer",
                     [AppLanguage.Spanish] = "Limitador de RPM",
                 },
+
+                ["rev.vehicle"] = new()
+                {
+                    [AppLanguage.English] = "Vehicle: {0}",
+                    [AppLanguage.Polish] = "Pojazd: {0}",
+                    [AppLanguage.Turkish] = "Araç: {0}",
+                    [AppLanguage.German] = "Fahrzeug: {0}",
+                    [AppLanguage.Spanish] = "Vehículo: {0}",
+                },
                 ["rev.calibratehint"] = new()
                 {
-                    [AppLanguage.English] = "Bind functions using the gear icon.",
-                    [AppLanguage.Polish] = "Przypisz funkcje klawiszem trybika.",
-                    [AppLanguage.Turkish] = "Fonksiyonları dişli simgesiyle atayın.",
-                    [AppLanguage.German] = "Funktionen über das Zahnradsymbol zuweisen.",
-                    [AppLanguage.Spanish] = "Asigna funciones con el icono de engranaje.",
+                    [AppLanguage.English] = "Bind rev limiter functions",
+                    [AppLanguage.Polish] = "Przypisz funkcje limitera obrotów",
+                    [AppLanguage.Turkish] = "Devir sınırlayıcı fonksiyonlarını ata",
+                    [AppLanguage.German] = "Drehzahlbegrenzer-Funktionen zuweisen",
+                    [AppLanguage.Spanish] = "Asignar funciones del limitador de RPM",
+                },
+                ["rev.autocalibrate"] = new()
+                {
+                    [AppLanguage.English] = "Auto-calibrate new vehicle",
+                    [AppLanguage.Polish] = "Auto-kalibracja nowego pojazdu",
+                    [AppLanguage.Turkish] = "Yeni aracı otomatik kalibre et",
+                    [AppLanguage.German] = "Neues Fahrzeug automatisch kalibrieren",
+                    [AppLanguage.Spanish] = "Autocalibrar vehículo nuevo",
+                },
+                ["rev.autocalibrate.subtitle"] = new()
+                {
+                    [AppLanguage.English] = "Shows the calibration prompt the first time you drive an unknown/uncalibrated car.",
+                    [AppLanguage.Polish] = "Pokazuje okno kalibracji przy pierwszej jeździe nieznanym/niekalibrowanym pojazdem.",
+                    [AppLanguage.Turkish] = "Bilinmeyen/kalibre edilmemiş bir arabayı ilk kez sürdüğünüzde kalibrasyon istemini gösterir.",
+                    [AppLanguage.German] = "Zeigt den Kalibrierungsdialog beim ersten Fahren eines unbekannten/nicht kalibrierten Fahrzeugs.",
+                    [AppLanguage.Spanish] = "Muestra el aviso de calibración la primera vez que conduces un coche desconocido/no calibrado.",
+                },
+                ["rev.calibrate.needs_outgauge"] = new()
+                {
+                    [AppLanguage.English] = "Can't calibrate — OutGauge is disconnected.",
+                    [AppLanguage.Polish] = "Nie można skalibrować — OutGauge jest rozłączony.",
+                    [AppLanguage.Turkish] = "Kalibre edilemiyor — OutGauge bağlı değil.",
+                    [AppLanguage.German] = "Kalibrierung nicht möglich — OutGauge ist getrennt.",
+                    [AppLanguage.Spanish] = "No se puede calibrar — OutGauge está desconectado.",
                 },
                 ["rev.calibrate"] = new()
                 {
@@ -348,6 +902,14 @@ namespace LFSDriftBuddy
                     [AppLanguage.German] = "KALIBRIEREN",
                     [AppLanguage.Spanish] = "CALIBRAR",
                 },
+                ["rev.bindfunctions"] = new()
+                {
+                    [AppLanguage.English] = "BIND FUNCTIONS",
+                    [AppLanguage.Polish] = "PRZYPISZ FUNKCJE",
+                    [AppLanguage.Turkish] = "FONKSİYONLARI ATA",
+                    [AppLanguage.German] = "FUNKTIONEN ZUWEISEN",
+                    [AppLanguage.Spanish] = "ASIGNAR FUNCIONES",
+                },
                 ["rev.rpm"] = new()
                 {
                     [AppLanguage.English] = "RPM:",
@@ -356,13 +918,14 @@ namespace LFSDriftBuddy
                     [AppLanguage.German] = "U/min:",
                     [AppLanguage.Spanish] = "RPM:",
                 },
+
                 ["rev.limit"] = new()
                 {
-                    [AppLanguage.English] = "RPM LIMIT: ",
-                    [AppLanguage.Polish] = "LIMIT RPM: ",
-                    [AppLanguage.Turkish] = "RPM LİMİTİ: ",
-                    [AppLanguage.German] = "DREHZAHLGRENZE: ",
-                    [AppLanguage.Spanish] = "LÍMITE DE RPM: ",
+                    [AppLanguage.English] = "RPM limit: ",
+                    [AppLanguage.Polish] = "Limit RPM: ",
+                    [AppLanguage.Turkish] = "RPM limiti: ",
+                    [AppLanguage.German] = "Drehzahlgrenze: ",
+                    [AppLanguage.Spanish] = "Límite de RPM: ",
                 },
                 ["rev.cutms"] = new()
                 {
@@ -392,7 +955,7 @@ namespace LFSDriftBuddy
                 ["rev.bindings.title"] = new()
                 {
                     [AppLanguage.English] = "Rev Limiter Bindings",
-                    [AppLanguage.Polish] = "Bindowanie ogranicznika obrotów",
+                    [AppLanguage.Polish] = "Przypisania ogranicznika obrotów",
                     [AppLanguage.Turkish] = "Devir Sınırlayıcı Kısayolları",
                     [AppLanguage.German] = "Drehzahlbegrenzer-Tastenbelegung",
                     [AppLanguage.Spanish] = "Asignaciones del limitador de RPM",
@@ -453,6 +1016,14 @@ namespace LFSDriftBuddy
                     [AppLanguage.German] = "Blinkertöne",
                     [AppLanguage.Spanish] = "Sonidos de intermitentes",
                 },
+                ["indicators.soundscheck.subtitle"] = new()
+                {
+                    [AppLanguage.English] = "Plays a click sound when an indicator turns on/off and when it self-cancels.",
+                    [AppLanguage.Polish] = "Odtwarza dźwięk kliknięcia przy włączeniu/wyłączeniu kierunkowskazu oraz przy jego automatycznym wyłączeniu.",
+                    [AppLanguage.Turkish] = "Sinyal açılıp kapandığında ve kendiliğinden iptal olduğunda tıklama sesi çalar.",
+                    [AppLanguage.German] = "Spielt ein Klickgeräusch ab, wenn ein Blinker ein-/ausgeschaltet wird oder sich selbst abschaltet.",
+                    [AppLanguage.Spanish] = "Reproduce un sonido de clic al activar/desactivar un intermitente y cuando se cancela automáticamente.",
+                },
                 ["indicators.centeroff"] = new()
                 {
                     [AppLanguage.English] = "Auto-cancel on wheel centering",
@@ -460,6 +1031,86 @@ namespace LFSDriftBuddy
                     [AppLanguage.Turkish] = "Direksiyon ortalanınca otomatik kapat",
                     [AppLanguage.German] = "Automatisches Abschalten beim Zentrieren des Lenkrads",
                     [AppLanguage.Spanish] = "Desactivación automática al centrar el volante",
+                },
+                ["indicators.centeroff.subtitle"] = new()
+                {
+                    [AppLanguage.English] = "Automatically turns the indicator off once the steering wheel returns near center, like a real car.",
+                    [AppLanguage.Polish] = "Automatycznie wyłącza kierunkowskaz, gdy kierownica wróci blisko pozycji środkowej, tak jak w prawdziwym aucie.",
+                    [AppLanguage.Turkish] = "Direksiyon merkeze yakın bir konuma döndüğünde sinyali gerçek bir araçtaki gibi otomatik olarak kapatır.",
+                    [AppLanguage.German] = "Schaltet den Blinker automatisch aus, sobald das Lenkrad wieder nahe der Mittelstellung ist, wie in einem echten Auto.",
+                    [AppLanguage.Spanish] = "Apaga automáticamente el intermitente cuando el volante vuelve cerca del centro, como en un coche real.",
+                },
+                ["indicators.armthreshold"] = new()
+                {
+                    [AppLanguage.English] = "Minimum turn to arm:",
+                    [AppLanguage.Polish] = "Minimalny skręt do uzbrojenia:",
+                    [AppLanguage.Turkish] = "Etkinleştirme için minimum dönüş:",
+                    [AppLanguage.German] = "Mindestlenkeinschlag zum Scharfstellen:",
+                    [AppLanguage.Spanish] = "Giro mínimo para armar:",
+                },
+                ["indicators.armthreshold.subtitle"] = new()
+                {
+                    [AppLanguage.English] = "How far you need to turn the wheel before returning to center will cancel the indicator.",
+                    [AppLanguage.Polish] = "Jak mocno trzeba skręcić kierownicą, zanim powrót do środka wyłączy kierunkowskaz.",
+                    [AppLanguage.Turkish] = "Merkeze dönüşün sinyali iptal etmesi için direksiyonun ne kadar çevrilmesi gerektiği.",
+                    [AppLanguage.German] = "Wie weit das Lenkrad gedreht werden muss, damit die Rückkehr zur Mitte den Blinker abschaltet.",
+                    [AppLanguage.Spanish] = "Cuánto hay que girar el volante antes de que volver al centro cancele el intermitente.",
+                },
+                ["indicators.centerthreshold"] = new()
+                {
+                    [AppLanguage.English] = "Center threshold:",
+                    [AppLanguage.Polish] = "Próg wycentrowania:",
+                    [AppLanguage.Turkish] = "Merkez eşiği:",
+                    [AppLanguage.German] = "Zentrierschwelle:",
+                    [AppLanguage.Spanish] = "Umbral de centrado:",
+                },
+                ["indicators.centerthreshold.subtitle"] = new()
+                {
+                    [AppLanguage.English] = "How close to center (in steering %) the wheel must return before the indicator cancels.",
+                    [AppLanguage.Polish] = "Jak blisko środka (w % skrętu kierownicy) trzeba wrócić, żeby kierunkowskaz się wyłączył.",
+                    [AppLanguage.Turkish] = "Sinyalin iptal olması için direksiyonun merkeze ne kadar yakın dönmesi gerektiği (direksiyon % olarak).",
+                    [AppLanguage.German] = "Wie nah am Zentrum (in Lenkwinkel-%) das Lenkrad zurückkehren muss, damit der Blinker abschaltet.",
+                    [AppLanguage.Spanish] = "Qué tan cerca del centro (en % de giro) debe volver el volante para que el intermitente se cancele.",
+                },
+                ["indicators.master"] = new()
+                {
+                    [AppLanguage.English] = "Enable turn signals",
+                    [AppLanguage.Polish] = "Włącz kierunkowskazy",
+                    [AppLanguage.Turkish] = "Sinyalleri etkinleştir",
+                    [AppLanguage.German] = "Blinker aktivieren",
+                    [AppLanguage.Spanish] = "Activar intermitentes",
+                },
+                ["indicators.wheelsetup"] = new()
+                {
+                    [AppLanguage.English] = "🎮 Configure Steering Wheel",
+                    [AppLanguage.Polish] = "🎮 Skonfiguruj kierownicę",
+                    [AppLanguage.Turkish] = "🎮 Direksiyonu Yapılandır",
+                    [AppLanguage.German] = "🎮 Lenkrad konfigurieren",
+                    [AppLanguage.Spanish] = "🎮 Configurar volante",
+                },
+                ["indicators.group.status"] = new()
+                {
+                    [AppLanguage.English] = "STATUS",
+                    [AppLanguage.Polish] = "STATUS",
+                    [AppLanguage.Turkish] = "DURUM",
+                    [AppLanguage.German] = "STATUS",
+                    [AppLanguage.Spanish] = "ESTADO",
+                },
+                ["indicators.group.wheel"] = new()
+                {
+                    [AppLanguage.English] = "WHEEL & AUTO-CANCEL",
+                    [AppLanguage.Polish] = "KIEROWNICA I AUTO-WYŁĄCZANIE",
+                    [AppLanguage.Turkish] = "DİREKSİYON VE OTOMATİK İPTAL",
+                    [AppLanguage.German] = "LENKRAD & AUTO-ABSCHALTUNG",
+                    [AppLanguage.Spanish] = "VOLANTE Y AUTOCANCELACIÓN",
+                },
+                ["indicators.group.sounds"] = new()
+                {
+                    [AppLanguage.English] = "SOUNDS",
+                    [AppLanguage.Polish] = "DŹWIĘKI",
+                    [AppLanguage.Turkish] = "SESLER",
+                    [AppLanguage.German] = "TÖNE",
+                    [AppLanguage.Spanish] = "SONIDOS",
                 },
                 ["indicators.volume"] = new()
                 {
@@ -476,6 +1127,14 @@ namespace LFSDriftBuddy
                     [AppLanguage.Turkish] = "FARLAR",
                     [AppLanguage.German] = "LICHTER",
                     [AppLanguage.Spanish] = "LUCES",
+                },
+                ["indicators.dash.subtitle"] = new()
+                {
+                    [AppLanguage.English] = "Live from your car's dashboard (OutGauge): turn signals and high beam.",
+                    [AppLanguage.Polish] = "Na żywo z deski rozdzielczej auta (OutGauge): kierunkowskazy i światła długie.",
+                    [AppLanguage.Turkish] = "Aracın gösterge panelinden canlı (OutGauge): sinyaller ve far.",
+                    [AppLanguage.German] = "Live vom Armaturenbrett deines Autos (OutGauge): Blinker und Fernlicht.",
+                    [AppLanguage.Spanish] = "En vivo desde el salpicadero del coche (OutGauge): intermitentes y luces largas.",
                 },
                 ["indicators.keybind"] = new()
                 {
@@ -525,29 +1184,45 @@ namespace LFSDriftBuddy
                     [AppLanguage.German] = "LENKUNG",
                     [AppLanguage.Spanish] = "DIRECCIÓN",
                 },
+                ["indicators.signal"] = new()
+                {
+                    [AppLanguage.English] = "SIGNAL",
+                    [AppLanguage.Polish] = "SYGNAŁ",
+                    [AppLanguage.Turkish] = "SİNYAL",
+                    [AppLanguage.German] = "SIGNAL",
+                    [AppLanguage.Spanish] = "SEÑAL",
+                },
                 ["keybind.dialog.title"] = new()
                 {
-                    [AppLanguage.English] = "Key binding",
-                    [AppLanguage.Polish] = "Bindowanie klawisza",
-                    [AppLanguage.Turkish] = "Tuş atama",
+                    [AppLanguage.English] = "Key Binding",
+                    [AppLanguage.Polish] = "Przypisanie klawisza",
+                    [AppLanguage.Turkish] = "Tuş Atama",
                     [AppLanguage.German] = "Tastenzuweisung",
                     [AppLanguage.Spanish] = "Asignación de tecla",
                 },
                 ["keybind.dialog.press"] = new()
                 {
-                    [AppLanguage.English] = "Press a key for: {0}\n\n(Press ESC to cancel)",
-                    [AppLanguage.Polish] = "Naciśnij klawisz dla: {0}\n\n(Naciśnij ESC aby anulować)",
-                    [AppLanguage.Turkish] = "{0} için bir tuşa basın\n\n(İptal için ESC)",
-                    [AppLanguage.German] = "Drücke eine Taste für: {0}\n\n(ESC zum Abbrechen)",
-                    [AppLanguage.Spanish] = "Presiona una tecla para: {0}\n\n(Presiona ESC para cancelar)",
+                    [AppLanguage.English] = "Press a key for: {0}\n\n(ESC to cancel, DELETE to unbind)",
+                    [AppLanguage.Polish] = "Naciśnij klawisz dla: {0}\n\n(ESC anuluje, DELETE usuwa przypisanie)",
+                    [AppLanguage.Turkish] = "{0} için bir tuşa basın\n\n(İptal: ESC, kaldırmak için: DELETE)",
+                    [AppLanguage.German] = "Drücke eine Taste für: {0}\n\n(ESC zum Abbrechen, ENTF zum Entfernen)",
+                    [AppLanguage.Spanish] = "Presiona una tecla para: {0}\n\n(ESC cancela, SUPR quita la asignación)",
                 },
                 ["keybind.dialog.bound"] = new()
                 {
                     [AppLanguage.English] = "Bound: {0}\n\nClick to return...",
-                    [AppLanguage.Polish] = "Bindowano: {0}\n\nKlikaj by wrócić...",
+                    [AppLanguage.Polish] = "Przypisano: {0}\n\nKliknij, aby wrócić...",
                     [AppLanguage.Turkish] = "Atandı: {0}\n\nDönmek için tıklayın...",
                     [AppLanguage.German] = "Zugewiesen: {0}\n\nKlicken zum Zurückkehren...",
                     [AppLanguage.Spanish] = "Asignado: {0}\n\nHaz clic para volver...",
+                },
+                ["keybind.dialog.unbound"] = new()
+                {
+                    [AppLanguage.English] = "Binding removed",
+                    [AppLanguage.Polish] = "Przypisanie usunięte",
+                    [AppLanguage.Turkish] = "Atama kaldırıldı",
+                    [AppLanguage.German] = "Zuweisung entfernt",
+                    [AppLanguage.Spanish] = "Asignación eliminada",
                 },
                 ["status.keybound"] = new()
                 {
@@ -581,6 +1256,22 @@ namespace LFSDriftBuddy
                     [AppLanguage.Turkish] = "DELİ SÜRÜŞ!",
                     [AppLanguage.German] = "IRRES FAHREN!",
                     [AppLanguage.Spanish] = "¡CONDUCCIÓN DEMENCIAL!",
+                },
+                ["drift.label.fast4"] = new()
+                {
+                    [AppLanguage.English] = "EXTREME DRIVING!",
+                    [AppLanguage.Polish] = "PODKURWIONA JAZDA!",
+                    [AppLanguage.Turkish] = "AŞIRI SÜRÜŞ!",
+                    [AppLanguage.German] = "EXTREMES FAHREN!",
+                    [AppLanguage.Spanish] = "¡CONDUCCIÓN EXTREMA!",
+                },
+                ["drift.label.fast5"] = new()
+                {
+                    [AppLanguage.English] = "GODLIKE DRIVING!",
+                    [AppLanguage.Polish] = "BOSKA JAZDA!",
+                    [AppLanguage.Turkish] = "İLAHİ SÜRÜŞ!",
+                    [AppLanguage.German] = "GÖTTLICHES FAHREN!",
+                    [AppLanguage.Spanish] = "¡CONDUCCIÓN DIVINA!",
                 },
                 ["drift.label.angle_extreme"] = new()
                 {
@@ -765,6 +1456,14 @@ namespace LFSDriftBuddy
                     [AppLanguage.Turkish] = "DONUT!",
                     [AppLanguage.German] = "DONUT!",
                     [AppLanguage.Spanish] = "¡DONUT!",
+                },
+                ["bonus.power_spin"] = new()
+                {
+                    [AppLanguage.English] = "POWER SPIN!",
+                    [AppLanguage.Polish] = "MOCNY OBRÓT!",
+                    [AppLanguage.Turkish] = "GÜÇLÜ DÖNÜŞ!",
+                    [AppLanguage.German] = "POWER SPIN!",
+                    [AppLanguage.Spanish] = "¡GIRO POTENTE!",
                 },
                 ["bonus.unstoppable"] = new()
                 {
@@ -966,6 +1665,15 @@ namespace LFSDriftBuddy
                     [AppLanguage.German] = "LETZTE RUNDE",
                     [AppLanguage.Spanish] = "ÚLTIMA VUELTA",
                 },
+
+                ["hud.lapstart"] = new()
+                {
+                    [AppLanguage.English] = "START",
+                    [AppLanguage.Polish] = "START",
+                    [AppLanguage.Turkish] = "BAŞLANGIÇ",
+                    [AppLanguage.German] = "START",
+                    [AppLanguage.Spanish] = "INICIO",
+                },
                 ["rev.calibration_prompt.title"] = new()
                 {
                     [AppLanguage.English] = "Rev Limiter Calibration",
@@ -993,6 +1701,25 @@ namespace LFSDriftBuddy
                         "Aún no hay un ajuste de limitador de RPM guardado para {0}. Para calibrar las RPM " +
                         "máximas, haz clic en el botón de abajo o usa tu botón/tecla asignada.",
                 },
+
+                ["rev.calibration_prompt.manual_body"] = new()
+                {
+                    [AppLanguage.English] =
+                        "Recalibrating the maximum RPM for {0}. Click the button below or press " +
+                        "your bound calibrate button/key.",
+                    [AppLanguage.Polish] =
+                        "Przekalibrowywanie maksymalnych obrotów dla {0}. Kliknij przycisk poniżej " +
+                        "lub użyj przypisanego przycisku/klawisza.",
+                    [AppLanguage.Turkish] =
+                        "{0} için maksimum RPM yeniden kalibre ediliyor. Aşağıdaki düğmeye tıklayın " +
+                        "ya da atanmış düğmenizi/tuşunuzu kullanın.",
+                    [AppLanguage.German] =
+                        "Die maximale Drehzahl für {0} wird neu kalibriert. Klicke auf die Schaltfläche " +
+                        "unten oder benutze deine zugewiesene Taste/deinen Knopf.",
+                    [AppLanguage.Spanish] =
+                        "Recalibrando las RPM máximas para {0}. Haz clic en el botón de abajo o usa " +
+                        "tu botón/tecla asignada.",
+                },
                 ["rev.calibration_prompt.enter_hint"] = new()
                 {
                     [AppLanguage.English] = " Or just press Enter.",
@@ -1009,16 +1736,16 @@ namespace LFSDriftBuddy
                     [AppLanguage.German] = "Schalte in den Leerlauf und halte das Gaspedal durchgetreten",
                     [AppLanguage.Spanish] = "Pon punto muerto y mantén el acelerador a fondo",
                 },
+
                 ["rev.calibration_prompt.done"] = new()
                 {
-                    [AppLanguage.English] = "Maximum RPM set to: {0}",
-                    [AppLanguage.Polish] = "Maksymalne obroty ustawiono na: {0}",
-                    [AppLanguage.Turkish] = "Maksimum RPM şu değere ayarlandı: {0}",
-                    [AppLanguage.German] = "Maximale Drehzahl eingestellt auf: {0}",
-                    [AppLanguage.Spanish] = "RPM máximas establecidas en: {0}",
+                    [AppLanguage.English] = "Successfully calibrated maximum engine RPM",
+                    [AppLanguage.Polish] = "Pomyślnie skalibrowano maksymalne obroty silnika",
+                    [AppLanguage.Turkish] = "Maksimum motor devri başarıyla kalibre edildi",
+                    [AppLanguage.German] = "Maximale Motordrehzahl erfolgreich kalibriert",
+                    [AppLanguage.Spanish] = "RPM máximas del motor calibradas correctamente",
                 },
 
-                // ── Added: strings that were previously hardcoded (not localized) in MainForm.cs ──
                 ["status.missing_sounds"] = new()
                 {
                     [AppLanguage.English] = "Missing sound files in the Sounds folder: {0}",
@@ -1050,6 +1777,14 @@ namespace LFSDriftBuddy
                     [AppLanguage.Turkish] = "Forza tarzı katman",
                     [AppLanguage.German] = "Forza-Stil-Overlay",
                     [AppLanguage.Spanish] = "Superposición estilo Forza",
+                },
+                ["hud.showoverlay.subtitle"] = new()
+                {
+                    [AppLanguage.English] = "Draws a transparent Forza-style overlay window over the game (drift score, RPM/speed gauge).",
+                    [AppLanguage.Polish] = "Rysuje przezroczyste okno nakładki w stylu Forza nad grą (wynik driftu, obrotomierz/prędkościomierz).",
+                    [AppLanguage.Turkish] = "Oyunun üzerine Forza tarzı şeffaf bir katman çizer (drift puanı, RPM/hız göstergesi).",
+                    [AppLanguage.German] = "Zeichnet ein transparentes Forza-Stil-Overlay-Fenster über dem Spiel (Drift-Punktzahl, Drehzahl-/Geschwindigkeitsanzeige).",
+                    [AppLanguage.Spanish] = "Dibuja una ventana de superposición transparente estilo Forza sobre el juego (puntuación de derrape, velocímetro/tacómetro).",
                 },
                 ["indicators.bindname.left"] = new()
                 {
@@ -1165,11 +1900,11 @@ namespace LFSDriftBuddy
                 },
                 ["collision.hit"] = new()
                 {
-                    [AppLanguage.English] = "{0} HIT -{1}",
-                    [AppLanguage.Polish] = "{0} UDERZENIE -{1}",
-                    [AppLanguage.Turkish] = "{0} ÇARPMA -{1}",
-                    [AppLanguage.German] = "{0} TREFFER -{1}",
-                    [AppLanguage.Spanish] = "{0} GOLPE -{1}",
+                    [AppLanguage.English] = "{0} HIT! -{1}",
+                    [AppLanguage.Polish] = "{0} UDERZENIE! -{1}",
+                    [AppLanguage.Turkish] = "{0} ÇARPMA! -{1}",
+                    [AppLanguage.German] = "{0} TREFFER! -{1}",
+                    [AppLanguage.Spanish] = "{0} ¡GOLPE! -{1}",
                 },
                 ["collision.kiss"] = new()
                 {
@@ -1177,7 +1912,7 @@ namespace LFSDriftBuddy
                     [AppLanguage.Polish] = "{0} MUŚNIĘCIE! +{1}",
                     [AppLanguage.Turkish] = "{0} SIYIRMA! +{1}",
                     [AppLanguage.German] = "{0} STREIFER! +{1}",
-                    [AppLanguage.Spanish] = "{0} ROCE! +{1}",
+                    [AppLanguage.Spanish] = "{0} ¡ROCE! +{1}",
                 },
                 ["indicators.sound_error"] = new()
                 {
@@ -1189,9 +1924,9 @@ namespace LFSDriftBuddy
                 },
                 ["hud.customcolor.title"] = new()
                 {
-                    [AppLanguage.English] = "Custom overlay color",
+                    [AppLanguage.English] = "Custom Overlay Color",
                     [AppLanguage.Polish] = "Własny kolor nakładki",
-                    [AppLanguage.Turkish] = "Özel katman rengi",
+                    [AppLanguage.Turkish] = "Özel Katman Rengi",
                     [AppLanguage.German] = "Benutzerdefinierte Overlay-Farbe",
                     [AppLanguage.Spanish] = "Color personalizado de superposición",
                 },

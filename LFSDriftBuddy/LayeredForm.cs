@@ -6,9 +6,7 @@ using System.Windows.Forms;
 
 namespace LFSDriftBuddy
 {
-    /// <summary>Form with per-pixel transparency (WS_EX_LAYERED + UpdateLayeredWindow) —
-    /// unlike TransparencyKey, doesn't leave fringing on anti-aliased text/shapes.</summary>
-    public class LayeredForm : Form
+        public class LayeredForm : Form
     {
         private const int WS_EX_LAYERED = 0x80000;
         private const int WS_EX_TRANSPARENT = 0x20;
@@ -45,7 +43,7 @@ namespace LFSDriftBuddy
             SetWindowPos(Handle, HWND_TOPMOST, 0, 0, 0, 0,
                 SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
         }
-       
+
         [StructLayout(LayoutKind.Sequential)] private struct POINT { public int x, y; public POINT(int x, int y) { this.x = x; this.y = y; } }
         [StructLayout(LayoutKind.Sequential)] private struct SIZE { public int cx, cy; public SIZE(int cx, int cy) { this.cx = cx; this.cy = cy; } }
         [StructLayout(LayoutKind.Sequential, Pack = 1)]
@@ -79,8 +77,7 @@ namespace LFSDriftBuddy
             SetWindowLong(Handle, GWL_EXSTYLE, ex);
         }
 
-        /// <summary>Replaces the whole window content with a 32bppArgb bitmap (full per-pixel alpha).</summary>
-        protected void SetBitmap(Bitmap bitmap)
+                protected void SetBitmap(Bitmap bitmap)
         {
             if (bitmap.PixelFormat != PixelFormat.Format32bppArgb)
                 throw new ArgumentException("Bitmap must be 32bppArgb.");
@@ -117,6 +114,6 @@ namespace LFSDriftBuddy
             }
         }
 
-        protected override void OnPaintBackground(PaintEventArgs e) { /* drawn manually via SetBitmap */ }
+        protected override void OnPaintBackground(PaintEventArgs e) {  }
     }
 }
