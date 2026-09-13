@@ -1548,16 +1548,16 @@ namespace LFSDriftBuddy
 
             _wheelInput = new SteeringWheelInput(
                 this.Handle,
-                (0, () => BeginInvoke((Action)(() => { _hud.ShowInGameAward("0"); }))),
-                (1, () => BeginInvoke((Action)(() => { _hud.ShowInGameAward("1"); }))),
-                (2, () => BeginInvoke((Action)(() => { _hud.ShowInGameAward("2"); }))),
-                (3, () => BeginInvoke((Action)(() => { _hud.ShowInGameAward("3"); }))),
-                (4, () => BeginInvoke((Action)(() => { _hud.ShowInGameAward("4"); }))),
-                (5, () => BeginInvoke((Action)(() => { _hud.ShowInGameAward("5"); }))),
-                (6, () => BeginInvoke((Action)(() => { _hud.ShowInGameAward("6"); }))),
-                (7, () => BeginInvoke((Action)(() => { _hud.ShowInGameAward("7"); }))),
-                (8, () => BeginInvoke((Action)(() => { _hud.ShowInGameAward("8"); }))),
-                (9, () => BeginInvoke((Action)(() => { _hud.ShowInGameAward("9"); }))),
+                //(0, () => BeginInvoke((Action)(() => { _hud.ShowInGameAward("0"); }))),
+                //(1, () => BeginInvoke((Action)(() => { _hud.ShowInGameAward("1"); }))),
+                //(2, () => BeginInvoke((Action)(() => { _hud.ShowInGameAward("2"); }))),
+                //(3, () => BeginInvoke((Action)(() => { _hud.ShowInGameAward("3"); }))),
+                //(4, () => BeginInvoke((Action)(() => { _hud.ShowInGameAward("4"); }))),
+                //(5, () => BeginInvoke((Action)(() => { _hud.ShowInGameAward("5"); }))),
+                //(6, () => BeginInvoke((Action)(() => { _hud.ShowInGameAward("6"); }))),
+                //(7, () => BeginInvoke((Action)(() => { _hud.ShowInGameAward("7"); }))),
+                //(8, () => BeginInvoke((Action)(() => { _hud.ShowInGameAward("8"); }))),
+                //(9, () => BeginInvoke((Action)(() => { _hud.ShowInGameAward("9"); }))),
                 (10, () => BeginInvoke((Action)(() =>
                 {
                     if (!_connectionSwitch.Checked)
@@ -1565,13 +1565,13 @@ namespace LFSDriftBuddy
                         _insim.Connect(_hostBox.Text.Trim(), (int)_portBox.Value, _adminBox.Text);
                     }
 
-                }))),
-                (11, () => BeginInvoke((Action)(() => { _hud.ShowInGameAward("11"); }))),
-                (12, () => BeginInvoke((Action)(() => { _hud.ShowInGameAward("12"); }))),
-                (13, () => BeginInvoke((Action)(() => { _hud.ShowInGameAward("13"); }))),
-                (14, () => BeginInvoke((Action)(() => { _hud.ShowInGameAward("14"); }))),
-                (15, () => BeginInvoke((Action)(() => { _hud.ShowInGameAward("15"); }))),
-                (16, () => BeginInvoke((Action)(() => { _hud.ShowInGameAward("16"); })))
+                })))
+                //(11, () => BeginInvoke((Action)(() => { _hud.ShowInGameAward("11"); }))),
+                //(12, () => BeginInvoke((Action)(() => { _hud.ShowInGameAward("12"); }))),
+                //(13, () => BeginInvoke((Action)(() => { _hud.ShowInGameAward("13"); }))),
+                //(14, () => BeginInvoke((Action)(() => { _hud.ShowInGameAward("14"); }))),
+                //(15, () => BeginInvoke((Action)(() => { _hud.ShowInGameAward("15"); }))),
+                //(16, () => BeginInvoke((Action)(() => { _hud.ShowInGameAward("16"); })))
 
             );
 
@@ -4174,6 +4174,9 @@ namespace LFSDriftBuddy
             _localPlayerParked = true;
             _overlay.ResetCarData();
             _overlay.ResetOutGaugeData();
+
+            if (_showHudCheck.Checked)
+                _hud.ClearAllButtons();
         }
 
         private void OnCarData(object sender, CarDataEventArgs e)
@@ -4233,7 +4236,7 @@ namespace LFSDriftBuddy
                 _angleValueLabel.ForeColor = _isDrifting
                     ? Color.FromArgb(255, 80, 80) : Color.FromArgb(60, 180, 255);
 
-                if (_showHudCheck.Checked && _insim.IsConnected && _insim.IsRaceNow)
+                if (_showHudCheck.Checked && _insim.IsConnected)
                     _hud.UpdateInGameHUD();
 
                 if (!string.IsNullOrEmpty(_drift.LastAwardedText) && _drift.LastAwardedText != _lastOverlayBonusText)
@@ -4265,7 +4268,7 @@ namespace LFSDriftBuddy
 
                 UpdateScoreLabels();
 
-                if (_showHudCheck.Checked && _insim.IsConnected && _insim.IsRaceNow)
+                if (_showHudCheck.Checked && _insim.IsConnected)
                     _hud.UpdateInGameHUD();
 
                 int colorTier = DriftEngine.GetColorTier(_driftLabelKind);

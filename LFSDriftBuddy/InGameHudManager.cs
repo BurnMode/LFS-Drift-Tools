@@ -36,7 +36,7 @@ namespace LFSDriftBuddy
         private int _awardTick;
         private string _colorCurrentMain = "^7";
 
-        private const int ActiveGraceMs = 450;
+        private static readonly double ActiveGraceMs = DriftEngine.COMBO_TIMEOUT_SEC * 1000;
         private DateTime _lastActiveUtc = DateTime.MinValue;
 
         private readonly Dictionary<byte, string> _lastSent = new();
