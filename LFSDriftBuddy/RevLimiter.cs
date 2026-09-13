@@ -92,23 +92,31 @@ namespace LFSDriftBuddy
 
             Error?.Invoke(string.Format(Localization.T("status.revlimiter.forced_restore"), reason));
 
+            bool restored = false;
             for (int attempt = 0; attempt < 3; attempt++)
             {
                 if (TryPressIgnitionKey())
+                {
+                    restored = true;
                     break;
+                }
 
                 Thread.Sleep(50);
             }
 
             lock (_lock)
             {
-                _ignitionState = true;
-                IsCutting = false;
+                if (restored)
+                {
+                    _ignitionState = true;
+                    IsCutting = false;
+                    WatchdogRecoveries++;
+                }
                 _lastCut = DateTime.UtcNow;
-                WatchdogRecoveries++;
             }
 
-            CutEnded?.Invoke();
+            if (restored)
+                CutEnded?.Invoke();
         }
 
         public void ProcessOutGaugeData(OutGaugeData data)
@@ -168,17 +176,20 @@ namespace LFSDriftBuddy
                     needsRestore = !_ignitionState;
                 }
 
-                if (needsRestore)
-                    TryPressIgnitionKey();
+                bool restored = !needsRestore || TryPressIgnitionKey();
 
                 lock (_lock)
                 {
-                    _ignitionState = true;
-                    IsCutting = false;
+                    if (restored)
+                    {
+                        _ignitionState = true;
+                        IsCutting = false;
+                    }
                     _lastCut = DateTime.UtcNow;
                 }
 
-                CutEnded?.Invoke();
+                if (restored)
+                    CutEnded?.Invoke();
             }
         }
 

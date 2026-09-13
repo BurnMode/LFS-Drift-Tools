@@ -99,6 +99,38 @@ namespace LFSDriftBuddy
                     [AppLanguage.German] = "⬤  InSim verbunden",
                     [AppLanguage.Spanish] = "⬤  InSim conectado",
                 },
+                ["overlay.welcome"] = new()
+                {
+                    [AppLanguage.English] = "Welcome to LFS Drift Tools",
+                    [AppLanguage.Polish] = "Witaj w LFS Drift Tools",
+                    [AppLanguage.Turkish] = "LFS Drift Tools'a Hoş Geldiniz",
+                    [AppLanguage.German] = "Willkommen bei LFS Drift Tools",
+                    [AppLanguage.Spanish] = "Bienvenido a LFS Drift Tools",
+                },
+                ["overlay.connected"] = new()
+                {
+                    [AppLanguage.English] = "Connected",
+                    [AppLanguage.Polish] = "Połączono",
+                    [AppLanguage.Turkish] = "Bağlandı",
+                    [AppLanguage.German] = "Verbunden",
+                    [AppLanguage.Spanish] = "Conectado",
+                },
+                ["overlay.goodbye"] = new()
+                {
+                    [AppLanguage.English] = "See you next time!",
+                    [AppLanguage.Polish] = "Do zobaczenia!",
+                    [AppLanguage.Turkish] = "Görüşmek üzere!",
+                    [AppLanguage.German] = "Bis zum nächsten Mal!",
+                    [AppLanguage.Spanish] = "¡Hasta la próxima!",
+                },
+                ["overlay.disconnected"] = new()
+                {
+                    [AppLanguage.English] = "Disconnected",
+                    [AppLanguage.Polish] = "Rozłączono",
+                    [AppLanguage.Turkish] = "Bağlantı kesildi",
+                    [AppLanguage.German] = "Getrennt",
+                    [AppLanguage.Spanish] = "Desconectado",
+                },
                 ["status.outgauge.disconnected"] = new()
                 {
                     [AppLanguage.English] = "⬤  Disconnected OutGauge",
@@ -498,6 +530,30 @@ namespace LFSDriftBuddy
                     [AppLanguage.Turkish] = "Büyük çizgiler",
                     [AppLanguage.German] = "Große Skalenstriche",
                     [AppLanguage.Spanish] = "Marcas mayores",
+                },
+                ["speedometer.elements.plaindigits"] = new()
+                {
+                    [AppLanguage.English] = "Plain speed number (no leading zeros)",
+                    [AppLanguage.Polish] = "Zwykła liczba (bez zer wiodących)",
+                    [AppLanguage.Turkish] = "Sade hız sayısı (baştaki sıfırlar yok)",
+                    [AppLanguage.German] = "Einfache Zahl (ohne führende Nullen)",
+                    [AppLanguage.Spanish] = "Número simple (sin ceros a la izquierda)",
+                },
+                ["speedometer.elements.instantspeed"] = new()
+                {
+                    [AppLanguage.English] = "Instant speed (no smoothing)",
+                    [AppLanguage.Polish] = "Natychmiastowa prędkość (bez wygładzania)",
+                    [AppLanguage.Turkish] = "Anlık hız (yumuşatma yok)",
+                    [AppLanguage.German] = "Sofortige Geschwindigkeit (ohne Glättung)",
+                    [AppLanguage.Spanish] = "Velocidad instantánea (sin suavizado)",
+                },
+                ["speedometer.elements.airspeed"] = new()
+                {
+                    [AppLanguage.English] = "Air Speed",
+                    [AppLanguage.Polish] = "Air Speed",
+                    [AppLanguage.Turkish] = "Air Speed",
+                    [AppLanguage.German] = "Air Speed",
+                    [AppLanguage.Spanish] = "Air Speed",
                 },
                 ["speedometer.elements.redlinethickness"] = new()
                 {

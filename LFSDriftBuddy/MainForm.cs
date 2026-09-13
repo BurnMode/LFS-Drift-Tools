@@ -57,6 +57,11 @@ namespace LFSDriftBuddy
         private DriftEngine _drift = new DriftEngine();
         private IndicatorManager _indicators = new IndicatorManager();
         private byte _lastKnownPlayerPLID = 0;
+        private byte _myOwnPlid = 0;
+        private bool _sawOwnOutGaugeSinceConnect = false;
+        private bool _sawAnyOutGaugeSinceConnect = false;
+        private bool _localPlayerParked = false;
+        private string? _localPlayerNickAtPark = null;
 
         private double _speedKmh = 0;
         private double _driftAngle = 0;
@@ -106,6 +111,7 @@ namespace LFSDriftBuddy
             _drift.DeactivateLapCounting();
             _overlay.SetLapBoxVisible(false);
             _overlay.UpdateAccentColor(OverlayColorIdle);
+            _overlay.ResetOutGaugeData();
 
             if (_dashLeftLamp != null)
             {
@@ -139,6 +145,34 @@ namespace LFSDriftBuddy
             _showRPMHudCheck.SetCheckedSilent(available && _showRPMHudCheckedBeforeMasterOff);
         }
 
+        private void SyncRevAutoCalibrateAvailability()
+        {
+            if (_revAutoCalibrateNewCarCheck == null) return;
+            bool available = _outGaugeConnectionEnabled && (_revEnableSwitch?.Checked ?? false);
+            _revAutoCalibrateNewCarCheck.Enabled = available;
+            _revAutoCalibrateNewCarCheck.SetCheckedSilent(available && _revAutoCalibrateCheckedBeforeRevOff);
+        }
+
+        private void UpdateOverlayAttachment()
+        {
+            bool wantsOverlay = (_showOverlayCheck?.Checked ?? false) || (_speedoTachoEnabledCheck?.Checked ?? false);
+            if (wantsOverlay)
+            {
+                IntPtr lfsHwnd = FindLfsWindow();
+                if (lfsHwnd != IntPtr.Zero)
+                {
+                    _overlay.UpdateScore(_drift.TotalScore);
+                    _overlay.UpdateAccentColor(OverlayColorIdle);
+                    _overlay.UpdateMaxRpm(CalibratedMAXRPM);
+                    _overlay.AttachTo(lfsHwnd);
+                }
+            }
+            else
+            {
+                _overlay.Detach();
+            }
+        }
+
         private void ApplyOutGaugeConnectionState(bool on)
         {
             if (on)
@@ -164,9 +198,9 @@ namespace LFSDriftBuddy
                 _revLimiterNumeric.Enabled = true;
                 _revCutMS.Enabled = true;
                 revBindingsBtn.Enabled = true;
-                _revAutoCalibrateNewCarCheck.Enabled = true;
                 _revLimiter.Enabled = _revEnabledBeforeOutGaugeOff;
                 _revEnableSwitch.SetCheckedSilent(_revEnabledBeforeOutGaugeOff);
+                SyncRevAutoCalibrateAvailability();
                 if (!_revLimiter.IsRunning)
                     _revLimiter.Start();
             }
@@ -192,7 +226,7 @@ namespace LFSDriftBuddy
                 _revLimiterNumeric.Enabled = false;
                 _revCutMS.Enabled = false;
                 revBindingsBtn.Enabled = false;
-                _revAutoCalibrateNewCarCheck.Enabled = false;
+                SyncRevAutoCalibrateAvailability();
             }
         }
 
@@ -232,6 +266,7 @@ namespace LFSDriftBuddy
         private MacToggleSwitch _revEnableSwitch;
 
         private bool _revEnabledBeforeOutGaugeOff = true;
+        private bool _revAutoCalibrateCheckedBeforeRevOff = true;
 
         private MacToggleSwitch _revAutoCalibrateNewCarCheck;
         private MacToggleSwitch _connectionSwitch;
@@ -386,7 +421,6 @@ namespace LFSDriftBuddy
             {
                 if (inRace)
                 {
-                    _overlay.SetMenuMode(false);
                     _hud.InitInGameHUD();
                 }
                 else
@@ -395,7 +429,6 @@ namespace LFSDriftBuddy
                     _hud.InvalidateCache();
                     _drift.DeactivateLapCounting();
                     _overlay.UpdateLapScore(_drift.LapScore);
-                    _overlay.SetMenuMode(true);
                     _overlay.SetLapBoxVisible(false);
                 }
             }));
@@ -431,16 +464,18 @@ namespace LFSDriftBuddy
             }));
             _insim.CarReset += (s, e) => BeginInvoke((Action)(() =>
             {
-                if (e.PLID == _lastKnownPlayerPLID)
+                if (e.PLID == _myOwnPlid)
                 {
-
                     LoadVehicleRevSettings(_currentCarName);
+                    _drift.ResetLapScore();
+                    _overlay.UpdateLapScore(_drift.LapScore);
+                    _overlay.SetLapBoxVisible(false);
                 }
             }));
 
             _insim.PitLaneEntered += (s, e) => BeginInvoke((Action)(() =>
             {
-                if (e.PLID == _lastKnownPlayerPLID)
+                if (e.PLID == _myOwnPlid)
                 {
                     _drift.ResetLapScore();
                     _overlay.UpdateLapScore(_drift.LapScore);
@@ -450,8 +485,18 @@ namespace LFSDriftBuddy
 
             _insim.PitLaneExited += (s, e) => BeginInvoke((Action)(() =>
             {
-                if (e.PLID == _lastKnownPlayerPLID)
+                bool isMe = e.PLID == _myOwnPlid;
+                if (!isMe && _localPlayerParked && _localPlayerNickAtPark != null &&
+                    _insim.GetPlayerName(e.PLID) == _localPlayerNickAtPark)
                 {
+                    _myOwnPlid = e.PLID;
+                    isMe = true;
+                }
+
+                if (isMe)
+                {
+                    _lastKnownPlayerPLID = _myOwnPlid;
+                    _localPlayerParked = false;
                     _drift.ResetLapScore();
                     _overlay.UpdateLapScore(_drift.LapScore);
                     _overlay.SetLapBoxVisible(true);
@@ -464,16 +509,14 @@ namespace LFSDriftBuddy
                 _drift.OnRaceRestarted();
                 _overlay.UpdateLapScore(_drift.LapScore);
                 _overlay.SetLapBoxVisible(false);
+                _localPlayerParked = false;
+                _localPlayerNickAtPark = null;
             }));
 
             _insim.PlayerPitted += (s, e) => BeginInvoke((Action)(() =>
             {
-                if (e.PLID == _lastKnownPlayerPLID)
-                {
-                    _drift.ResetLapScore();
-                    _overlay.UpdateLapScore(_drift.LapScore);
-                    _overlay.SetLapBoxVisible(false);
-                }
+                if (e.PLID == _myOwnPlid)
+                    EnterParkedState();
             }));
 
             _insim.CheckpointCrossed += (s, e) => BeginInvoke((Action)(() =>
@@ -935,7 +978,9 @@ namespace LFSDriftBuddy
                     _indicatorCenterThresholdPct = Math.Clamp(settings.IndicatorCenterThresholdPct, 1, 90);
                     _indicatorCenterThresholdNumeric.Value = _indicatorCenterThresholdPct;
 
-                    _speedoTachoEnabledCheck.Checked = settings.SpeedoTachoEnabled;
+                    _speedoTachoEnabledCheck.SetCheckedSilent(settings.SpeedoTachoEnabled);
+                    _overlay.SpeedoTachoEnabled = settings.SpeedoTachoEnabled;
+                    UpdateOverlayAttachment();
                     _speedoTachoOffsetXNumeric.Value = Math.Clamp((decimal)settings.SpeedoTachoOffsetX,
                         _speedoTachoOffsetXNumeric.Minimum, _speedoTachoOffsetXNumeric.Maximum);
                     _speedoTachoOffsetYNumeric.Value = Math.Clamp((decimal)settings.SpeedoTachoOffsetY,
@@ -971,6 +1016,9 @@ namespace LFSDriftBuddy
                         ShowUnit = settings.SpeedoTachoShowUnit,
                         ShowMinorTicks = settings.SpeedoTachoShowMinorTicks,
                         ShowMajorTicks = settings.SpeedoTachoShowMajorTicks,
+                        PlainDigits = settings.SpeedoTachoPlainDigits,
+                        InstantSpeed = settings.SpeedoTachoInstantSpeed,
+                        AirSpeed = settings.SpeedoTachoAirSpeed,
                         RedlineThickness = settings.RedlineThickness <= 0 ? 4f : settings.RedlineThickness,
                         BackgroundImagePath = settings.SpeedoBackgroundImagePath ?? "",
                         BackgroundPanX = settings.SpeedoBackgroundPanX,
@@ -1076,6 +1124,9 @@ namespace LFSDriftBuddy
                     SpeedoTachoShowUnit = _overlay.SpeedoTachoShowUnit,
                     SpeedoTachoShowMinorTicks = _overlay.SpeedoTachoShowMinorTicks,
                     SpeedoTachoShowMajorTicks = _overlay.SpeedoTachoShowMajorTicks,
+                    SpeedoTachoPlainDigits = _overlay.SpeedoTachoPlainDigits,
+                    SpeedoTachoInstantSpeed = _overlay.SpeedoTachoInstantSpeed,
+                    SpeedoTachoAirSpeed = _overlay.SpeedoTachoAirSpeed,
                     RedlineThickness = _redlineThickness,
 
                     SpeedoBackgroundImagePath = _speedoBackgroundImagePath,
@@ -1257,16 +1308,44 @@ namespace LFSDriftBuddy
             BeginInvoke((Action)(() =>
             {
 
+                _sawAnyOutGaugeSinceConnect = true;
+
+                if (_localPlayerParked)
+                {
+                    if (data.PLID != 0 && _localPlayerNickAtPark != null &&
+                        _insim.GetPlayerName(data.PLID) == _localPlayerNickAtPark)
+                    {
+                        _lastKnownPlayerPLID = data.PLID;
+                        _myOwnPlid = data.PLID;
+                        _localPlayerParked = false;
+                        _sawOwnOutGaugeSinceConnect = true;
+                        AppendStatusMessage($"DEBUG OnRevData UNPARKED via OutGauge: new PLID={data.PLID}");
+                    }
+                    else
+                    {
+                        return;
+                    }
+                }
+
                 _overlay.NotifyOutGaugeData();
+                _overlay.UpdateSpeedGaugeDash(data.Speed * 3.6);
                 _outGaugeFreshness.Ping();
 
                 if (data.PLID != 0 && data.PLID != _lastKnownPlayerPLID)
                 {
+                    if (_lastKnownPlayerPLID != 0)
+                        OnTrackedPlayerChanged();
+
                     _lastKnownPlayerPLID = data.PLID;
+                    if (_myOwnPlid == 0)
+                        _myOwnPlid = data.PLID;
                     TryApplyInSimDriverName(data.PLID);
                     if (_insim.GetPlayerName(data.PLID) == null)
                         _insim.RequestPlayerList();
                 }
+
+                if (data.PLID != 0 && data.PLID == _myOwnPlid)
+                    _sawOwnOutGaugeSinceConnect = true;
 
                 _drift.SetHandbrakeActive(data.HandbrakeOn);
                 _rpmLabel.Text = ((int)data.RPM).ToString("N0");
@@ -1298,7 +1377,7 @@ namespace LFSDriftBuddy
 
                 _hud.ShowInGameRPMLimitter(_revLimiterNumeric.Value.ToString());
 
-                _drift.UpdateEngineTelemetry(data.RPM, data.Throttle, (int)data.Gear);
+                _drift.UpdateEngineTelemetry(data.RPM, data.Throttle, (int)data.Gear, data.Speed * 3.6);
 
                 _indicators.UpdateFromOutGauge(data.LeftSignalOn, data.RightSignalOn, data.AnySignalOn);
 
@@ -1663,6 +1742,7 @@ namespace LFSDriftBuddy
             _speedoTachoEnabledCheck.CheckedChanged += (s, e) =>
             {
                 _overlay.SpeedoTachoEnabled = _speedoTachoEnabledCheck.Checked;
+                UpdateOverlayAttachment();
                 SaveSettings();
             };
             speedometerPanel.Controls.Add(_speedoTachoEnabledCheck);
@@ -1902,22 +1982,11 @@ namespace LFSDriftBuddy
 
             _showOverlayCheck.CheckedChanged += (s, e) =>
             {
+                _overlay.ScoreOverlayEnabled = _showOverlayCheck.Checked;
                 if (_showOverlayCheck.Checked)
-                {
-                    IntPtr lfsHwnd = FindLfsWindow();
-                    if (lfsHwnd != IntPtr.Zero)
-                    {
-                        _overlay.UpdateScore(_drift.TotalScore);
-                        _overlay.UpdateAccentColor(OverlayColorIdle);
-                        _overlay.UpdateMaxRpm(CalibratedMAXRPM);
-                        _overlay.AttachTo(lfsHwnd);
-                    }
                     _showHudCheck.Checked = false;
-                }
-                else
-                {
-                    _overlay.Detach();
-                }
+
+                UpdateOverlayAttachment();
                 SaveSettings();
                 RefreshColorButtonSwatches();
             };
@@ -2024,6 +2093,8 @@ namespace LFSDriftBuddy
                 if (!_revLimiter.IsRunning)
                     _revLimiter.Start();
 
+                SyncRevAutoCalibrateAvailability();
+
                 SaveSettings();
             };
 
@@ -2106,7 +2177,11 @@ namespace LFSDriftBuddy
                 Checked = true
             };
             revLimiterPanel.Controls.Add(_revAutoCalibrateNewCarCheck);
-            _revAutoCalibrateNewCarCheck.CheckedChanged += (s, e) => SaveSettings();
+            _revAutoCalibrateNewCarCheck.CheckedChanged += (s, e) =>
+            {
+                _revAutoCalibrateCheckedBeforeRevOff = _revAutoCalibrateNewCarCheck.Checked;
+                SaveSettings();
+            };
             MakeLabel(revLimiterPanel, Localization.T("rev.autocalibrate.subtitle"), 24, 252, 380, 18,
                 Color.FromArgb(140, 140, 170), new Font("Segoe UI", 7.5f), ContentAlignment.TopLeft, locKey: "rev.autocalibrate.subtitle");
 
@@ -2685,6 +2760,7 @@ namespace LFSDriftBuddy
             bool wasEnabledBeforeCalibration = _revLimiter.Enabled;
             _revLimiter.Enabled = false;
             _revEnableSwitch.SetCheckedSilent(false);
+            SyncRevAutoCalibrateAvailability();
 
             _hud.ShowInGameAward(Localization.T("rev.calibration_award.start"));
             _revLimiterCalibrationPrompt?.ShowCalibratingState();
@@ -2701,6 +2777,7 @@ namespace LFSDriftBuddy
 
             _revLimiter.Enabled = wasEnabledBeforeCalibration;
             _revEnableSwitch.SetCheckedSilent(wasEnabledBeforeCalibration);
+            SyncRevAutoCalibrateAvailability();
             _hud.ShowInGameAward(Localization.T("rev.limit") + CalibratedMAXRPM);
             _hud.ShowInGameRPMLimitter(CalibratedMAXRPM.ToString());
             _revLimiterCalibrationPrompt?.ShowDoneState(CalibratedMAXRPM);
@@ -3499,7 +3576,7 @@ namespace LFSDriftBuddy
         private void ShowSpeedoElementsMenu()
         {
             Form popup = new Form { StartPosition = FormStartPosition.CenterParent };
-            var card = BuildPopupChrome(popup, 340, 330, out _);
+            var card = BuildPopupChrome(popup, 340, 450, out _);
 
             MakeLabel(card, Localization.T("speedometer.elements.title"), 20, 15, 290, 24,
                 ApplePalette.Title, new Font("Segoe UI Semibold", 11f));
@@ -3543,6 +3620,20 @@ namespace LFSDriftBuddy
                 _overlay.SpeedoTachoShowMajorTicks = v;
                 _speedoTachoPreview.ShowMajorTicks = v;
                 _speedoTachoPreview.Invalidate();
+            });
+            AddToggleRow("speedometer.elements.plaindigits", _overlay.SpeedoTachoPlainDigits, v =>
+            {
+                _overlay.SpeedoTachoPlainDigits = v;
+                _speedoTachoPreview.PlainDigits = v;
+                _speedoTachoPreview.Invalidate();
+            });
+            AddToggleRow("speedometer.elements.instantspeed", _overlay.SpeedoTachoInstantSpeed, v =>
+            {
+                _overlay.SpeedoTachoInstantSpeed = v;
+            });
+            AddToggleRow("speedometer.elements.airspeed", _overlay.SpeedoTachoAirSpeed, v =>
+            {
+                _overlay.SpeedoTachoAirSpeed = v;
             });
 
             MakeLabel(card, Localization.T("speedometer.elements.redlinethickness"), 20, y, 250, 20, ApplePalette.Text);
@@ -3604,6 +3695,9 @@ namespace LFSDriftBuddy
             ShowUnit = _overlay.SpeedoTachoShowUnit,
             ShowMinorTicks = _overlay.SpeedoTachoShowMinorTicks,
             ShowMajorTicks = _overlay.SpeedoTachoShowMajorTicks,
+            PlainDigits = _overlay.SpeedoTachoPlainDigits,
+            InstantSpeed = _overlay.SpeedoTachoInstantSpeed,
+            AirSpeed = _overlay.SpeedoTachoAirSpeed,
             RedlineThickness = _redlineThickness,
             BackgroundImagePath = _speedoBackgroundImagePath,
             BackgroundPanX = _speedoBackgroundPanX,
@@ -3623,12 +3717,16 @@ namespace LFSDriftBuddy
             _overlay.SpeedoTachoShowUnit = preset.ShowUnit;
             _overlay.SpeedoTachoShowMinorTicks = preset.ShowMinorTicks;
             _overlay.SpeedoTachoShowMajorTicks = preset.ShowMajorTicks;
+            _overlay.SpeedoTachoPlainDigits = preset.PlainDigits;
+            _overlay.SpeedoTachoInstantSpeed = preset.InstantSpeed;
+            _overlay.SpeedoTachoAirSpeed = preset.AirSpeed;
             if (_speedoTachoPreview != null)
             {
                 _speedoTachoPreview.ShowRpmDigits = preset.ShowRpmDigits;
                 _speedoTachoPreview.ShowUnit = preset.ShowUnit;
                 _speedoTachoPreview.ShowMinorTicks = preset.ShowMinorTicks;
                 _speedoTachoPreview.ShowMajorTicks = preset.ShowMajorTicks;
+                _speedoTachoPreview.PlainDigits = preset.PlainDigits;
             }
 
             _redlineThickness = preset.RedlineThickness <= 0 ? 4f : preset.RedlineThickness;
@@ -4055,15 +4153,50 @@ namespace LFSDriftBuddy
             confirmTimer.Start();
         }
 
+        private void OnTrackedPlayerChanged()
+        {
+            _drift.ResetLapScore();
+            _overlay.UpdateLapScore(_drift.LapScore);
+            _overlay.SetLapBoxVisible(false);
+            UpdateLapContextLabel();
+        }
+
+        private void EnterParkedState()
+        {
+            if (_localPlayerParked || _myOwnPlid == 0) return;
+
+            _drift.ResetLapScore();
+            _overlay.UpdateLapScore(_drift.LapScore);
+            _overlay.SetLapBoxVisible(false);
+
+            _lastKnownPlayerPLID = _myOwnPlid;
+            _localPlayerNickAtPark = _insim.GetPlayerName(_myOwnPlid);
+            _localPlayerParked = true;
+            _overlay.ResetCarData();
+            _overlay.ResetOutGaugeData();
+        }
+
         private void OnCarData(object sender, CarDataEventArgs e)
         {
+
+            if (_localPlayerParked)
+                return;
 
             byte viewPlid = _insim.ViewPLID;
 
             if (viewPlid != 0)
+            {
+                if (viewPlid != _lastKnownPlayerPLID && _lastKnownPlayerPLID != 0)
+                    OnTrackedPlayerChanged();
+
                 _lastKnownPlayerPLID = viewPlid;
+                if (_myOwnPlid == 0)
+                    _myOwnPlid = viewPlid;
+            }
             else if (_lastKnownPlayerPLID == 0)
+            {
                 return;
+            }
 
             if (e.Car.PLID != _lastKnownPlayerPLID)
                 return;
@@ -4077,6 +4210,7 @@ namespace LFSDriftBuddy
                 if (!_showHudCheck.Checked)
                     _hud.ShowInGameAward("");
 
+                _overlay.NotifyCarData();
                 _drift.SetOutGaugeDataFresh(_outGaugeFreshness.IsFresh);
                 _drift.Update(e.Car);
                 _indicators.Update();
@@ -4442,17 +4576,26 @@ namespace LFSDriftBuddy
                 if (_showHudCheck.Checked)
                     _hud.InitInGameHUD();
 
-                if (_showOverlayCheck.Checked)
+                UpdateOverlayAttachment();
+
+                _overlay.ShowConnectionNotification(
+                    Localization.T("overlay.welcome"),
+                    Localization.T("overlay.connected"),
+                    OverlayColor1,
+                    5.0);
+
+                _sawOwnOutGaugeSinceConnect = false;
+                _sawAnyOutGaugeSinceConnect = false;
+                var parkedCheckTimer = new System.Windows.Forms.Timer { Interval = 5500 };
+                parkedCheckTimer.Tick += (ts, te) =>
                 {
-                    IntPtr lfsHwnd = FindLfsWindow();
-                    if (lfsHwnd != IntPtr.Zero)
-                    {
-                        _overlay.UpdateScore(_drift.TotalScore);
-                        _overlay.UpdateAccentColor(OverlayColorIdle);
-                        _overlay.UpdateMaxRpm(CalibratedMAXRPM);
-                        _overlay.AttachTo(lfsHwnd);
-                    }
-                }
+                    parkedCheckTimer.Stop();
+                    parkedCheckTimer.Dispose();
+                    if (!_localPlayerParked && _myOwnPlid != 0 &&
+                        _sawAnyOutGaugeSinceConnect && !_sawOwnOutGaugeSinceConnect)
+                        EnterParkedState();
+                };
+                parkedCheckTimer.Start();
 
             }));
         }
@@ -4469,11 +4612,30 @@ namespace LFSDriftBuddy
                 _speedKmh = 0; _driftAngle = 0;
 
                 _angleValueLabel.Text = "0°";
-                _overlay.Detach();
+
+                _overlay.ShowConnectionNotification(
+                    Localization.T("overlay.goodbye"),
+                    Localization.T("overlay.disconnected"),
+                    OverlayColor4,
+                    5.0);
+                var detachTimer = new System.Windows.Forms.Timer { Interval = 5200 };
+                detachTimer.Tick += (ts, te) =>
+                {
+                    detachTimer.Stop();
+                    detachTimer.Dispose();
+                    _overlay.Detach();
+                };
+                detachTimer.Start();
+
                 _overlay.ResetOutGaugeData();
+                _overlay.ResetCarData();
                 _outGaugeFreshness.Reset();
                 _drift.SetOutGaugeDataFresh(false);
                 _hud.InvalidateCache();
+                _localPlayerParked = false;
+                _localPlayerNickAtPark = null;
+                _lastKnownPlayerPLID = 0;
+                _myOwnPlid = 0;
             }));
         }
 
@@ -6340,6 +6502,7 @@ namespace LFSDriftBuddy
         public bool ShowUnit { get; set; } = true;
         public bool ShowMinorTicks { get; set; } = true;
         public bool ShowMajorTicks { get; set; } = true;
+        public bool PlainDigits { get; set; } = false;
 
         public Image SpeedoBackgroundImage { get; set; } = null;
         public float SpeedoBackgroundPanX { get; set; } = 0f;
@@ -6650,7 +6813,9 @@ namespace LFSDriftBuddy
             using Font unitFont = MakeFont(11f);
 
             double displaySpeed = UseMph ? DemoSpeedKmh * KmhToMph : DemoSpeedKmh;
-            string speedText = ((int)Math.Round(displaySpeed)).ToString("D3");
+            string speedText = PlainDigits
+                ? ((int)Math.Round(displaySpeed)).ToString()
+                : ((int)Math.Round(displaySpeed)).ToString("D3");
             var speedSize = g.MeasureString(speedText, speedFont);
             float speedX = cx - speedSize.Width / 2f;
             float speedY = cy + gearRadius + 10;
@@ -6905,6 +7070,9 @@ namespace LFSDriftBuddy
         public bool ShowUnit { get; set; } = true;
         public bool ShowMinorTicks { get; set; } = true;
         public bool ShowMajorTicks { get; set; } = true;
+        public bool PlainDigits { get; set; } = false;
+        public bool InstantSpeed { get; set; } = false;
+        public bool AirSpeed { get; set; } = false;
         public float RedlineThickness { get; set; } = 4f;
         public string BackgroundImagePath { get; set; } = "";
         public float BackgroundPanX { get; set; } = 0f;
@@ -6971,6 +7139,9 @@ namespace LFSDriftBuddy
         public bool SpeedoTachoShowUnit { get; set; } = true;
         public bool SpeedoTachoShowMinorTicks { get; set; } = true;
         public bool SpeedoTachoShowMajorTicks { get; set; } = true;
+        public bool SpeedoTachoPlainDigits { get; set; } = false;
+        public bool SpeedoTachoInstantSpeed { get; set; } = false;
+        public bool SpeedoTachoAirSpeed { get; set; } = false;
         public float RedlineThickness { get; set; } = 4f;
 
         public string SpeedoBackgroundImagePath { get; set; } = "";

@@ -14,6 +14,8 @@ public class SteeringWheelInput : IDisposable
     private bool[] _previousButtons = Array.Empty<bool>();
     private readonly Dictionary<int, Action> _buttonBindings;
     private bool _autoConnectAttempted = false;
+    private DateTime _reconnectRetryAt = DateTime.MaxValue;
+    private const int ReconnectDelayMs = 1500;
     public bool IsConnected => _wheel != null;
     public string DeviceName { get; private set; } = "";
     public Guid DeviceGuid { get; private set; } = Guid.Empty;
@@ -138,6 +140,7 @@ public class SteeringWheelInput : IDisposable
 
             _useXInput = false;
             _xinputPad = null;
+            _reconnectRetryAt = DateTime.UtcNow.AddMilliseconds(ReconnectDelayMs);
             return;
         }
 
@@ -230,7 +233,6 @@ public class SteeringWheelInput : IDisposable
             DeviceGuid = instanceGuid;
             SteeringAxis = axis;
             _previousButtons = new bool[16];
-            _autoConnectAttempted = true;
 
             Log?.Invoke($"{Localization.T("status.connected")} (XInput): {DeviceName}");
             return;
@@ -256,7 +258,6 @@ public class SteeringWheelInput : IDisposable
             DeviceName = name;
             DeviceGuid = instanceGuid;
             _previousButtons = new bool[_wheel.Capabilities.ButtonCount];
-            _autoConnectAttempted = true;
 
             Log?.Invoke($"{Localization.T("status.connected")} {DeviceName} ({Localization.T("wheelconfig.axis")}{SteeringAxis})");
         }
@@ -281,6 +282,11 @@ public class SteeringWheelInput : IDisposable
             if (!_autoConnectAttempted)
             {
                 _autoConnectAttempted = true;
+                TryAutoConnect();
+            }
+            else if (DateTime.UtcNow >= _reconnectRetryAt)
+            {
+                _reconnectRetryAt = DateTime.MaxValue;
                 TryAutoConnect();
             }
             return;
@@ -334,6 +340,7 @@ public class SteeringWheelInput : IDisposable
         {
 
             _wheel = null;
+            _reconnectRetryAt = DateTime.UtcNow.AddMilliseconds(ReconnectDelayMs);
             Log?.Invoke(Localization.T("status.disconnectwheel"));
         }
     }

@@ -930,7 +930,7 @@ namespace LFSDriftBuddy
 
             return 0.001 +
                    ((kmh - 1) /
-                   (100 - 15)) * 1.99;
+                   (100 - 1)) * 1.99;
         }
 
         private int GetDriftIndicatorLevel(double angle)
@@ -1138,6 +1138,16 @@ namespace LFSDriftBuddy
         private float _lastRpm = 0f;
         private float _lastThrottle = 0f;
         private int _lastGear = 0;
+        private double _lastDashSpeedKmh = 0;
+        private DateTime _lastDashSpeedUpdateTime = DateTime.MinValue;
+        private const double DASH_SPEED_MAX_AGE_SEC = 0.3;
+
+        // Burnout tiers are driven by wheel slip (OutGauge dash speed minus the car's real
+        // SpeedKmh) plus how long the burnout is held — slip scales naturally with each car's
+        // gearing, unlike raw RPM. Tune these weights against BurnoutGood/High/Extreme/Insane
+        // feel if needed.
+        private const double BURNOUT_SLIP_WEIGHT = 0.38;
+        private const double BURNOUT_DURATION_WEIGHT = 2.0;
 
         private DateTime _burnoutConditionStart = DateTime.MinValue;
 
@@ -1184,11 +1194,13 @@ namespace LFSDriftBuddy
 
         private bool _wasDriftingPrev = false;
 
-                public void UpdateEngineTelemetry(float rpm, float throttle, int gear)
+                public void UpdateEngineTelemetry(float rpm, float throttle, int gear, double dashSpeedKmh = 0)
         {
             _lastRpm = Math.Max(0, rpm);
             _lastThrottle = Math.Clamp(throttle, 0f, 1f);
             _lastGear = gear;
+            _lastDashSpeedKmh = Math.Max(0, dashSpeedKmh);
+            _lastDashSpeedUpdateTime = DateTime.UtcNow;
         }
 
         private void UpdateBurnout(DateTime now, bool drifting, bool speeding, double headingDeg)
@@ -1295,7 +1307,7 @@ namespace LFSDriftBuddy
             double rpmFactor = Math.Clamp(_lastRpm / (BURNOUT_MIN_RPM ), 1.0, 5.0);
             ComboMultiplier = Math.Round(Math.Min(ComboMultiplier + (0.01 * rpmFactor * _dtSec), 10.0), 2);
 
-            long framePts = (long)Math.Round(BURNOUT_POINTS_PER_SECOND * ComboMultiplier * _dtSec * (_lastGear / 2));
+            long framePts = (long)Math.Round(BURNOUT_POINTS_PER_SECOND * ComboMultiplier * _dtSec * (_lastGear / 2.0));
 
             CurrentRunPoints += framePts;
             TotalScore += framePts;
@@ -1303,7 +1315,9 @@ namespace LFSDriftBuddy
             _lastBurnoutTime = now;
             SaveCurrentDriver();
 
-            var burnoutKind = GetBurnoutLabelKind(_lastRpm, heldSec, _lastGear);
+            bool dashSpeedFresh = (now - _lastDashSpeedUpdateTime).TotalSeconds <= DASH_SPEED_MAX_AGE_SEC;
+            double wheelSlipKmh = dashSpeedFresh ? Math.Max(0, _lastDashSpeedKmh - SpeedKmh) : 0;
+            var burnoutKind = GetBurnoutLabelKind(wheelSlipKmh, heldSec);
             DriftScored?.Invoke(
                 CurrentRunPoints,
                 ComboMultiplier,
@@ -1456,10 +1470,9 @@ namespace LFSDriftBuddy
             }
         }
 
-        private DriftLabelKind GetBurnoutLabelKind(float rpm, double heldSec, float gear)
+        private DriftLabelKind GetBurnoutLabelKind(double wheelSlipKmh, double heldSec)
         {
-            double rpmAboveThreshold = Math.Max(0, rpm - BURNOUT_MIN_RPM);
-            double severity = (rpmAboveThreshold / 100.0) + ((heldSec - BURNOUT_ACTIVATE_SEC) * gear);
+            double severity = wheelSlipKmh * BURNOUT_SLIP_WEIGHT + (heldSec - BURNOUT_ACTIVATE_SEC) * BURNOUT_DURATION_WEIGHT;
 
             if (severity >= 80) return DriftLabelKind.BurnoutInsane;
             if (severity >= 65) return DriftLabelKind.BurnoutExtreme;

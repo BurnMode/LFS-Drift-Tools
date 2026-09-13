@@ -104,9 +104,9 @@ namespace LFSDriftBuddy.InSim
             return new byte[]
             {
                 2,
-                43,
+                (byte)PacketType.ISP_BFN,
                 0,
-                3,
+                1,
                 ucid,
                 0,
                 0,

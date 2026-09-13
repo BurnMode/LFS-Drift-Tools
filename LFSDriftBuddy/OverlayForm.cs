@@ -67,7 +67,8 @@ namespace LFSDriftBuddy
 
         private Color _accentColor = Color.FromArgb(255, 235, 30);
         private Color _accentColorBack = Color.FromArgb(225, 205, 0);
-        public void UpdateAccentColor(Color c)
+
+        private void SetAccentColorInternal(Color c)
         {
             _accentColor = c;
             _accentColorBack = Color.FromArgb(
@@ -76,6 +77,23 @@ namespace LFSDriftBuddy
                 (int)(c.G * 0.35),
                 (int)(c.B * 0.35)
             );
+        }
+
+        public void UpdateAccentColor(Color c)
+        {
+            if (DateTime.Now < _notificationUntil) return;
+            SetAccentColorInternal(c);
+        }
+
+        private string? _notificationText = null;
+        private DateTime _notificationUntil = DateTime.MinValue;
+
+        public void ShowConnectionNotification(string scoreText, string bonusText, Color accentColor, double durationSec = 5.0)
+        {
+            _notificationText = scoreText;
+            _notificationUntil = DateTime.Now.AddSeconds(durationSec);
+            SetAccentColorInternal(accentColor);
+            ShowBonus(bonusText, durationSec, boostOpacity: true);
         }
 
         private class ComboCharAnim
@@ -113,10 +131,19 @@ namespace LFSDriftBuddy
 
         private bool HasFreshOutGaugeData => _outGaugeFreshness.IsFresh;
 
+        private readonly DataFreshnessGate _carDataFreshness = new(TimeSpan.FromMilliseconds(1500));
+
+        public void NotifyCarData() => _carDataFreshness.Ping();
+
+        public void ResetCarData() => _carDataFreshness.Reset();
+
+        private bool HasFreshCarData => _carDataFreshness.IsFresh;
+
         private bool _activeRequested = false;
         private bool _isActiveNow = false;
         private double _comboRemainingSec = 0;
         private double _activeBlend = 0;
+        private double _scoreVisibleBlend = 1.0;
         private bool _angleVisTargetVisible = false;
         private bool _angleVisEntering = false;
         private DateTime _angleVisBlendStart = DateTime.MinValue;
@@ -139,6 +166,8 @@ namespace LFSDriftBuddy
 
         private int _currentRpm = 0;
 
+        public bool ScoreOverlayEnabled { get; set; } = true;
+
         public bool SpeedoTachoEnabled { get; set; } = true;
         public float SpeedoTachoOffsetX { get; set; } = 0f;
         public float SpeedoTachoOffsetY { get; set; } = 0f;
@@ -153,6 +182,11 @@ namespace LFSDriftBuddy
         public bool SpeedoTachoShowUnit { get; set; } = true;
         public bool SpeedoTachoShowMinorTicks { get; set; } = true;
         public bool SpeedoTachoShowMajorTicks { get; set; } = true;
+        public bool SpeedoTachoPlainDigits { get; set; } = false;
+        public bool SpeedoTachoInstantSpeed { get; set; } = false;
+        // OFF (default) = OutGauge dash/wheel speed (matches a real dash during wheelspin).
+        // ON = the old way: InSim's physics-accurate speed.
+        public bool SpeedoTachoAirSpeed { get; set; } = false;
 
         public Color SpeedoTachoTextColor { get; set; } = Color.White;
         public Color SpeedoTachoIndicatorColor { get; set; } = Color.FromArgb(255, 225, 225, 230);
@@ -165,12 +199,19 @@ namespace LFSDriftBuddy
         public float SpeedoBackgroundZoom { get; set; } = 1.0f;
         public float SpeedoBackgroundOpacity { get; set; } = 1.0f;
 
-        private double _targetSpeedKmh = 0;
+        private double _targetSpeedKmhTrue = 0;
+        private double _targetSpeedKmhDash = 0;
         private double _displayedSpeedKmh = 0;
         private int _currentGear = 0;
         private int _calibratedMaxRpm = 0;
 
-        public void UpdateSpeedGauge(double speedKmh) => _targetSpeedKmh = Math.Max(0, speedKmh);
+        // "True" speed is InSim's physics-accurate speed (car's actual velocity through
+        // space) — it stays near zero during a stationary burnout. "Dash" speed is OutGauge's
+        // Speed field, which (like a real car's speedometer, driven off wheel rotation) spikes
+        // during wheelspin even when the car isn't actually moving. SpeedoTachoAirSpeed
+        // picks which one feeds the gauge.
+        public void UpdateSpeedGauge(double speedKmh) => _targetSpeedKmhTrue = Math.Max(0, speedKmh);
+        public void UpdateSpeedGaugeDash(double speedKmh) => _targetSpeedKmhDash = Math.Max(0, speedKmh);
         public void UpdateGear(int gear) => _currentGear = gear;
         public void UpdateMaxRpm(int maxRpm) => _calibratedMaxRpm = Math.Max(0, maxRpm);
 
@@ -178,6 +219,8 @@ namespace LFSDriftBuddy
         {
             public string Text;
             public DateTime Start;
+            public double DurationSec;
+            public bool BoostOpacity;
             public float DispW;
             public bool SizeInit;
             public float DispX;
@@ -260,7 +303,7 @@ namespace LFSDriftBuddy
 
         public void UpdateLapContextLabel(string label) => _lapContextLabel = label ?? "";
 
-        private bool _inMenu = false;
+        private bool _inMenu = true;
 
                 public void SetMenuMode(bool inMenu)
         {
@@ -337,14 +380,16 @@ namespace LFSDriftBuddy
 
                 public void SetActive(bool active) => _activeRequested = active;
 
-        public void ShowBonus(string bonusText)
+        public void ShowBonus(string bonusText, double durationSec = BonusDurationSec, bool boostOpacity = false)
         {
             if (string.IsNullOrWhiteSpace(bonusText)) return;
 
             _bonusItems.Add(new BonusItem
             {
                 Text = bonusText,
-                Start = DateTime.Now
+                Start = DateTime.Now,
+                DurationSec = durationSec,
+                BoostOpacity = boostOpacity
             });
         }
 
@@ -509,6 +554,15 @@ namespace LFSDriftBuddy
 
             _isActiveNow = _activeRequested;
 
+            bool wantsMenuMode = !HasFreshCarData && now >= _notificationUntil;
+            if (wantsMenuMode != _inMenu)
+                SetMenuMode(wantsMenuMode);
+
+            double scoreVisibleTarget = (_inMenu || !ScoreOverlayEnabled) ? 0.0 : 1.0;
+            double scoreVisibleRate = scoreVisibleTarget > _scoreVisibleBlend ? 0.45 : 0.3;
+            _scoreVisibleBlend += (scoreVisibleTarget - _scoreVisibleBlend) * scoreVisibleRate;
+            if (Math.Abs(scoreVisibleTarget - _scoreVisibleBlend) < 0.01) _scoreVisibleBlend = scoreVisibleTarget;
+
             _displayedScore += (_targetScore - _displayedScore) * 0.18;
             if (Math.Abs(_targetScore - _displayedScore) < 1) _displayedScore = _targetScore;
 
@@ -521,8 +575,16 @@ namespace LFSDriftBuddy
             _displayedAngle += (_driftAngle - _displayedAngle) * 0.25;
             if (Math.Abs(_driftAngle - _displayedAngle) < 0.1) _displayedAngle = _driftAngle;
 
-            _displayedSpeedKmh += (_targetSpeedKmh - _displayedSpeedKmh) * 0.3;
-            if (Math.Abs(_targetSpeedKmh - _displayedSpeedKmh) < 0.05) _displayedSpeedKmh = _targetSpeedKmh;
+            double targetSpeedKmh = SpeedoTachoAirSpeed ? _targetSpeedKmhTrue : _targetSpeedKmhDash;
+            if (SpeedoTachoInstantSpeed)
+            {
+                _displayedSpeedKmh = targetSpeedKmh;
+            }
+            else
+            {
+                _displayedSpeedKmh += (targetSpeedKmh - _displayedSpeedKmh) * 0.3;
+                if (Math.Abs(targetSpeedKmh - _displayedSpeedKmh) < 0.05) _displayedSpeedKmh = targetSpeedKmh;
+            }
 
             if (_isActiveNow)
                 _comboRemainingSec = ComboTimeoutSec;
@@ -582,23 +644,106 @@ namespace LFSDriftBuddy
 
                 float centerX = Width / 2f;
 
-                DrawIdleScore(g, centerX, out float idlebarY);
-                DrawActiveHud(g, centerX, out float barX, out float barY, out float barW, out float barH);
-                DrawBonusBox(g, centerX, barY + idlebarY, barH);
-                DrawLapScoreBox(g);
-                DrawLapResultPopup(g);
+                if (ScoreOverlayEnabled)
+                {
+                    if (_scoreVisibleBlend > 0.01)
+                        DrawScoreCollapsible(g, centerX);
+                    if (_scoreVisibleBlend < 0.99)
+                        DrawScoreCollapsedIndicator(g, centerX);
+
+                    if (!_inMenu)
+                    {
+                        DrawLapScoreBox(g);
+                        DrawLapResultPopup(g);
+                    }
+                }
                 DrawSpeedoTacho(g);
             }
 
             SetBitmap(_buffer);
         }
 
+        private const float ScoreCollapseAnchorY = 26f;
+        private Bitmap? _scoreFadeBuffer;
+
+        private void DrawScoreContent(Graphics g, float centerX, float scale)
+        {
+            var savedState = g.Save();
+            g.TranslateTransform(centerX, ScoreCollapseAnchorY);
+            g.ScaleTransform(scale, scale);
+            g.TranslateTransform(-centerX, -ScoreCollapseAnchorY);
+
+            DrawIdleScore(g, centerX, out float idlebarY);
+            DrawActiveHud(g, centerX, out float barX, out float barY, out float barW, out float barH);
+            DrawBonusBox(g, centerX, barY + idlebarY, barH);
+
+            g.Restore(savedState);
+        }
+
+        private void DrawScoreCollapsible(Graphics g, float centerX)
+        {
+            float scale = (float)(0.08 + 0.92 * _scoreVisibleBlend);
+
+            if (_scoreVisibleBlend >= 0.995 || Width <= 0 || Height <= 0)
+            {
+                DrawScoreContent(g, centerX, scale);
+                return;
+            }
+
+            if (_scoreFadeBuffer == null || _scoreFadeBuffer.Width != Width || _scoreFadeBuffer.Height != Height)
+            {
+                _scoreFadeBuffer?.Dispose();
+                _scoreFadeBuffer = new Bitmap(Width, Height, PixelFormat.Format32bppArgb);
+            }
+
+            using (var fg = Graphics.FromImage(_scoreFadeBuffer))
+            {
+                fg.Clear(Color.Transparent);
+                fg.SmoothingMode = SmoothingMode.AntiAlias;
+                fg.TextRenderingHint = System.Drawing.Text.TextRenderingHint.AntiAlias;
+                fg.CompositingQuality = CompositingQuality.HighQuality;
+
+                DrawScoreContent(fg, centerX, scale);
+            }
+
+            using var attrs = new ImageAttributes();
+            var matrix = new ColorMatrix { Matrix33 = (float)_scoreVisibleBlend };
+            attrs.SetColorMatrix(matrix, ColorMatrixFlag.Default, ColorAdjustType.Bitmap);
+            g.DrawImage(_scoreFadeBuffer, new Rectangle(0, 0, Width, Height), 0, 0, Width, Height, GraphicsUnit.Pixel, attrs);
+        }
+
+        private static double EaseOutBack(double t)
+        {
+            const double c1 = 1.70158;
+            const double c3 = c1 + 1;
+            double t1 = Math.Clamp(t, 0, 1) - 1;
+            return 1 + c3 * t1 * t1 * t1 + c1 * t1 * t1;
+        }
+
+        private void DrawScoreCollapsedIndicator(Graphics g, float centerX)
+        {
+            double revealAmount = 1.0 - _scoreVisibleBlend;
+            double bouncy = EaseOutBack(Math.Min(1.0, revealAmount * 1.4));
+
+            const float maxRadius = 10f;
+            float radius = maxRadius * (float)Math.Max(0, bouncy);
+            if (radius < 0.5f) return;
+
+            double alpha = Math.Clamp(bouncy * 0.55, 0, 0.5);
+
+            _scratchBrush.Color = WithAlpha(Color.White, alpha);
+            g.FillEllipse(_scratchBrush, centerX - radius, ScoreCollapseAnchorY - radius, radius * 2, radius * 2);
+        }
+
         private void DrawIdleScore(Graphics g, float centerX, out float idlebarY)
         {
-            double alpha = 0.75 - _activeBlend;
+            bool notificationActive = DateTime.Now < _notificationUntil && _notificationText != null;
+            double alpha = notificationActive ? 0.9 : 0.75 - _activeBlend;
             float slideX = _isActiveNow ? (float)(-_activeBlend * 160) : (float)(_activeBlend * 160);
 
-            string text = ((long)Math.Round(_displayedScore)).ToString("N0");
+            string text = notificationActive
+                ? _notificationText!
+                : ((long)Math.Round(_displayedScore)).ToString("N0");
             var font = _idleFont32;
             var size = g.MeasureString(text, font);
             idlebarY = size.Height;
@@ -854,13 +999,12 @@ namespace LFSDriftBuddy
             double alphacut = 0.5;
             var now = DateTime.Now;
 
-            _bonusItems.RemoveAll(it => (now - it.Start).TotalSeconds > BonusDurationSec);
+            _bonusItems.RemoveAll(it => (now - it.Start).TotalSeconds > it.DurationSec);
             if (_bonusItems.Count == 0) return;
 
             var font = _activeFont15;
             const float padH = 7, padV = 4;
             double slideInSec = BonusSlideMs / 1000.0;
-            double slideOutStart = BonusDurationSec - slideInSec;
 
             var widths = new float[_bonusItems.Count];
             var heights = new float[_bonusItems.Count];
@@ -886,6 +1030,7 @@ namespace LFSDriftBuddy
                 }
 
                 double elapsed = (now - item.Start).TotalSeconds;
+                double slideOutStart = item.DurationSec - slideInSec;
                 double alpha, slideOffset;
 
                 if (elapsed < slideInSec)
@@ -948,10 +1093,11 @@ namespace LFSDriftBuddy
                 if (alpha > 0.01)
                 {
                     float boxX = _bonusItems[i].DispX + (float)slideOffsets[i];
+                    double itemAlphaCut = _bonusItems[i].BoostOpacity ? 0.1 : alphacut;
 
                     using (var path = RoundedRect(new RectangleF(boxX, boxY, w, h), 6))
                     {
-                        _scratchBrush.Color = WithAlpha(_accentColor, alpha - alphacut);
+                        _scratchBrush.Color = WithAlpha(_accentColor, alpha - itemAlphaCut);
                         g.FillPath(_scratchBrush, path);
                     }
 
@@ -1140,9 +1286,9 @@ namespace LFSDriftBuddy
             float scale = Math.Max(0.3f, SpeedoTachoScale);
             float scaledSize = SpeedoTachoDesignSize * scale;
 
-            const float marginX = 24f, marginY = 24f;
+            const float marginX = 0f, marginY = 0f;
             float anchorRight = Width - marginX + SpeedoTachoOffsetX;
-            float anchorBottom = Height - marginY + SpeedoTachoOffsetY;
+            float anchorBottom = Height - marginY - SpeedoTachoOffsetY;
 
             float originX = anchorRight - scaledSize;
             float originY = anchorBottom - scaledSize;
@@ -1175,7 +1321,7 @@ namespace LFSDriftBuddy
 
             using var path = new GraphicsPath();
             path.AddEllipse(dialRect);
-            var oldClip = g.Clip;
+            using var oldClip = g.Clip;
             g.SetClip(path, CombineMode.Intersect);
 
             using var attrs = new ImageAttributes();
@@ -1327,7 +1473,9 @@ namespace LFSDriftBuddy
 
             double displaySpeed = SpeedoTachoUseMph ? _displayedSpeedKmh * KmhToMph : _displayedSpeedKmh;
 
-            string speedText = ((int)Math.Round(displaySpeed)).ToString("D3");
+            string speedText = SpeedoTachoPlainDigits
+                ? ((int)Math.Round(displaySpeed)).ToString()
+                : ((int)Math.Round(displaySpeed)).ToString("D3");
             var speedSize = g.MeasureString(speedText, speedFont);
             float speedX = cx - speedSize.Width / 2f;
             float speedY = cy + gearRadius + 10;
@@ -1496,6 +1644,7 @@ namespace LFSDriftBuddy
                 _renderTimer?.Dispose();
                 _trackTimer?.Dispose();
                 _buffer?.Dispose();
+                _scoreFadeBuffer?.Dispose();
             }
             base.Dispose(disposing);
         }

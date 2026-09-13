@@ -96,6 +96,7 @@ namespace LFSDriftBuddy.InSim
         private byte[] _buffer = new byte[8192];
         private int _bufferLen = 0;
         private volatile bool _running = false;
+        private volatile bool _disconnectedNotified = false;
         private StateFlags _gameState = 0;
         public StateFlags GameState => _gameState;
         public byte ViewPLID { get; private set; } = 0;
@@ -206,6 +207,7 @@ namespace LFSDriftBuddy.InSim
 
                 _stream = _client.GetStream();
                 _running = true;
+                _disconnectedNotified = false;
 
                 _receiveThread = new Thread(ReceiveLoop)
                 {
@@ -246,7 +248,11 @@ namespace LFSDriftBuddy.InSim
             {
                 _running = false;
                 Cleanup();
-                Disconnected?.Invoke(this, EventArgs.Empty);
+                if (!_disconnectedNotified)
+                {
+                    _disconnectedNotified = true;
+                    Disconnected?.Invoke(this, EventArgs.Empty);
+                }
                 RaiseStatus(Localization.T("status.insim.disconnected"));
             }
         }
@@ -329,7 +335,11 @@ namespace LFSDriftBuddy.InSim
             {
                 _running = false;
                 Cleanup();
-                Disconnected?.Invoke(this, EventArgs.Empty);
+                if (!_disconnectedNotified)
+                {
+                    _disconnectedNotified = true;
+                    Disconnected?.Invoke(this, EventArgs.Empty);
+                }
             }
         }
 
@@ -577,18 +587,20 @@ namespace LFSDriftBuddy.InSim
         {
 
             if (p.Length < 4) return;
+            RaiseStatus($"DEBUG PLP (player pitted): PLID={p[3]}");
             PlayerPitted?.Invoke(this, new PlidEventArgs { PLID = p[3] });
         }
 
         private void HandleCrs(byte[] p)
         {
             if (p.Length < 4) return;
+            RaiseStatus($"DEBUG CRS (car reset): PLID={p[3]}");
             CarReset?.Invoke(this, new PlidEventArgs { PLID = p[3] });
         }
 
         private void HandleRst(byte[] p)
         {
-
+            RaiseStatus("DEBUG RST (race restarted)");
             RaceRestarted?.Invoke(this, EventArgs.Empty);
         }
 
@@ -599,6 +611,8 @@ namespace LFSDriftBuddy.InSim
 
             byte plid = p[3];
             byte fact = p[4];
+
+            RaiseStatus($"DEBUG PLA (pit lane): PLID={plid} fact={fact}");
 
             if (fact == 0)
                 PitLaneExited?.Invoke(this, new PlidEventArgs { PLID = plid });
@@ -611,8 +625,11 @@ namespace LFSDriftBuddy.InSim
             if (p.Length < 12) return;
 
             var prev = _gameState;
-            _gameState = (StateFlags)BitConverter.ToUInt16(p, 6);
+            _gameState = (StateFlags)BitConverter.ToUInt16(p, 8);
+            byte prevViewPlid = ViewPLID;
             ViewPLID = p[11];
+            if (ViewPLID != prevViewPlid)
+                RaiseStatus($"DEBUG STA: ViewPLID {prevViewPlid} -> {ViewPLID}");
 
             if (p.Length >= 28)
             {
