@@ -1,4 +1,4 @@
-namespace LFSDriftBuddy.InSim
+namespace LFSDriftTools.InSim
 {
         public enum PacketType : byte
     {

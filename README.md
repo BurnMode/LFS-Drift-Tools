@@ -1,98 +1,120 @@
 # LFS Drift Tools
 
-**Version 0.711.0906**
+**Version v0.774.0920.alpha**
 
-**LFS Drift Tools** is a companion application for [Live for Speed](https://www.lfs.net/) that turns your drift sessions into a more fun experience. It connects to LFS via InSim/OutGauge and adds real-time scoring, collision detection, an in-game HUD, a transparent overlay, a configurable rev limiter, and a smarter turn signal system, all wrapped in a clean, modern UI.
+**LFS Drift Tools** is a companion application for [Live for Speed](https://www.lfs.net/). It connects to LFS through InSim, OutGauge and OutSim2 and adds drift scoring, collision detection, an in-game HUD, a transparent overlay, a rev limiter, turn signals and a steering assist for gamepads.
 
-## Key Features
+## Features
 
-- **DriftEngine - Real-time Scoring Engine**
-  Calculates drift score based on angle, speed, and combo multipliers, with per-track and per-layout best lap tracking. Stats are saved per driver and reload instantly when you switch cars or spectate someone else. Automatically detects laps, track/layout changes, pit stops, and race restarts via InSim events.
+- **Drift scoring**
+  Score based on drift angle, speed and combo multipliers, with best laps stored per track and layout. Stats are saved per driver and reload when you switch cars or spectate someone else. Laps, track/layout changes, pit stops and restarts are detected through InSim.
 
-- **Forza Horizon-style Overlay**
-  A transparent, layered on-screen overlay rendered over the LFS window, showing drift angle, combo countdown, bonus text animations, rev limiter status, and a circular speedometer/tachometer gauge.
+- **Overlay**
+  A transparent overlay drawn over the LFS window: drift angle, combo countdown, bonus texts, rev limiter status and the speedometer/tachometer gauge.
 
-- **Speedometer & Tachometer Gauge**
-  A Forza-style circular gauge showing live (smoothed) vehicle speed, current gear, and an RPM arc that auto-calibrates to the car's redline, with a redline-thickness slider that grows inward so the ring never spills past the dial edge. Two independent preset slots store the whole look — visibility toggles, colors, redline thickness, and an optional background image with its own pan/zoom/opacity — switchable on the fly via arrows next to the live preview, each with its own one-click reset to defaults. Repositionable and scalable, with a KPH↔MPH toggle, per-element color customization, and drop shadows on every readout, appearing automatically whenever real OutGauge data is flowing.
+- **Speedometer and tachometer**
+  A circular gauge with smoothed speed, gear and an RPM arc calibrated to the car's redline. Two preset slots store the whole look (visibility, colors, redline thickness, optional background image with pan/zoom/opacity). KPH/MPH toggle, per-element colors, adjustable position and scale. Shown only while OutGauge data is arriving.
 
-- **Rev Limiter**
-  A configurable ignition-cut rev limiter driven by OutGauge RPM data, with adjustable cut duration, auto-calibration, and dedicated keyboard/wheel-button bindings for toggle, calibrate, increase, and decrease actions.
+- **Rev limiter**
+  Ignition-cut limiter driven by OutGauge RPM, with adjustable cut time, auto-calibration for new cars and key/wheel-button bindings for toggle, calibrate, increase and decrease.
+  Limits are stored per car. On first launch the app loads presets for all stock LFS cars and a few popular mods. A car can be flagged as not supported, which disables the limiter for it. This happens automatically when a car reports more than 20000 RPM, and the flag can be changed manually.
 
-- **Turn Signal & Hazard System**
-  Automatic, steering-based turn signal cancellation, hazard lights, and light toggling, with reliable background input detection and support for both keyboard and steering wheel/gamepad button bindings. Live dashboard telltales for the left/right signal and high beam mirror your car's actual dash, read straight from OutGauge.
+- **Controller Assist**
+  Steering assist for Xbox/XInput gamepads. The app reads your physical pad, applies counter-steer based on rear slip angle from OutSim2, and passes the result to LFS through a virtual Xbox 360 pad (ViGEmBus).
+  - Presets: Off, Light, Medium, Strong, and adjustable trims for counter-steer and assist strength.
+  - Force-feedback style vibration from load, suspension, impacts, surface changes and gear shifts.
+  - Optional hiding of the physical pad from other apps with HidHide, so LFS sees only the virtual pad.
+  - Steering bar overlay in the game window.
+  - A bindable hotkey next to the main switch. It toggles Steering Assist only, so the virtual pad stays connected and you don't have to reselect the device in LFS. Vibration keeps working.
+  - LFS reads controllers only at startup. If LFS was already running, the app shows a notice with the exact name of the virtual pad to select in Options > Controls, after refreshing the controller list.
+  - ViGEmBus and HidHide installers are bundled and can be started from the app.
 
-- **Burnout Detection & Bonus System**
-  Detects wheelspin while the car is essentially stationary (RPM, throttle, and gear read directly from OutGauge) and scores it with tiered labels (Good/High/Extreme/Insane) based on intensity and hold duration. Bonus points reward a full 360° burnout spin, a Donut (a full loop completed while drifting), a Clean Lap, grazing a track object cleanly (Unstoppable), and smooth Burnout↔Drift transitions. Minimum drift speed and maximum burnout speed are both configurable.
+- **Turn signals and hazards**
+  Steering-based automatic cancel, hazard lights and light toggle, with keyboard and wheel/gamepad bindings. Left/right signal and high beam telltales come from OutGauge.
 
-- **Vehicle & Object Collision Detection**
-  Reads live car-to-car contact from InSim: a light touch that doesn't break a stable drift scores a KISS bonus, while a hit that spins you, kills your speed, or lands too hard costs points, tagged with the other driver's name and impact tier. It's purely a modifier on your existing drift score, not a separate scoring system, and outside of a drift a hit is shown for information only, with no effect on points. Hits against track objects (walls, cones, etc.) use the same KISS/penalty logic and can be toggled independently.
+- **Burnouts and bonuses**
+  Wheelspin detection at low speed, scored in tiers (Good/High/Extreme/Insane). Bonuses for a full 360° burnout spin, donuts, clean laps, cleanly grazing a track object and smooth burnout-to-drift transitions. Bonuses are not counted while the car is upside down (requires OutSim2).
 
-- **Steering Wheel & Gamepad Support**
-  Device detection and axis calibration for wheels via DirectInput. Xbox/XInput gamepads get their steering axis assigned automatically, skipping manual calibration, with native XInput support to keep background input handling accurate.
+- **Collision detection**
+  Car-to-car and car-to-object contacts from InSim. A light touch that doesn't break a drift gives a KISS bonus, a hard hit costs points depending on the impact tier. Car and object collisions can be enabled separately.
 
-- **Multiplayer-aware Driver Identity**
-  Tracks your driver profile by your LFS nickname, staying accurate as you switch cars, tab-cycle through spectated drivers, or rename yourself in-game, even on a busy multiplayer server.
+- **Wheels and gamepads**
+  Device detection and axis calibration through DirectInput, with a countdown during automatic axis calibration. Xbox/XInput pads get their steering axis assigned automatically.
 
-- **In-Game HUD (IS_BTN)**
-  Displays live score, run points, combo multiplier, and drift labels directly inside LFS using native InSim buttons, fully color-customizable through an in-app InSim color picker.
+- **In-game HUD (IS_BTN)**
+  Score, run points, combo multiplier and drift labels as native InSim buttons, with an in-app color picker.
 
-- **Persistent Settings**
-  All bindings, calibration values, colors, and preferences are saved locally and restored automatically on startup.
+- **Settings**
+  Bindings, calibration, colors and options are saved locally and restored on startup. Options that are turned off automatically because of missing data (no pad, no OutSim2, no OutGauge) return to your last choice when the data is back.
 
 ## Requirements
 
 - Windows 10/11
 - [.NET 6.0](https://dotnet.microsoft.com/download/dotnet/6.0) or later (Windows Desktop Runtime)
-- [Live for Speed](https://www.lfs.net/) with **both InSim and OutGauge** configured (see [Configuring LFS](#configuring-lfs-insim--outgauge) below)
-- A DirectInput/XInput-compatible steering wheel or gamepad (optional, for wheel/pad bindings)
+- [Live for Speed](https://www.lfs.net/) with InSim, OutGauge and, for Controller Assist, OutSim2 configured (see below)
+- For Controller Assist: an Xbox/XInput gamepad, ViGEmBus, and optionally HidHide
+- A DirectInput/XInput device for wheel/pad bindings (optional)
 
-## Supported Languages
+## Supported languages
 
-- English
-- Polish
-- Turkish
-- German
-- Spanish
+English, Polish, Turkish, German, Spanish.
 
-## Configuring LFS (InSim + OutGauge)
+## Configuring LFS
 
-The app needs **two separate connections** to LFS to work fully, and they're set up differently. Almost every "it doesn't do anything" / "the speedometer or rev limiter never shows up" report comes down to only one of these being configured.
+The app uses three connections. Each one enables its own features.
 
-### 1. InSim (required for scoring, HUD, turn signals, lap/track events)
+| Connection | Default port | Used for |
+|---|---|---|
+| InSim | 29999 | scoring, HUD, laps, collisions, turn signals |
+| OutGauge | 35555 | speedometer, rev limiter, burnouts |
+| OutSim2 | 30020 | Controller Assist, upside-down detection |
 
-Enable InSim per session, either by:
+### Automatic
 
-- Type `/insim <port>` in the LFS chat/console (e.g. `/insim 29999`), **or**
-- Launch LFS with the command-line option `LFS /insim=<port>` (handy in a shortcut, so it's always on).
-
-Then enter the same host (`127.0.0.1` for a local install) and port in the app's **Connection** panel and click **Connect**.
-
-### 2. OutGauge (required for the speedometer/tachometer, rev limiter, and burnout detection)
-
-OutGauge is a separate telemetry stream configured through `cfg.txt` in your LFS installation folder (not through an in-game command). Open it in a text editor and add or edit these lines:
+Set the LFS game folder in the app and click **Configure LFS cfg**. The app changes only the lines below in `cfg.txt`, leaves the rest of the file untouched and saves the previous file as `cfg.txt.bak`. Restart LFS afterwards.
 
 ```
-OutGauge Mode 2
+InSim 29999
+OutGauge Mode 1
 OutGauge Delay 1
 OutGauge IP 127.0.0.1
 OutGauge Port 35555
-OutGauge ID 1
+OutGauge ID 0
+OutSim Mode 2
+OutSim Delay 1
+OutSim IP 127.0.0.1
+OutSim Port 30020
+OutSim ID 0
+OutSim Opts bf
 ```
 
-**`cfg.txt` is only read when LFS starts.** Fully restart LFS after editing it, or the change won't take effect. The port (`35555`) must match what the app listens on and shouldn't be shared with another OutGauge client.
+The ports and OutSim Opts follow the values set in the app.
 
-### Verifying it's working
+### Manual
 
-- If the Connect toggle flips back off by itself, the InSim connection attempt failed (wrong host/port, or `/insim` wasn't enabled). Check the status text at the bottom of the window for the reason.
-- If InSim connects fine but the speedometer/tachometer gauge never appears and the score HUD stays locked showing only the total score, OutGauge isn't reaching the app. Re-check the `cfg.txt` block above and confirm you restarted LFS afterwards. Both features activate automatically once real OutGauge data is flowing, and hide again the moment it stops, such as while sitting in a menu or garage.
+- InSim: type `/insim <port>` in LFS, or start LFS with `LFS /insim=<port>`. Enter the same host and port in the app and click **Connect**.
+- OutGauge and OutSim2: edit `cfg.txt` as shown above.
 
-## Getting Started
+`cfg.txt` is read only when LFS starts, so restart LFS after every change. The OutSim Opts value in the app must match `OutSim Opts` in `cfg.txt` exactly.
+
+### Checking the connections
+
+- If the InSim switch turns itself off, the connection failed. The status text at the bottom of the window shows the reason.
+- If InSim works but the gauge never appears, OutGauge is not reaching the app. Check `cfg.txt` and restart LFS.
+- If Controller Assist stays locked, check that OutSim2 is on and packets arrive.
+
+## Getting started
 
 1. Launch **LFS Drift Tools**.
-2. Make sure LFS has both InSim and OutGauge configured, per [Configuring LFS](#configuring-lfs-insim--outgauge) above.
-3. Enter the host, port, and admin password (if set) in the app, then click **Connect**.
-4. Configure your rev limiter, HUD, overlay, and turn signal bindings from the UI.
+2. Configure LFS as described above and restart it.
+3. Enter host, port and admin password (if set), then click **Connect**.
+4. Set up the rev limiter, HUD, overlay and bindings in the UI.
+5. For Controller Assist: install ViGEmBus from the app, connect the pad, turn on OutSim2 and the main switch. If LFS was already running, select the virtual pad in Options > Controls.
+
+## Troubleshooting
+
+Unhandled exceptions are written to `crash.log` next to the executable. A crash with no entry there is usually a native error. Check Windows Event Viewer, Windows Logs > Application.
 
 ## Disclaimer
 
-This project interacts with LFS through the official InSim/OutGauge protocols and is intended as a companion tool for personal use. It is not affiliated with or endorsed by the developers of Live for Speed.
+This project uses the official InSim, OutGauge and OutSim protocols and is intended for personal use. It is not affiliated with or endorsed by the developers of Live for Speed.

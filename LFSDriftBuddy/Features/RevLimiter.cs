@@ -4,7 +4,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using System.Windows.Forms;
 
-namespace LFSDriftBuddy
+namespace LFSDriftTools
 {
 
     public class RevLimiter : IDisposable

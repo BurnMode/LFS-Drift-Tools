@@ -1,7 +1,7 @@
 using System;
 using System.Text;
 
-namespace LFSDriftBuddy.InSim
+namespace LFSDriftTools.InSim
 {
 
     public static class Packets

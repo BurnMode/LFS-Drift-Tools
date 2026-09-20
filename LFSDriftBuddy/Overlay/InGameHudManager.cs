@@ -1,10 +1,10 @@
 using System;
 using System.Collections.Generic;
 using System.Windows.Forms;
-using LFSDriftBuddy.InSim;
-using static LFSDriftBuddy.DriftEngine;
+using LFSDriftTools.InSim;
+using static LFSDriftTools.DriftEngine;
 
-namespace LFSDriftBuddy
+namespace LFSDriftTools
 {
 
     public class InGameHudManager : IDisposable

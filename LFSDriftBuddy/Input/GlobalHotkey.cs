@@ -1,6 +1,7 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.Linq;
 using System.Runtime.InteropServices;
 using System.Windows.Forms;
 
@@ -9,13 +10,13 @@ public class GlobalHotkey : IDisposable
     private const int WH_KEYBOARD_LL = 13;
     private const int WM_KEYDOWN = 0x0100;
     private const int WM_KEYUP = 0x0101;
-    private const long HoldThresholdMs = 50;
+    private const int WM_SYSKEYDOWN = 0x0104;
+    private const int WM_SYSKEYUP = 0x0105;
 
     private class KeyState
     {
         public bool KeyDown;
-        public bool Fired;
-        public Stopwatch Timer = new Stopwatch();
+        public volatile bool Pending;
         public Action Callback;
     }
 
@@ -34,7 +35,7 @@ public class GlobalHotkey : IDisposable
         proc = HookCallback;
         hook = SetHook(proc);
 
-        checkTimer.Interval = 50;
+        checkTimer.Interval = 20;
         checkTimer.Tick += CheckTimer_Tick;
         checkTimer.Start();
     }
@@ -51,24 +52,12 @@ public class GlobalHotkey : IDisposable
 
     private void CheckTimer_Tick(object sender, EventArgs e)
     {
-        foreach (var state in _bindings.Values)
+        foreach (var state in _bindings.Values.ToArray())
         {
-            if (state.KeyDown)
-            {
-                if (!state.Timer.IsRunning)
-                    state.Timer.Start();
+            if (!state.Pending) continue;
 
-                if (!state.Fired && state.Timer.ElapsedMilliseconds >= HoldThresholdMs)
-                {
-                    state.Fired = true;
-                    state.Callback?.Invoke();
-                }
-            }
-            else
-            {
-                state.Timer.Reset();
-                state.Fired = false;
-            }
+            state.Pending = false;
+            state.Callback?.Invoke();
         }
     }
 
@@ -80,9 +69,15 @@ public class GlobalHotkey : IDisposable
 
             if (_bindings.TryGetValue(key, out var state))
             {
-                if (wParam == (IntPtr)WM_KEYDOWN)
-                    state.KeyDown = true;
-                else if (wParam == (IntPtr)WM_KEYUP)
+                if (wParam == (IntPtr)WM_KEYDOWN || wParam == (IntPtr)WM_SYSKEYDOWN)
+                {
+                    if (!state.KeyDown)
+                    {
+                        state.KeyDown = true;
+                        state.Pending = true;
+                    }
+                }
+                else if (wParam == (IntPtr)WM_KEYUP || wParam == (IntPtr)WM_SYSKEYUP)
                     state.KeyDown = false;
             }
         }
@@ -115,8 +110,6 @@ public class GlobalHotkey : IDisposable
         using Process curProcess = Process.GetCurrentProcess();
         using ProcessModule? curModule = curProcess.MainModule;
 
-        // MainModule can be null (missing permissions, etc.) — GetModuleHandle(null) is a valid
-        // Win32 call in that case too: it just returns a handle to the calling process's own exe.
         return SetWindowsHookEx(
             WH_KEYBOARD_LL,
             proc,

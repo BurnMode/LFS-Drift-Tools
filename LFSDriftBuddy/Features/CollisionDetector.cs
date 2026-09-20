@@ -1,11 +1,11 @@
 using System;
 using System.Collections.Generic;
 
-namespace LFSDriftBuddy
+namespace LFSDriftTools
 {
     public class CollisionDetector
     {
-        public bool Enabled { get; set; } = false;
+        public bool Enabled { get; set; } = true;
 
         private double[] _hitLevelThresholds = { 5.0, 10.0, 30.0, 50.0, 100.0 };
         public IReadOnlyList<double> HitLevelThresholds => _hitLevelThresholds;

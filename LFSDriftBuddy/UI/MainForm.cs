@@ -1,4 +1,4 @@
-using LFSDriftBuddy.InSim;
+﻿using LFSDriftTools.InSim;
 using SharpDX.DirectInput;
 using System;
 using System.Collections.Generic;
@@ -12,11 +12,11 @@ using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Windows.Forms;
-using static LFSDriftBuddy.DriftEngine;
-using static LFSDriftBuddy.IndicatorManager;
+using static LFSDriftTools.DriftEngine;
+using static LFSDriftTools.IndicatorManager;
 using System.Reflection;
 
-namespace LFSDriftBuddy
+namespace LFSDriftTools
 {
     public partial class MainForm : Form
     {
@@ -44,15 +44,16 @@ namespace LFSDriftBuddy
 
         private string _missingIndicatorSoundsWarning = null;
 
-        // Assigned partway through the constructor (see BuildUI/InGameHudManager setup), but
-        // referenced by name from event-subscription lambdas set up earlier in the same
-        // constructor — those lambdas only ever RUN once InSim is actually connected, long after
-        // construction finishes, so this is genuinely always non-null by the time it's used.
         private OverlayForm _overlay = null!;
 
         private InSimConnection _insim;
 
         private OutGaugeConnection _outGauge = new OutGaugeConnection();
+        private OutSimConnection _outSim = new OutSimConnection();
+        private readonly StateEstimator _controllerAssistState = new StateEstimator();
+        private readonly AssistEngine _assistEngine = new AssistEngine();
+        private readonly VirtualPad _virtualPad = new VirtualPad();
+        private AssistLoop _assistLoop = null!;
 
         private DriftEngine _drift = new DriftEngine();
         private IndicatorManager _indicators = new IndicatorManager();
@@ -93,8 +94,43 @@ namespace LFSDriftBuddy
         private readonly System.Windows.Forms.Timer _outGaugeFreshnessPoll = new() { Interval = 250 };
         private bool _wasOutGaugeFresh = true;
 
+        private readonly System.Windows.Forms.Timer _controllerAssistDisplayTimer = new() { Interval = 33 };
+        private System.Windows.Forms.Timer? _overlayDetachTimer;
+
+        private void OnControllerAssistDisplayTick(object sender, EventArgs e)
+        {
+            var snap = _assistEngine.LastSnapshot;
+            _overlay.UpdateControllerAssist(_assistLoop.IsRunning, snap.RawSteerPercent, snap.OutputSteerPercent);
+
+            _caTelemetrySpeedValue.Text = $"{snap.SpeedKmh:F0} km/h";
+            _caTelemetryRearSlipValue.Text = $"{snap.RearSlipDeg:F1} deg";
+            _caTelemetryRawSteerValue.Text = $"{snap.RawSteerPercent:F0} %";
+            _caTelemetryOutputValue.Text = $"{snap.OutputSteerPercent:F0} %";
+            _caTelemetryContributionValue.Text = $"{snap.AssistContribution * 100:F0} %";
+            _caTelemetryVibrationValue.Text = $"{snap.RumbleLeft01 * 100:F0}% / {snap.RumbleRight01 * 100:F0}%";
+
+            _caTelemetrySpeedValue.ForeColor = ApplePalette.TextBlue;
+            _caTelemetryRearSlipValue.ForeColor = ApplePalette.TextOrange;
+            _caTelemetryRawSteerValue.ForeColor = ApplePalette.Text;
+            _caTelemetryOutputValue.ForeColor = ApplePalette.TextGreen;
+            _caTelemetryContributionValue.ForeColor = ApplePalette.TextPurple;
+            _caTelemetryVibrationValue.ForeColor = ApplePalette.TextRed;
+        }
+
         private void OnOutGaugeFreshnessPollTick(object sender, EventArgs e)
         {
+            if (_virtualPad.IsAvailable)
+                _virtualPadLastActiveUtc = DateTime.UtcNow;
+
+            TryAutoSelectAssistController();
+            SyncControllerAssistAvailability();
+
+            // Keeps a rolling snapshot of "physical" XInput pads for PadCloak, taken only while
+            // the virtual pad is definitely not connected yet, so whichever device(s) show up
+            // here are never our own emulated one.
+            if (!_assistLoop.IsRunning)
+                PadCloak.CaptureBaseline();
+
             bool fresh = _outGaugeFreshness.IsFresh;
             if (fresh == _wasOutGaugeFresh) return;
             _wasOutGaugeFresh = fresh;
@@ -102,7 +138,7 @@ namespace LFSDriftBuddy
             if (_outGaugeStateLabel != null)
             {
                 _outGaugeStateLabel.Text = Localization.T(fresh ? "status.outgauge.connected" : "status.outgauge.disconnected");
-                _outGaugeStateLabel.ForeColor = fresh ? Color.FromArgb(60, 220, 100) : Color.FromArgb(130, 130, 165);
+                _outGaugeStateLabel.ForeColor = fresh ? ApplePalette.StatusOk : ApplePalette.StatusIdle;
             }
 
             if (fresh) return;
@@ -143,6 +179,35 @@ namespace LFSDriftBuddy
             bool available = (_hudMasterEnabledCheck?.Checked ?? true) && _outGaugeConnectionEnabled;
             _showRPMHudCheck.Enabled = available;
             _showRPMHudCheck.SetCheckedSilent(available && _showRPMHudCheckedBeforeMasterOff);
+        }
+
+        private void ApplyRevUnsupportedState()
+        {
+            if (_revEnableSwitch == null || _revUnsupportedSwitch == null) return;
+
+            _revUnsupportedSwitch.SetCheckedSilent(_revCarUnsupported);
+            if (!_outGaugeConnectionEnabled) return;
+
+            bool supported = !_revCarUnsupported;
+            _revEnableSwitch.Enabled = supported;
+            _calibrateBtn1.Enabled = supported;
+            _revLimiter.Enabled = supported && _revEnabledBeforeOutGaugeOff;
+            _revEnableSwitch.SetCheckedSilent(supported && _revEnabledBeforeOutGaugeOff);
+            SyncRevAutoCalibrateAvailability();
+        }
+
+        private void SetCurrentCarRevUnsupported(bool unsupported, bool detectedAutomatically)
+        {
+            if (string.IsNullOrEmpty(_currentCarName)) return;
+
+            _revCarUnsupported = unsupported;
+            if (unsupported) _revLimiterCalibrationPrompt?.Close();
+
+            SaveVehicleRevSettings(_currentCarName);
+            ApplyRevUnsupportedState();
+
+            if (detectedAutomatically)
+                AppendStatusMessage(string.Format(Localization.T("rev.unsupported.auto"), _currentCarName, UnsupportedRevRpmThreshold), StatusErrorColor);
         }
 
         private void SyncRevAutoCalibrateAvailability()
@@ -201,24 +266,47 @@ namespace LFSDriftBuddy
                 _revLimiter.Enabled = _revEnabledBeforeOutGaugeOff;
                 _revEnableSwitch.SetCheckedSilent(_revEnabledBeforeOutGaugeOff);
                 SyncRevAutoCalibrateAvailability();
+                ApplyRevUnsupportedState();
                 if (!_revLimiter.IsRunning)
                     _revLimiter.Start();
+
+                _speedoTachoEnabledCheck.Enabled = true;
+                _speedoTachoEnabledCheck.SetCheckedSilent(_speedoTachoCheckedBeforeOutGaugeOff);
+                _overlay.SpeedoTachoEnabled = _speedoTachoCheckedBeforeOutGaugeOff;
+                UpdateOverlayAttachment();
+
+                _revLockedLabel.Text = string.Format(Localization.T("rev.connected"), _outGauge.UdpPort);
+                _revLockedLabel.ForeColor = ApplePalette.StatusOk;
             }
             else
             {
+                // Only snapshot the live switch states on a real on->off transition: a repeated
+                // "off" would otherwise read the already-forced-off values back over the user's
+                // remembered choices.
+                bool wasOn = _outGaugeConnectionEnabled;
+
                 _outGauge.Stop();
                 _outGaugeConnectionEnabled = false;
                 SyncAdvancedOutGaugeAvailability();
                 SyncIndicatorSoundsAvailability();
                 SyncRevLimiterHudAvailability();
 
+                _revLockedLabel.Text = Localization.T("rev.locked");
+                _revLockedLabel.ForeColor = ApplePalette.StatusWarn;
+
+                if (wasOn) _speedoTachoCheckedBeforeOutGaugeOff = _speedoTachoEnabledCheck.Checked;
+                _overlay.SpeedoTachoEnabled = false;
+                _speedoTachoEnabledCheck.SetCheckedSilent(false);
+                _speedoTachoEnabledCheck.Enabled = false;
+                UpdateOverlayAttachment();
+
                 if (_advancedOutGaugeCheck != null)
                 {
-                    _advancedOutGaugeCheckedBeforeOutGaugeOff = _advancedOutGaugeCheck.Checked;
+                    if (wasOn) _advancedOutGaugeCheckedBeforeOutGaugeOff = _advancedOutGaugeCheck.Checked;
                     _advancedOutGaugeCheck.SetCheckedSilent(false);
                 }
 
-                _revEnabledBeforeOutGaugeOff = _revEnableSwitch.Checked;
+                if (wasOn) _revEnabledBeforeOutGaugeOff = _revEnableSwitch.Checked;
                 _revLimiter.Enabled = false;
                 _revEnableSwitch.SetCheckedSilent(false);
                 _revEnableSwitch.Enabled = false;
@@ -228,6 +316,772 @@ namespace LFSDriftBuddy
                 revBindingsBtn.Enabled = false;
                 SyncRevAutoCalibrateAvailability();
             }
+
+            if (_inGameSettingsOverlay != null && _inGameSettingsOverlay.Visible)
+                RefreshInGameSettingsOverlayValues();
+        }
+
+        private void ApplyOutSimConnectionState(bool on)
+        {
+            if (on)
+            {
+                string hex = _outSimOptsBox.Text.Trim().TrimStart('0', 'x', 'X');
+                if (!uint.TryParse(hex, System.Globalization.NumberStyles.HexNumber,
+                    System.Globalization.CultureInfo.InvariantCulture, out uint parsedOpts))
+                {
+                    _outSimStatusLabel.Text = string.Format(Localization.T("connection.outsim.badopts"), _outSimOptsBox.Text);
+                    _outSimStatusLabel.ForeColor = StatusErrorColor;
+                    _outSimConnectionSwitch.SetCheckedSilent(false);
+                    return;
+                }
+
+                _outSim.Opts = (OutSimOpts)parsedOpts;
+                _outSim.UdpPort = (int)_outSimPortBox.Value;
+                _outSim.Start();
+
+                if (!_outSim.IsRunning)
+                {
+                    _outSimConnectionSwitch.SetCheckedSilent(false);
+                    return;
+                }
+            }
+            else
+            {
+                _outSim.Stop();
+                _drift.SetUpsideDown(false);
+            }
+
+            UpdateOutSimStatusLabel();
+            SyncControllerAssistAvailability();
+        }
+
+        private void UpdateOutSimStatusLabel()
+        {
+            if (_outSimStatusLabel == null) return;
+
+            if (!_outSim.IsRunning)
+            {
+                _outSimStatusLabel.Text = Localization.T("status.outsim.disconnected");
+                _outSimStatusLabel.ForeColor = ApplePalette.StatusIdle;
+            }
+            else if (_outSim.PacketsReceived == 0)
+            {
+                _outSimStatusLabel.Text = string.Format(Localization.T("status.outsim.listening"), _outSim.UdpPort);
+                _outSimStatusLabel.ForeColor = ApplePalette.StatusWarn;
+            }
+            else
+            {
+                _outSimStatusLabel.Text = string.Format(Localization.T("status.outsim.receiving"), _outSim.PacketsReceived);
+                _outSimStatusLabel.ForeColor = ApplePalette.StatusOk;
+            }
+        }
+
+        // What the user last chose for the master switch, independent of whether it's currently
+        // being held off by missing hardware. The switch itself is forced off when the pad or
+        // OutSim2 goes away; this is what makes it come back on once both are back.
+        private bool _caMasterUserWanted;
+        private bool _caHardwareWasAvailable;
+
+        private void ApplyControllerAssistMasterState(bool on, bool userInitiated = true)
+        {
+            _caMasterUserWanted = on;
+
+            if (on)
+            {
+                // Belt-and-braces: the periodic tick (OnOutGaugeFreshnessPollTick) only runs
+                // once the message loop is pumping, which auto-start-on-launch (LoadSettings,
+                // still inside the constructor) predates entirely, leaving the baseline at its
+                // empty initial value the very first time. Capturing synchronously here, right
+                // before the virtual pad exists, guarantees a fresh baseline regardless of when
+                // assist starts.
+                if (!_assistLoop.IsRunning)
+                {
+                    PadCloak.CaptureBaseline();
+                    _diBaselineGuids = new HashSet<Guid>(_wheelInput.GetAvailableDevices().Select(d => d.Guid));
+                }
+
+                if (!_assistLoop.Start())
+                {
+                    _caMasterSwitch.SetCheckedSilent(false);
+                    // A failed manual attempt is the user's answer for now; a failed automatic
+                    // resume keeps the wish so the next hardware comeback tries again.
+                    if (userInitiated) _caMasterUserWanted = false;
+                    SyncControllerAssistAvailability();
+                    return;
+                }
+                if (_caHidePadSwitch != null && _caHidePadSwitch.Checked)
+                    ApplyPadCloakState(true);
+
+                ScheduleLfsPadNotice(LfsPadNotice.Emulated, null);
+            }
+            else
+            {
+                string physicalPadName = _wheelInput.DeviceName;
+                _assistLoop.Stop();
+                ApplyPadCloakState(false);
+
+                ScheduleLfsPadNotice(LfsPadNotice.Physical, physicalPadName);
+            }
+
+            _overlay.ShowControllerAssistNotification(
+                Localization.T(on ? "controllerassist.notification.on" : "controllerassist.notification.off"));
+
+            SaveSettings();
+            SyncControllerAssistAvailability();
+        }
+
+        private void UpdateControllerAssistStatusLabels()
+        {
+            if (_caPadStatusLabel == null) return;
+
+            bool padConnected = _assistLoop.PadConnected;
+            _caPadStatusLabel.Text = Localization.T(padConnected ? "controllerassist.pad.connected" : "controllerassist.pad.disconnected");
+            _caPadStatusLabel.ForeColor = padConnected ? ApplePalette.StatusOk : ApplePalette.StatusIdle;
+
+            // Driver presence itself is checked far less often (RefreshDriverStatusLabels,
+            // startup + after an install attempt) since it opens a handle to each driver;
+            // this just re-applies the cached result every tick alongside the other locks.
+            if (_caHidePadSwitch != null)
+                _caHidePadSwitch.Enabled = _caHidePadSwitch.Enabled && _hidHideInstalledCache;
+        }
+
+        private bool _vigemInstalledCache;
+        private bool _hidHideInstalledCache;
+
+        // Static driver-installed facts, unlike hardware connection state which changes
+        // constantly: only re-checked at startup and right after an install attempt, since
+        // each check opens a handle to the corresponding driver.
+        private void RefreshDriverStatusLabels()
+        {
+            if (_caVirtualPadStatusLabel == null) return;
+
+            _vigemInstalledCache = DriverManager.IsViGEmBusInstalled();
+            _caVirtualPadStatusLabel.Text = "ViGEmBus: " + Localization.T(_vigemInstalledCache ? "drivers.status.installed" : "drivers.status.notinstalled");
+            _caVirtualPadStatusLabel.ForeColor = _vigemInstalledCache ? ApplePalette.StatusOk : ApplePalette.StatusIdle;
+            _caVigemInstallBtn.Enabled = !_vigemInstalledCache;
+
+            _hidHideInstalledCache = DriverManager.IsHidHideInstalled();
+            _caHidHideStatusLabel.Text = "HidHide: " + Localization.T(_hidHideInstalledCache ? "drivers.status.installed" : "drivers.status.notinstalled");
+            _caHidHideStatusLabel.ForeColor = _hidHideInstalledCache ? ApplePalette.StatusOk : ApplePalette.StatusIdle;
+            _caHidHideInstallBtn.Enabled = !_hidHideInstalledCache;
+        }
+
+        private async void InstallDriverAsync(DriverKind kind, Button triggerBtn)
+        {
+            triggerBtn.Enabled = false;
+            triggerBtn.Text = Localization.T("drivers.status.installing");
+
+            var result = await DriverManager.InstallAsync(kind);
+
+            RefreshDriverStatusLabels();
+            _caVigemInstallBtn.Text = Localization.T("drivers.button.install");
+            _caHidHideInstallBtn.Text = Localization.T("drivers.button.install");
+
+            AppendStatusMessage(result.Message, result.Success ? StatusSuccessColor : StatusErrorColor);
+
+            // The hide-pad wish may have been sitting there unfulfilled only because HidHide
+            // wasn't installed yet; now that it is, honor it without a manual re-toggle.
+            if (result.Success && kind == DriverKind.HidHide &&
+                _caMasterSwitch.Checked && _caHidePadSwitch.Checked && !PadCloak.IsHiding)
+                ApplyPadCloakState(true);
+        }
+
+        private void ApplyPadCloakState(bool hide)
+        {
+            if (hide)
+            {
+                if (PadCloak.TryHide(out string message))
+                    AppendStatusMessage(Localization.T("controllerassist.hidhide.hidden"));
+                else
+                    AppendStatusMessage(message, StatusErrorColor);
+            }
+            else
+            {
+                bool wasHiding = PadCloak.IsHiding;
+                PadCloak.Unhide();
+                if (wasHiding)
+                    AppendStatusMessage(Localization.T("controllerassist.hidhide.restored"));
+            }
+        }
+
+        private enum LfsPadNotice { None, Emulated, Physical }
+
+        private LfsPadNotice _lastLfsPadNotice = LfsPadNotice.None;
+        private HashSet<Guid> _diBaselineGuids = new();
+        private System.Windows.Forms.Timer? _lfsNoticeTimer;
+        private Form? _lfsNoticeForm;
+        private bool _lfsNoticeShownThisRun;
+        private bool _lfsNoticeDontShow;
+
+        private const string DefaultEmulatedPadName = "Controller (XBOX 360 For Windows)";
+
+        private static bool IsLfsRunning()
+        {
+            try
+            {
+                var processes = System.Diagnostics.Process.GetProcessesByName("LFS");
+                bool running = processes.Length > 0;
+                foreach (var p in processes) p.Dispose();
+                return running;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        private string? FindEmulatedPadName()
+        {
+            return _wheelInput.GetAvailableDevices()
+                .Where(d => SteeringWheelInput.IsXInputPad(d.Name) && !_diBaselineGuids.Contains(d.Guid))
+                .Select(d => d.Name)
+                .FirstOrDefault();
+        }
+
+        private void ScheduleLfsPadNotice(LfsPadNotice kind, string? knownPadName)
+        {
+            StopLfsNoticeTimer();
+
+            if (_lfsNoticeShownThisRun || _lfsNoticeDontShow) return;
+
+            if (!IsLfsRunning())
+            {
+                _lastLfsPadNotice = LfsPadNotice.None;
+                return;
+            }
+
+            if (_lastLfsPadNotice == kind) return;
+            _lastLfsPadNotice = kind;
+
+            int nameTries = 0;
+            _lfsNoticeTimer = new System.Windows.Forms.Timer { Interval = 400 };
+            _lfsNoticeTimer.Tick += (s, e) =>
+            {
+                if (!IsLfsRunning())
+                {
+                    StopLfsNoticeTimer();
+                    _lastLfsPadNotice = LfsPadNotice.None;
+                    return;
+                }
+
+                if (!OutSimIsReceiving()) return;
+
+                string padName;
+                bool nameIsGuess = false;
+
+                if (kind == LfsPadNotice.Physical)
+                {
+                    padName = string.IsNullOrWhiteSpace(knownPadName) ? DefaultEmulatedPadName : knownPadName;
+                }
+                else
+                {
+                    nameTries++;
+                    string? found = FindEmulatedPadName();
+                    if (found == null && nameTries < 8) return;
+                    padName = found ?? DefaultEmulatedPadName;
+                    nameIsGuess = found == null;
+                }
+
+                StopLfsNoticeTimer();
+                ShowLfsPadNotice(kind, padName, nameIsGuess);
+            };
+            _lfsNoticeTimer.Start();
+        }
+
+        private void StopLfsNoticeTimer()
+        {
+            _lfsNoticeTimer?.Stop();
+            _lfsNoticeTimer?.Dispose();
+            _lfsNoticeTimer = null;
+        }
+
+        private bool OutSimIsReceiving()
+        {
+            var sample = _outSim.LastSample;
+            return _outSim.IsRunning && sample != null && (DateTime.UtcNow - sample.ReceivedAtUtc).TotalSeconds < 2.0;
+        }
+
+        private class NoActivateForm : Form
+        {
+            protected override bool ShowWithoutActivation => true;
+        }
+
+        private void ShowLfsPadNotice(LfsPadNotice kind, string padName, bool nameIsGuess)
+        {
+            _lfsNoticeShownThisRun = true;
+            _lfsNoticeForm?.Close();
+
+            bool emulated = kind == LfsPadNotice.Emulated;
+            bool showHideTip = emulated && _caHidePadSwitch != null && !_caHidePadSwitch.Checked;
+
+            var popup = new NoActivateForm { StartPosition = FormStartPosition.CenterScreen, TopMost = true };
+            int height = 440 + (showHideTip ? 50 : 0);
+            var card = BuildPopupChrome(popup, 580, height, out _);
+
+            MakeLabel(card, Localization.T(emulated ? "lfsnotice.title.emulated" : "lfsnotice.title.physical"),
+                24, 18, 500, 32, ApplePalette.Title, new Font("Segoe UI Semibold", 15f));
+
+            MakeLabel(card, Localization.T(emulated ? "lfsnotice.emulated.message" : "lfsnotice.physical.message"),
+                24, 62, 532, 70, ApplePalette.Text, new Font("Segoe UI", 12f), ContentAlignment.TopLeft);
+
+            MakeLabel(card, Localization.T("lfsnotice.steps"),
+                24, 138, 532, 70, ApplePalette.Text, new Font("Segoe UI", 12f), ContentAlignment.TopLeft);
+
+            var nameBox = new Panel { Location = new Point(24, 216), Size = new Size(532, 52), BackColor = Color.Transparent };
+            nameBox.Paint += (s, e) =>
+            {
+                e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
+                var rect = new Rectangle(0, 0, nameBox.Width - 1, nameBox.Height - 1);
+                using GraphicsPath path = DrawingHelpers.RoundedPath(rect, 10);
+                using Pen border = new Pen(ApplePalette.Green, 1.6f);
+                e.Graphics.DrawPath(border, path);
+            };
+            card.Controls.Add(nameBox);
+            MakeLabel(nameBox, padName, 8, 6, 516, 40, ApplePalette.TextGreen,
+                new Font("Segoe UI Semibold", 15f), ContentAlignment.MiddleCenter);
+
+            int y = 276;
+            if (nameIsGuess)
+            {
+                MakeLabel(card, Localization.T("lfsnotice.padname.guess"), 24, y, 532, 22,
+                    ApplePalette.Secondary, new Font("Segoe UI", 10f), ContentAlignment.MiddleCenter);
+                y += 26;
+            }
+
+            if (showHideTip)
+            {
+                MakeLabel(card, Localization.T("lfsnotice.hidenote"), 24, y, 532, 44,
+                    ApplePalette.Secondary, new Font("Segoe UI", 10.5f), ContentAlignment.TopLeft);
+            }
+
+            var dontShow = new MacCheckBox { Text = Localization.T("lfsnotice.dontshow"), Location = new Point(24, height - 94), Size = new Size(532, 26), Checked = _lfsNoticeDontShow };
+            card.Controls.Add(dontShow);
+
+            var okBtn = MakeButton(card, Localization.T("common.ok"), 220, height - 54, 140, 30, ApplePalette.Blue);
+            okBtn.Click += (s, e) => popup.Close();
+
+            popup.FormClosed += (s, e) =>
+            {
+                if (dontShow.Checked != _lfsNoticeDontShow)
+                {
+                    _lfsNoticeDontShow = dontShow.Checked;
+                    SaveSettings();
+                }
+                if (ReferenceEquals(_lfsNoticeForm, popup)) _lfsNoticeForm = null;
+                popup.Dispose();
+            };
+
+            _lfsNoticeForm = popup;
+            popup.Show();
+        }
+
+        private void RefreshControllerAssistPresetButtons()
+        {
+            if (_caPresetOffBtn == null) return;
+
+            var active = _assistEngine.Settings.Preset;
+            SetButtonColor(_caPresetOffBtn, active == AssistPreset.Off ? ApplePalette.Green : ApplePalette.Blue);
+            SetButtonColor(_caPresetLightBtn, active == AssistPreset.Light ? ApplePalette.Green : ApplePalette.Blue);
+            SetButtonColor(_caPresetMediumBtn, active == AssistPreset.Medium ? ApplePalette.Green : ApplePalette.Blue);
+            SetButtonColor(_caPresetStrongBtn, active == AssistPreset.Strong ? ApplePalette.Green : ApplePalette.Blue);
+        }
+
+        private string _lastAutoPromptSignature = "";
+
+        // ViGEmBus keeps listing its virtual pad for a moment after it's been disconnected, so
+        // "is the virtual pad connected right now" alone would let that leftover entry be picked
+        // as a real controller in the gap right after the physical pad drops out.
+        private DateTime _virtualPadLastActiveUtc = DateTime.MinValue;
+        private const double VirtualPadLingerSeconds = 4.0;
+
+        private bool VirtualPadMayBePresent =>
+            _virtualPad.IsAvailable || (DateTime.UtcNow - _virtualPadLastActiveUtc).TotalSeconds < VirtualPadLingerSeconds;
+
+        private void TryAutoSelectAssistController()
+        {
+            if (_wheelInput == null || _wheelInput.IsConnected || _wheelInput.IsXInputDevice) return;
+
+            if (VirtualPadMayBePresent) return;
+
+            var devices = _wheelInput.GetAvailableDevices();
+            var candidates = devices
+                .Where(d => SteeringWheelInput.IsXInputPad(d.Name) || _wheelInput.IsRecognizedWheel(d.Guid))
+                .ToList();
+
+            if (candidates.Count == 0)
+            {
+                _lastAutoPromptSignature = "";
+                return;
+            }
+
+            if (candidates.Count == 1)
+            {
+                var device = candidates[0];
+                JoystickOffset axis = SteeringWheelInput.IsXInputPad(device.Name)
+                    ? JoystickOffset.X
+                    : _wheelInput.GetDefaultAxisFor(device.Name);
+
+                if (!_wheelInput.ConnectToDevice(device.Guid, axis)) return;
+
+                _savedWheelGuid = device.Guid;
+                _savedWheelAxis = axis;
+                SyncControllerAssistAvailability();
+                SaveSettings();
+                AppendStatusMessage(string.Format(Localization.T("controllerassist.autoselected"), _wheelInput.DeviceName));
+                _lastAutoPromptSignature = "";
+                return;
+            }
+
+            string signature = string.Join(",", candidates.Select(d => d.Guid).OrderBy(g => g));
+            if (signature == _lastAutoPromptSignature) return;
+            _lastAutoPromptSignature = signature;
+
+            ShowWheelSetupDialog(devices);
+        }
+
+        private string? _lastInputControllerTilesSignature = null;
+
+        private void RefreshInputControllerTiles()
+        {
+            if (_inputControllerTilesPanel == null) return;
+
+            var devices = _wheelInput.GetAvailableDevices()
+                .Where(d => !(SteeringWheelInput.IsXInputPad(d.Name) && VirtualPadMayBePresent && d.Guid != _wheelInput.DeviceGuid))
+                .ToList();
+
+            string activeGuid = (_wheelInput.IsConnected || _wheelInput.IsXInputDevice) ? _wheelInput.DeviceGuid.ToString() : "";
+            string signature = activeGuid + "|" + string.Join(",", devices.Select(d => $"{d.Guid}:{d.Name}"));
+            if (signature == _lastInputControllerTilesSignature) return;
+            _lastInputControllerTilesSignature = signature;
+
+            _inputControllerTilesPanel.Controls.Clear();
+
+            if (devices.Count == 0)
+            {
+                MakeLabel(_inputControllerTilesPanel, Localization.T("inputcontroller.none"), 0, 0, _inputControllerTilesPanel.Width, 30,
+                    ApplePalette.Secondary, new Font("Segoe UI", 9f), ContentAlignment.MiddleLeft);
+                return;
+            }
+
+            const int tileW = 120, tileH = 100, tileGap = 10;
+            int x = 0;
+            foreach (var d in devices)
+            {
+                bool isActive = d.Guid == _wheelInput.DeviceGuid && (_wheelInput.IsConnected || _wheelInput.IsXInputDevice);
+                var tile = MakeButton(_inputControllerTilesPanel, d.Name, x, 0, tileW, tileH,
+                    isActive ? ApplePalette.Green : ApplePalette.Blue);
+
+                var guid = d.Guid;
+                var name = d.Name;
+                tile.Click += (s, e) =>
+                {
+                    JoystickOffset axis = SteeringWheelInput.IsXInputPad(name)
+                        ? (guid == _savedWheelGuid ? _savedWheelAxis : JoystickOffset.X)
+                        : _wheelInput.GetDefaultAxisFor(name);
+
+                    if (!_wheelInput.ConnectToDevice(guid, axis)) return;
+
+                    _savedWheelGuid = guid;
+                    _savedWheelAxis = axis;
+                    SyncControllerAssistAvailability();
+                    SaveSettings();
+                    AppendStatusMessage(string.Format(Localization.T("wheelconfig.configured"), _wheelInput.DeviceName, _wheelInput.SteeringAxis));
+                };
+
+                x += tileW + tileGap;
+            }
+        }
+
+        private void SyncControllerAssistAvailability()
+        {
+            RefreshInputControllerTiles();
+
+            if (_caMasterSwitch == null) return;
+
+            bool hasController = _wheelInput.IsXInputDevice;
+            bool hasOutSim = _outSim.IsRunning;
+            bool hardwareAvailable = hasController && hasOutSim;
+
+            _caLockedLabel.Visible = true;
+            if (!hasController)
+            {
+                _caLockedLabel.Text = Localization.T("controllerassist.locked");
+                _caLockedLabel.ForeColor = ApplePalette.StatusWarn;
+            }
+            else if (!hasOutSim)
+            {
+                _caLockedLabel.Text = Localization.T("controllerassist.locked.outsim");
+                _caLockedLabel.ForeColor = ApplePalette.StatusWarn;
+            }
+            else
+            {
+                _caLockedLabel.Text = string.Format(Localization.T("controllerassist.connected"), _wheelInput.DeviceName);
+                _caLockedLabel.ForeColor = ApplePalette.StatusOk;
+            }
+            _caMasterSwitch.Enabled = hardwareAvailable;
+
+            if (!hardwareAvailable && _caMasterSwitch.Checked)
+            {
+                _caMasterSwitch.SetCheckedSilent(false);
+                _assistLoop.Stop();
+                ApplyPadCloakState(false);
+                _lastLfsPadNotice = LfsPadNotice.None;
+                SaveSettings();
+            }
+
+            bool hardwareJustReturned = hardwareAvailable && !_caHardwareWasAvailable;
+            _caHardwareWasAvailable = hardwareAvailable;
+            if (hardwareJustReturned && _caMasterUserWanted && !_caMasterSwitch.Checked)
+            {
+                _caMasterSwitch.SetCheckedSilent(true);
+                ApplyControllerAssistMasterState(true, userInitiated: false);
+            }
+
+            bool optionsEnabled = hardwareAvailable && _caMasterSwitch.Checked;
+            foreach (var c in _caControls) c.Enabled = optionsEnabled;
+
+            UpdateControllerAssistStatusLabels();
+        }
+
+        private static string FormatSliderValue(double v, int decimals, string suffix) => v.ToString("F" + decimals) + suffix;
+
+        private void ShowControllerAssistTuningMenu()
+        {
+            Form popup = new Form { StartPosition = FormStartPosition.CenterParent };
+            var card = BuildPopupChrome(popup, 420, 700, out _);
+
+            MakeLabel(card, Localization.T("controllerassist.tuning.title"), 20, 15, 320, 24,
+                ApplePalette.Title, new Font("Segoe UI Semibold", 11f));
+
+            var s = _assistEngine.Settings;
+            int y = 55;
+
+            void AddSlider(string labelKey, double minDisplay, double maxDisplay, double tickScale,
+                double initialDisplay, Action<double> onChangeDisplay, string suffix = "", int decimals = 0)
+            {
+                MakeLabel(card, Localization.T(labelKey), 20, y, 220, 20, ApplePalette.Text);
+                var slider = new MacSlider
+                {
+                    Location = new Point(20, y + 20),
+                    Size = new Size(300, 22),
+                    Minimum = (int)Math.Round(minDisplay * tickScale),
+                    Maximum = (int)Math.Round(maxDisplay * tickScale),
+                    Value = (int)Math.Round(initialDisplay * tickScale),
+                };
+                var valLabel = MakeLabel(card, FormatSliderValue(initialDisplay, decimals, suffix), 322, y + 20, 70, 22, ApplePalette.Text, new Font("Segoe UI", 9f));
+                slider.ValueChanged += (sd, e) =>
+                {
+                    double v = slider.Value / tickScale;
+                    onChangeDisplay(v);
+                    valLabel.Text = FormatSliderValue(v, decimals, suffix);
+                    s.Preset = AssistPreset.Custom;
+                    RefreshControllerAssistPresetButtons();
+                    SaveSettings();
+                };
+                card.Controls.Add(slider);
+                y += 52;
+            }
+
+            AddSlider("controllerassist.tuning.deadzone", 0, 20, 10, s.DeadzonePercent, v => s.DeadzonePercent = v, "%", 1);
+            AddSlider("controllerassist.tuning.responsecurve", 0.2, 3.0, 100, s.ResponseCurve, v => s.ResponseCurve = v, "", 2);
+            AddSlider("controllerassist.tuning.speedref", 20, 250, 1, s.SpeedSensitivityRefKmh, v => s.SpeedSensitivityRefKmh = v, " km/h", 0);
+            AddSlider("controllerassist.tuning.minhighspeed", 0, 100, 1, s.MinHighSpeedSteerFraction * 100, v => s.MinHighSpeedSteerFraction = v / 100.0, "%", 0);
+            AddSlider("controllerassist.tuning.slipactivation", 0, 30, 10, s.SlipActivationDeg, v => s.SlipActivationDeg = v, "°", 1);
+            AddSlider("controllerassist.tuning.slipfull", 0, 45, 10, s.SlipFullDeg, v => s.SlipFullDeg = v, "°", 1);
+            AddSlider("controllerassist.tuning.countersteergain", 0, 5, 100, s.CountersteerGain, v => s.CountersteerGain = v, "", 2);
+            AddSlider("controllerassist.tuning.assiststrength", 0, 100, 1, s.AssistStrength * 100, v => s.AssistStrength = v / 100.0, "%", 0);
+            AddSlider("controllerassist.tuning.minactivationspeed", 0, 20, 10, s.MinActivationSpeedKmh, v => s.MinActivationSpeedKmh = v, " km/h", 1);
+            AddSlider("controllerassist.tuning.maxsteerrate", 1, 40, 10, s.MaxSteerRatePerSec, v => s.MaxSteerRatePerSec = v, "", 1);
+            AddSlider("controllerassist.tuning.smoothing", 0, 200, 1, s.SmoothingMs, v => s.SmoothingMs = v, " ms", 0);
+            AddSlider("controllerassist.tuning.selfcenter", 0, 100, 1, s.SelfCenterStrength * 100, v => s.SelfCenterStrength = v / 100.0, "%", 0);
+
+            ShowModalPopup(popup);
+        }
+
+        private void ShowControllerAssistRumbleMenu()
+        {
+            Form popup = new Form { StartPosition = FormStartPosition.CenterParent };
+            var card = BuildPopupChrome(popup, 420, 760, out _);
+
+            MakeLabel(card, Localization.T("controllerassist.rumble.title"), 20, 15, 320, 24,
+                ApplePalette.Title, new Font("Segoe UI Semibold", 11f));
+
+            var r = _assistEngine.Rumble;
+            int y = 55;
+
+            void AddSlider(string labelKey, double minDisplay, double maxDisplay, double tickScale,
+                double initialDisplay, Action<double> onChangeDisplay, string suffix = "", int decimals = 0)
+            {
+                MakeLabel(card, Localization.T(labelKey), 20, y, 220, 20, ApplePalette.Text);
+                var slider = new MacSlider
+                {
+                    Location = new Point(20, y + 20),
+                    Size = new Size(300, 22),
+                    Minimum = (int)Math.Round(minDisplay * tickScale),
+                    Maximum = (int)Math.Round(maxDisplay * tickScale),
+                    Value = (int)Math.Round(initialDisplay * tickScale),
+                };
+                var valLabel = MakeLabel(card, FormatSliderValue(initialDisplay, decimals, suffix), 322, y + 20, 70, 22, ApplePalette.Text, new Font("Segoe UI", 9f));
+                slider.ValueChanged += (sd, e) =>
+                {
+                    double v = slider.Value / tickScale;
+                    onChangeDisplay(v);
+                    valLabel.Text = FormatSliderValue(v, decimals, suffix);
+                    SaveSettings();
+                };
+                card.Controls.Add(slider);
+                y += 52;
+            }
+
+            AddSlider("controllerassist.rumble.strength", 0, 100, 1, r.RumbleStrength * 100, v => r.RumbleStrength = v / 100.0, "%", 0);
+            AddSlider("controllerassist.rumble.loadweight", 0, 100, 1, r.RumbleLoadWeight * 100, v => r.RumbleLoadWeight = v / 100.0, "%", 0);
+            AddSlider("controllerassist.rumble.roadweight", 0, 100, 1, r.RumbleRoadWeight * 100, v => r.RumbleRoadWeight = v / 100.0, "%", 0);
+            AddSlider("controllerassist.rumble.impactweight", 0, 100, 1, r.RumbleImpactWeight * 100, v => r.RumbleImpactWeight = v / 100.0, "%", 0);
+            AddSlider("controllerassist.rumble.surfaceweight", 0, 100, 1, r.RumbleSurfaceChangeWeight * 100, v => r.RumbleSurfaceChangeWeight = v / 100.0, "%", 0);
+            AddSlider("controllerassist.rumble.shiftweight", 0, 100, 1, r.RumbleShiftWeight * 100, v => r.RumbleShiftWeight = v / 100.0, "%", 0);
+            AddSlider("controllerassist.rumble.jerksensitivity", 0.5, 20, 10, r.RumbleJerkSensitivity, v => r.RumbleJerkSensitivity = v, " g/s", 1);
+            AddSlider("controllerassist.rumble.loadslipactivation", 0, 30, 10, r.RumbleLoadSlipActivationDeg, v => r.RumbleLoadSlipActivationDeg = v, "°", 1);
+            AddSlider("controllerassist.rumble.loadslipfull", 0, 30, 10, r.RumbleLoadSlipFullDeg, v => r.RumbleLoadSlipFullDeg = v, "°", 1);
+            AddSlider("controllerassist.rumble.roadgain", 0.02, 3, 100, r.RumbleRoadGain, v => r.RumbleRoadGain = v, "", 2);
+            AddSlider("controllerassist.rumble.impactgain", 0.02, 3, 100, r.RumbleImpactGain, v => r.RumbleImpactGain = v, "", 2);
+            AddSlider("controllerassist.rumble.responsecurve", 0.2, 3, 100, r.RumbleResponseCurve, v => r.RumbleResponseCurve = v, "", 2);
+            AddSlider("controllerassist.rumble.directionalbias", 0, 100, 1, r.RumbleDirectionalBias * 100, v => r.RumbleDirectionalBias = v / 100.0, "%", 0);
+
+            ShowModalPopup(popup);
+        }
+
+        private void SetLfsFolder(string folder)
+        {
+            _lfsGameFolder = folder;
+            UpdateLfsFolderStatusLabel();
+            SaveSettings();
+        }
+
+        private void UpdateLfsFolderStatusLabel()
+        {
+            if (_lfsFolderStatusLabel == null) return;
+            _lfsFolderStatusLabel.Text = string.IsNullOrWhiteSpace(_lfsGameFolder)
+                ? Localization.T("general.folder.notset")
+                : _lfsGameFolder;
+        }
+
+        private void BrowseLfsFolder()
+        {
+            using var dlg = new FolderBrowserDialog
+            {
+                Description = Localization.T("general.lfsfolder"),
+                SelectedPath = Directory.Exists(_lfsGameFolder) ? _lfsGameFolder : "",
+            };
+            if (dlg.ShowDialog(this) != DialogResult.OK) return;
+            SetLfsFolder(dlg.SelectedPath);
+        }
+
+        private void ConfigureLfsCfg()
+        {
+            if (string.IsNullOrWhiteSpace(_lfsGameFolder) || !Directory.Exists(_lfsGameFolder))
+            {
+                AppendStatusMessage(Localization.T("general.configure.nofolder"), StatusErrorColor);
+                return;
+            }
+
+            try
+            {
+                string cfgPath = Path.Combine(_lfsGameFolder, "cfg.txt");
+                List<string> lines = File.Exists(cfgPath)
+                    ? File.ReadAllLines(cfgPath).ToList()
+                    : new List<string>();
+
+                int insimPort = (int)_portBox.Value;
+                int outGaugePort = (int)_outGaugePortBox.Value;
+                int outSimPort = (int)_outSimPortBox.Value;
+                string outSimOpts = string.IsNullOrWhiteSpace(_outSimOptsBox.Text) ? "bf" : _outSimOptsBox.Text.Trim();
+
+                var expected = new (string Prefix, string Line)[]
+                {
+                    ("InSim", $"InSim {insimPort}"),
+                    ("OutGauge Mode", "OutGauge Mode 1"),
+                    ("OutGauge Delay", "OutGauge Delay 1"),
+                    ("OutGauge IP", "OutGauge IP 127.0.0.1"),
+                    ("OutGauge Port", $"OutGauge Port {outGaugePort}"),
+                    ("OutGauge ID", "OutGauge ID 0"),
+                    ("OutSim Mode", "OutSim Mode 2"),
+                    ("OutSim Delay", "OutSim Delay 1"),
+                    ("OutSim IP", "OutSim IP 127.0.0.1"),
+                    ("OutSim Port", $"OutSim Port {outSimPort}"),
+                    ("OutSim ID", "OutSim ID 0"),
+                    ("OutSim Opts", $"OutSim Opts {outSimOpts}"),
+                };
+
+                bool alreadyValid = expected.All(e => CfgLineMatches(lines, e.Prefix, e.Line));
+
+                if (alreadyValid)
+                {
+                    ShowInfoPopup(Localization.T("general.configure.title"), Localization.T("general.configure.alreadyvalid"));
+                    return;
+                }
+
+                foreach (var e in expected)
+                    UpsertCfgLine(lines, e.Prefix, e.Line);
+
+                if (File.Exists(cfgPath))
+                {
+                    try { File.Copy(cfgPath, cfgPath + ".bak", overwrite: true); } catch { }
+                }
+
+                File.WriteAllLines(cfgPath, lines);
+
+                ShowInfoPopup(Localization.T("general.configure.title"), Localization.T("general.configure.success"));
+            }
+            catch (Exception ex)
+            {
+                AppendStatusMessage(string.Format(Localization.T("general.configure.error"), ex.Message), StatusErrorColor);
+            }
+        }
+
+        private static bool CfgLineMatches(List<string> lines, string keyPrefix, string expectedLine)
+        {
+            foreach (var line in lines)
+            {
+                string trimmed = line.TrimStart();
+                if (trimmed.StartsWith(keyPrefix, StringComparison.OrdinalIgnoreCase) &&
+                    (trimmed.Length == keyPrefix.Length || char.IsWhiteSpace(trimmed[keyPrefix.Length])))
+                {
+                    return string.Equals(NormalizeCfgLine(trimmed), NormalizeCfgLine(expectedLine), StringComparison.OrdinalIgnoreCase);
+                }
+            }
+            return false;
+        }
+
+        private static string NormalizeCfgLine(string line) =>
+            string.Join(' ', line.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries));
+
+        private static void UpsertCfgLine(List<string> lines, string keyPrefix, string newLine)
+        {
+            for (int i = 0; i < lines.Count; i++)
+            {
+                string trimmed = lines[i].TrimStart();
+                if (trimmed.StartsWith(keyPrefix, StringComparison.OrdinalIgnoreCase) &&
+                    (trimmed.Length == keyPrefix.Length || char.IsWhiteSpace(trimmed[keyPrefix.Length])))
+                {
+                    lines[i] = newLine;
+                    return;
+                }
+            }
+            lines.Add(newLine);
+        }
+
+        private void ShowInfoPopup(string title, string message, Form ownerForm = null)
+        {
+            Form popup = new Form { StartPosition = FormStartPosition.CenterParent };
+            var card = BuildPopupChrome(popup, 360, 180, out _);
+
+            MakeLabel(card, title, 20, 15, 320, 24, ApplePalette.Title, new Font("Segoe UI Semibold", 11f));
+            MakeLabel(card, message, 20, 50, 320, 80, ApplePalette.Text, new Font("Segoe UI", 9.5f), ContentAlignment.TopLeft);
+
+            var okBtn = MakeButton(card, Localization.T("common.ok"), 20, 136, 320, 30, ApplePalette.Blue);
+            okBtn.Click += (s, e) => popup.Close();
+
+            ShowModalPopup(popup, ownerForm);
         }
 
         private const int TitleBarHeight = 40;
@@ -246,8 +1100,6 @@ namespace LFSDriftBuddy
 
         private MacProgressBar _rpmBar = null!;
 
-        // Same story as _overlay above — constructed after BuildUI() but only ever read from
-        // event lambdas that fire well after construction finishes.
         private InGameHudManager _hud = null!;
 
         private Label _angleValueLabel = null!;
@@ -259,6 +1111,10 @@ namespace LFSDriftBuddy
         private Label _bestDeepDriftValueLabel;
         private Label _driverInfoLabel;
         private Label _vehicleInfoLabel;
+        private MacToggleSwitch _revUnsupportedSwitch;
+        private bool _revCarUnsupported;
+        private const int UnsupportedRevRpmThreshold = 20000;
+        private Label _revLockedLabel;
         private NoWheelRichTextBox _statusLabel;
         private TextBox _hostBox, _adminBox;
         private MinimalNumericUpDown _portBox;
@@ -273,6 +1129,39 @@ namespace LFSDriftBuddy
 
         private MacToggleSwitch _outGaugeConnectionSwitch;
         private MinimalNumericUpDown _outGaugePortBox;
+        private MacToggleSwitch _outSimConnectionSwitch;
+        private MinimalNumericUpDown _outSimPortBox;
+        private TextBox _outSimOptsBox;
+        private Label _outSimStatusLabel = null!;
+        private MacToggleSwitch _caMasterSwitch = null!;
+        private Button _caBindBtn = null!;
+        private InputBinding _caToggleBinding = InputBinding.None;
+        private MacToggleSwitch _caSteeringAssistSwitch = null!;
+        private MacToggleSwitch _caVibrationSwitch = null!;
+        private Button _caPresetOffBtn = null!, _caPresetLightBtn = null!, _caPresetMediumBtn = null!, _caPresetStrongBtn = null!;
+        private MacSlider _caCountersteerTrimSlider = null!;
+        private Label _caCountersteerTrimValueLabel = null!;
+        private MacSlider _caAssistStrengthTrimSlider = null!;
+        private Label _caAssistStrengthTrimValueLabel = null!;
+        private Label _caLockedLabel = null!;
+        private Label _caPadStatusLabel = null!;
+        private Label _caVirtualPadStatusLabel = null!;
+        private Label _caHidHideStatusLabel = null!;
+        private Button _caVigemInstallBtn = null!;
+        private Button _caHidHideInstallBtn = null!;
+        private MacToggleSwitch _caHidePadSwitch = null!;
+        private MacToggleSwitch _caOverlayBarSwitch = null!;
+        private Label _caTelemetrySpeedValue = null!;
+        private Label _caTelemetryRearSlipValue = null!;
+        private Label _caTelemetryRawSteerValue = null!;
+        private Label _caTelemetryOutputValue = null!;
+        private Label _caTelemetryContributionValue = null!;
+        private Label _caTelemetryVibrationValue = null!;
+        private MacSlider _caVibrationStrengthSlider = null!;
+        private Label _caVibrationStrengthValueLabel = null!;
+        private readonly List<Control> _caControls = new();
+        private string _lfsGameFolder = "";
+        private Label _lfsFolderStatusLabel;
         private MacToggleSwitch _themeSwitch;
         private Label _connectionStateLabel;
 
@@ -282,7 +1171,8 @@ namespace LFSDriftBuddy
         private MacToggleSwitch _showOverlayCheck;
 
         private MacToggleSwitch _hudMasterEnabledCheck;
-        private bool _lastHudStyleWasOverlay = true;
+        private bool _scoreOverlayBeforeHudMasterOff = true;
+        private bool _insimHudBeforeHudMasterOff = false;
 
         private bool _showRPMHudCheckedBeforeMasterOff = false;
 
@@ -293,6 +1183,7 @@ namespace LFSDriftBuddy
         private bool _advancedOutGaugeCheckedBeforeOutGaugeOff = true;
 
         private MacToggleSwitch _speedoTachoEnabledCheck;
+        private bool _speedoTachoCheckedBeforeOutGaugeOff = true;
         private MinimalNumericUpDown _speedoTachoOffsetXNumeric;
         private MinimalNumericUpDown _speedoTachoOffsetYNumeric;
         private MinimalNumericUpDown _speedoTachoScaleNumeric;
@@ -362,13 +1253,14 @@ namespace LFSDriftBuddy
         private int _indicatorSoundsVolume = 100;
 
         private MacToggleSwitch _indicatorsMasterEnabledCheck;
-        private Button _wheelSetupBtn;
+
+        private Panel _inputControllerTilesPanel;
 
         private bool _indicatorSoundsCheckedBeforeMasterOff = true;
         private bool _indicatorAutoCancelCheckedBeforeMasterOff = true;
 
         private MinimalNumericUpDown _indicatorArmThresholdNumeric;
-        private int _indicatorArmThresholdPct = 25;
+        private int _indicatorArmThresholdPct = 35;
 
         private MinimalNumericUpDown _indicatorCenterThresholdNumeric;
         private int _indicatorCenterThresholdPct = 5;
@@ -409,6 +1301,16 @@ namespace LFSDriftBuddy
 
         public MainForm()
         {
+            AutoScaleMode = AutoScaleMode.None;
+
+            // Undoes a device hide left over from a run that never reached a clean shutdown
+            // (crash, task-killed), before anything else in this session touches HidHide.
+            PadCloak.RestoreFromCrash();
+
+            ApplePalette.SetDark(true);
+            BackColor = ApplePalette.Background;
+            SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer |
+                ControlStyles.UserPaint, true);
 
             _insim = new InSimConnection();
 
@@ -559,6 +1461,22 @@ namespace LFSDriftBuddy
             _outGauge.DataReceived += OnRevData;
             _outGauge.Error += msg => AppendStatusMessage(msg, StatusErrorColor);
 
+            _outSim.DataReceived += sample => _controllerAssistState.Ingest(sample);
+            _outSim.DataReceived += sample =>
+                _drift.SetUpsideDown(Math.Cos(sample.Pitch) * Math.Cos(sample.Roll) < UpsideDownUpZThreshold);
+            _outSim.DataReceived += _ => BeginInvoke((Action)(() => UpdateOutSimStatusLabel()));
+            _outSim.Error += msg => BeginInvoke((Action)(() =>
+            {
+                AppendStatusMessage(msg, StatusErrorColor);
+                _outSimStatusLabel.Text = msg;
+                _outSimStatusLabel.ForeColor = StatusErrorColor;
+            }));
+            _outSim.Warning += msg => BeginInvoke((Action)(() =>
+            {
+                _outSimStatusLabel.Text = msg;
+                _outSimStatusLabel.ForeColor = ApplePalette.StatusWarn;
+            }));
+
             _revLimiter.CutStarted += () => BeginInvoke((Action)(() =>
             {
                 _revCutLabel.Text = Localization.T("rev.cut");
@@ -628,6 +1546,11 @@ namespace LFSDriftBuddy
                 _revLimiterNumeric, _angleValueLabel);
 
             LoadSettings();
+            SyncControllerAssistAvailability();
+            RefreshDriverStatusLabels();
+
+            _controllerAssistDisplayTimer.Tick += OnControllerAssistDisplayTick;
+            _controllerAssistDisplayTimer.Start();
 
             UpdateBestStatsLabels();
 
@@ -636,6 +1559,41 @@ namespace LFSDriftBuddy
 
             UpdateIndicatorDiagnosticsLabel();
 
+            _inGameSettingsOverlay = new InGameSettingsOverlay();
+            BuildInGameSettingsOverlayContent(_inGameSettingsOverlay.ContentHost);
+
+            WarmUpUI();
+        }
+
+        private void WarmUpUI()
+        {
+            if (_mainScrollPanel == null) return;
+
+            int originalY = _mainScrollPanel.ScrollY;
+
+            _mainScrollPanel.ScrollTo(_mainScrollPanel.MaxScrollY);
+            _mainScrollPanel.PerformLayout();
+            _mainScrollPanel.Invalidate(true);
+            _mainScrollPanel.Update();
+
+            _mainScrollPanel.ScrollTo(originalY);
+            _mainScrollPanel.PerformLayout();
+            _mainScrollPanel.Invalidate(true);
+            _mainScrollPanel.Update();
+
+            _mainScrollbar?.SyncToTarget();
+            ForceRepaintRecursive(this);
+        }
+
+        private static void ForceRepaintRecursive(Control control)
+        {
+            if (!control.IsHandleCreated) control.CreateControl();
+
+            foreach (Control child in control.Controls)
+                ForceRepaintRecursive(child);
+
+            control.Invalidate(true);
+            control.Update();
         }
 
         private SteeringWheelInput _wheelInput;
@@ -657,6 +1615,11 @@ namespace LFSDriftBuddy
                     ? Localization.T("status.outgauge.connected")
                     : Localization.T("status.outgauge.disconnected");
             _langBtn.Text = Localization.LanguageDisplayName(Localization.CurrentLanguage);
+            if (_ovLangBtn != null)
+                _ovLangBtn.Text = Localization.LanguageDisplayName(Localization.CurrentLanguage);
+            UpdateLfsFolderStatusLabel();
+            UpdateOutSimStatusLabel();
+            SyncControllerAssistAvailability();
 
             if (_driverInfoLabel != null)
                 _driverInfoLabel.Text = string.Format(Localization.T("score.driver"), _drift.CurrentDriver);
@@ -765,17 +1728,19 @@ namespace LFSDriftBuddy
             return region;
         }
 
-        private Form CreateDimOverlay()
+        private Form CreateDimOverlay(Form ownerForm = null)
         {
+            ownerForm ??= this;
             return new Form
             {
                 FormBorderStyle = FormBorderStyle.None,
                 StartPosition = FormStartPosition.Manual,
                 ShowInTaskbar = false,
-                Bounds = this.Bounds,
+                Bounds = ownerForm.Bounds,
                 BackColor = Color.Black,
                 Opacity = 0.5,
-                Owner = this
+                Owner = ownerForm,
+                TopMost = ownerForm.TopMost
             };
         }
 
@@ -815,11 +1780,12 @@ namespace LFSDriftBuddy
             return card;
         }
 
-        private DialogResult ShowModalPopup(Form popup)
+        private DialogResult ShowModalPopup(Form popup, Form ownerForm = null)
         {
-            Form overlayBg = CreateDimOverlay();
+            Form overlayBg = CreateDimOverlay(ownerForm);
             overlayBg.Show();
             popup.Owner = overlayBg;
+            popup.TopMost = overlayBg.TopMost;
             try { return popup.ShowDialog(overlayBg); }
             finally { overlayBg.Close(); overlayBg.Dispose(); }
         }
@@ -877,8 +1843,24 @@ namespace LFSDriftBuddy
                     RefreshHudPreview();
                     SyncHudColors();
 
+                    _revLimiter.RpmLimit = CalibratedMAXRPM;
+                    _revLimiter.CutMs = SavedMSCUT;
+                    _vehicleRevSettings = RevLimiterPresets.Create();
+
                     _outGaugeConnectionSwitch.SetCheckedSilent(true);
                     ApplyOutGaugeConnectionState(true);
+
+                    _outSimConnectionSwitch.SetCheckedSilent(true);
+                    ApplyOutSimConnectionState(true);
+
+                    _assistEngine.MasterEnabled = true;
+                    _assistEngine.RumbleEnabled = true;
+                    _caSteeringAssistSwitch.SetCheckedSilent(true);
+                    _caVibrationSwitch.SetCheckedSilent(true);
+                    _caOverlayBarSwitch.SetCheckedSilent(true);
+                    _overlay.ControllerAssistBarVisible = true;
+                    _caHidePadSwitch.SetCheckedSilent(true);
+                    _caMasterUserWanted = true;
 
                     UpdateSpeedoPresetLabel();
 
@@ -924,6 +1906,37 @@ namespace LFSDriftBuddy
                 if (_themeSwitch != null)
                     _themeSwitch.SetCheckedSilent(settings.DarkTheme);
 
+                _lfsGameFolder = settings.LfsGameFolder ?? "";
+                UpdateLfsFolderStatusLabel();
+
+                _outSimPortBox.Value = Math.Clamp(settings.OutSimPort, 1, 65535);
+                _outSimOptsBox.Text = string.IsNullOrWhiteSpace(settings.OutSimOptsHex) ? "bf" : settings.OutSimOptsHex;
+                if (settings.OutSimConnectionEnabled)
+                {
+                    _outSimConnectionSwitch.SetCheckedSilent(true);
+                    ApplyOutSimConnectionState(true);
+                }
+
+                _assistEngine.Settings = settings.ControllerAssistSettings ?? AssistSettings.ForPreset(AssistPreset.Medium);
+                _assistEngine.Rumble = settings.ControllerAssistRumble ?? new RumbleSettings();
+                _assistEngine.CountersteerTrimPercent = settings.ControllerAssistCountersteerTrimPercent;
+                _assistEngine.AssistStrengthTrimPercent = settings.ControllerAssistStrengthTrimPercent;
+                _assistEngine.MasterEnabled = settings.ControllerAssistSteeringEnabled;
+                _assistEngine.RumbleEnabled = settings.ControllerAssistVibrationEnabled;
+                _caSteeringAssistSwitch.SetCheckedSilent(settings.ControllerAssistSteeringEnabled);
+                _caVibrationSwitch.SetCheckedSilent(settings.ControllerAssistVibrationEnabled);
+                _caCountersteerTrimSlider.SetValueSilent((int)_assistEngine.CountersteerTrimPercent);
+                _caCountersteerTrimValueLabel.Text = $"{(int)_assistEngine.CountersteerTrimPercent}%";
+                _caAssistStrengthTrimSlider.SetValueSilent((int)_assistEngine.AssistStrengthTrimPercent);
+                _caAssistStrengthTrimValueLabel.Text = $"{(int)_assistEngine.AssistStrengthTrimPercent}%";
+                _caVibrationStrengthSlider.SetValueSilent((int)Math.Round(_assistEngine.Rumble.RumbleStrength * 100));
+                _caVibrationStrengthValueLabel.Text = $"{(int)Math.Round(_assistEngine.Rumble.RumbleStrength * 100)}%";
+                _caOverlayBarSwitch.SetCheckedSilent(settings.ControllerAssistOverlayBarVisible);
+                _overlay.ControllerAssistBarVisible = settings.ControllerAssistOverlayBarVisible;
+                _caHidePadSwitch.SetCheckedSilent(settings.ControllerAssistHidePhysicalPad);
+                RefreshControllerAssistPresetButtons();
+                _caMasterUserWanted = settings.ControllerAssistEnabled;
+
                 Localization.SetLanguage(
                     Enum.Parse<AppLanguage>(settings.Language));
 
@@ -932,6 +1945,8 @@ namespace LFSDriftBuddy
                 ApplyRevBinding(ref _revDecreaseBinding, revCfg.RevDecreaseBinding, ExecuteRevDecrease);
                 ApplyRevBinding(ref _revIncreaseBinding, revCfg.RevIncreaseBinding, ExecuteRevIncrease);
                 ApplyRevBinding(ref _lightToggleBinding, settings.LightToggleBinding, ExecuteLightToggle);
+                ApplyRevBinding(ref _caToggleBinding, settings.ControllerAssistToggleBinding, ExecuteControllerAssistToggle);
+                RefreshControllerAssistBindLabel();
 
                 ApplyIndicatorBinding(
                     settings.IndicatorLeftBinding,
@@ -966,6 +1981,8 @@ namespace LFSDriftBuddy
                     }
                 }
 
+                SyncControllerAssistAvailability();
+
                 try
                 {
                     _indicatorSoundsVolume = Math.Clamp(settings.IndicatorSoundsVolume, 0, 100);
@@ -980,6 +1997,7 @@ namespace LFSDriftBuddy
 
                     _speedoTachoEnabledCheck.SetCheckedSilent(settings.SpeedoTachoEnabled);
                     _overlay.SpeedoTachoEnabled = settings.SpeedoTachoEnabled;
+                    _speedoTachoCheckedBeforeOutGaugeOff = settings.SpeedoTachoEnabled;
                     UpdateOverlayAttachment();
                     _speedoTachoOffsetXNumeric.Value = Math.Clamp((decimal)settings.SpeedoTachoOffsetX,
                         _speedoTachoOffsetXNumeric.Minimum, _speedoTachoOffsetXNumeric.Maximum);
@@ -1008,8 +2026,6 @@ namespace LFSDriftBuddy
                     if (_speedUnitToggle != null) _speedUnitToggle.SetCheckedSilent(_useMph);
                     UpdateSpeedUnitLabels();
 
-                    // Preset A migrates from the old flat fields (pre-preset settings.json) when
-                    // there's no saved preset yet, so upgrading doesn't reset anyone's HUD.
                     _speedoPresets[0] = settings.SpeedoPresetA ?? new SpeedoPresetData
                     {
                         ShowRpmDigits = settings.SpeedoTachoShowRpmDigits,
@@ -1050,6 +2066,18 @@ namespace LFSDriftBuddy
                     if (_indicatorsMasterEnabledCheck != null)
                     {
                         _indicatorsMasterEnabledCheck.Checked = settings.IndicatorsMasterEnabled;
+                    }
+
+                    if (_hudMasterEnabledCheck != null)
+                    {
+                        _scoreOverlayBeforeHudMasterOff = settings.ShowScoreOverlay;
+                        _insimHudBeforeHudMasterOff = settings.ShowInsimHud;
+
+                        if (settings.ShowInsimHud) _showHudCheck.Checked = true;
+                        else _showOverlayCheck.Checked = settings.ShowScoreOverlay;
+
+                        _hudMasterEnabledCheck.Checked = settings.HudMasterEnabled;
+                        _lfsNoticeDontShow = settings.LfsNoticeDontShow;
                     }
 
                     _drift.SetAngleLevelThresholds(settings.AngleLevelThresholds);
@@ -1100,7 +2128,10 @@ namespace LFSDriftBuddy
 
                     DarkTheme = _isDarkTheme,
 
+                    LfsGameFolder = _lfsGameFolder,
+
                     LightToggleBinding = _lightToggleBinding,
+                    ControllerAssistToggleBinding = _caToggleBinding,
                     IndicatorLeftBinding = GetIndicatorBinding(_indicators.LeftKeyCode, _indicators.LeftWheelButton),
                     IndicatorRightBinding = GetIndicatorBinding(_indicators.RightKeyCode, _indicators.RightWheelButton),
                     IndicatorHazardBinding = GetIndicatorBinding(_indicators.HazardKeyCode, _indicators.HazardWheelButton),
@@ -1110,11 +2141,13 @@ namespace LFSDriftBuddy
 
                     IndicatorSoundsEnabled = _indicatorSoundsCheckedBeforeMasterOff,
                     IndicatorSoundsVolume = _indicatorVolumeSlider.Value,
-                    IndicatorAutoCancelOnCenter = _indicatorAutoCancelCheck.Checked,
+                    IndicatorAutoCancelOnCenter = _indicatorsMasterEnabledCheck.Checked
+                        ? _indicatorAutoCancelCheck.Checked
+                        : _indicatorAutoCancelCheckedBeforeMasterOff,
                     IndicatorArmThresholdPct = _indicatorArmThresholdPct,
                     IndicatorCenterThresholdPct = _indicatorCenterThresholdPct,
 
-                    SpeedoTachoEnabled = _speedoTachoEnabledCheck.Checked,
+                    SpeedoTachoEnabled = _speedoTachoCheckedBeforeOutGaugeOff,
                     SpeedoTachoOffsetX = (float)_speedoTachoOffsetXNumeric.Value,
                     SpeedoTachoOffsetY = (float)_speedoTachoOffsetYNumeric.Value,
                     SpeedoTachoScale = (float)_speedoTachoScaleNumeric.Value,
@@ -1143,9 +2176,32 @@ namespace LFSDriftBuddy
 
                     OutGaugeConnectionEnabled = _outGaugeConnectionSwitch?.Checked ?? false,
 
+                    OutSimConnectionEnabled = _outSimConnectionSwitch?.Checked ?? false,
+                    OutSimPort = (int)(_outSimPortBox?.Value ?? _outSim.UdpPort),
+                    OutSimOptsHex = _outSimOptsBox?.Text.Trim() ?? "bf",
+
+                    ControllerAssistEnabled = _caMasterUserWanted,
+                    ControllerAssistSteeringEnabled = _caSteeringAssistSwitch?.Checked ?? true,
+                    ControllerAssistVibrationEnabled = _caVibrationSwitch?.Checked ?? true,
+                    ControllerAssistOverlayBarVisible = _caOverlayBarSwitch?.Checked ?? false,
+                    ControllerAssistHidePhysicalPad = _caHidePadSwitch?.Checked ?? false,
+                    ControllerAssistSettings = _assistEngine.Settings,
+                    ControllerAssistRumble = _assistEngine.Rumble,
+                    ControllerAssistCountersteerTrimPercent = _assistEngine.CountersteerTrimPercent,
+                    ControllerAssistStrengthTrimPercent = _assistEngine.AssistStrengthTrimPercent,
+
                     ShowRPMHudEnabled = _showRPMHudCheckedBeforeMasterOff,
 
                     IndicatorsMasterEnabled = _indicatorsMasterEnabledCheck.Checked,
+
+                    LfsNoticeDontShow = _lfsNoticeDontShow,
+                    HudMasterEnabled = _hudMasterEnabledCheck?.Checked ?? true,
+                    ShowScoreOverlay = (_hudMasterEnabledCheck?.Checked ?? true)
+                        ? (_showOverlayCheck?.Checked ?? true)
+                        : _scoreOverlayBeforeHudMasterOff,
+                    ShowInsimHud = (_hudMasterEnabledCheck?.Checked ?? true)
+                        ? (_showHudCheck?.Checked ?? false)
+                        : _insimHudBeforeHudMasterOff,
 
                     AngleLevelThresholds = _drift.AngleLevelThresholds.ToArray(),
                     SpeedLevelThresholds = _drift.SpeedLevelThresholds.ToArray(),
@@ -1193,7 +2249,7 @@ namespace LFSDriftBuddy
                     RevCalibrateBinding = _revCalibrateBinding,
                     RevDecreaseBinding = _revDecreaseBinding,
                     RevIncreaseBinding = _revIncreaseBinding,
-                    AutoCalibrateNewCar = _revAutoCalibrateNewCarCheck?.Checked ?? true,
+                    AutoCalibrateNewCar = _revAutoCalibrateCheckedBeforeRevOff,
 
                     RevLimiterEnabled = _revEnabledBeforeOutGaugeOff,
                 };
@@ -1217,15 +2273,20 @@ namespace LFSDriftBuddy
             if (_vehicleInfoLabel != null)
                 _vehicleInfoLabel.Text = string.Format(Localization.T("rev.vehicle"), carName);
 
-            if (_vehicleRevSettings.TryGetValue(carName, out var vs))
+            bool known = _vehicleRevSettings.TryGetValue(carName, out var vs);
+            _revCarUnsupported = known && vs!.Unsupported;
+
+            if (known)
             {
-                ApplyVehicleRevValues(vs.MaxRpm, vs.CutMs,
+                ApplyVehicleRevValues(vs!.MaxRpm, vs.CutMs,
                     string.Format(Localization.T("rev.loaded_for_car"), carName, vs.MaxRpm, vs.CutMs));
+                ApplyRevUnsupportedState();
                 return;
             }
 
             ApplyVehicleRevValues(DefaultVehicleMaxRpm, DefaultVehicleCutMs,
                 string.Format(Localization.T("rev.no_saved_for_car"), carName, DefaultVehicleMaxRpm, DefaultVehicleCutMs));
+            ApplyRevUnsupportedState();
 
             ShowRevLimiterCalibrationPromptIfNeeded(carName);
         }
@@ -1294,7 +2355,8 @@ namespace LFSDriftBuddy
             _vehicleRevSettings[carName] = new VehicleRevSettings
             {
                 MaxRpm = (int)_revLimiterNumeric.Value,
-                CutMs = (int)_revCutMS.Value
+                CutMs = (int)_revCutMS.Value,
+                Unsupported = _revCarUnsupported
             };
 
             SaveSettings();
@@ -1375,6 +2437,9 @@ namespace LFSDriftBuddy
                     _insim.RequestPlayerList();
                 }
 
+                if (data.RPM > UnsupportedRevRpmThreshold && !_revCarUnsupported && !string.IsNullOrEmpty(_currentCarName))
+                    SetCurrentCarRevUnsupported(true, detectedAutomatically: true);
+
                 _hud.ShowInGameRPMLimitter(_revLimiterNumeric.Value.ToString());
 
                 _drift.UpdateEngineTelemetry(data.RPM, data.Throttle, (int)data.Gear, data.Speed * 3.6);
@@ -1423,6 +2488,8 @@ namespace LFSDriftBuddy
             }
 
             this.Invalidate(true);
+
+            _mainScrollPanel?.Refresh();
         }
 
         private void ApplyThemeRecursive(Control root)
@@ -1461,6 +2528,10 @@ namespace LFSDriftBuddy
                     case Label lbl when lbl.Tag as string == "status:live":
                         break;
 
+                    case Label lbl when lbl.Tag as string == "theme:title":
+                        lbl.ForeColor = ApplePalette.Title;
+                        break;
+
                     case Label lbl:
                         RecolorLabel(lbl);
                         break;
@@ -1471,22 +2542,45 @@ namespace LFSDriftBuddy
             }
         }
 
+        private static readonly Color DarkThemeTextSnapshot = Color.FromArgb(220, 220, 225);
+        private static readonly Color DarkThemeSecondarySnapshot = Color.FromArgb(150, 150, 160);
+
         private void RecolorLabel(Label lbl)
         {
 
             if (lbl.Tag == null)
-                lbl.Tag = lbl.ForeColor;
+            {
+                Color current = lbl.ForeColor;
+                if (current == DarkThemeTextSnapshot)
+                    lbl.Tag = "theme:dyntext";
+                else if (current == DarkThemeSecondarySnapshot)
+                    lbl.Tag = "theme:dynsecondary";
+                else
+                    lbl.Tag = current;
+            }
+
+            if (lbl.Tag as string == "theme:dyntext")
+            {
+                lbl.ForeColor = ApplePalette.Text;
+                return;
+            }
+            if (lbl.Tag as string == "theme:dynsecondary")
+            {
+                lbl.ForeColor = ApplePalette.Secondary;
+                return;
+            }
 
             if (!(lbl.Tag is Color original))
                 return;
 
+            double luma = (0.299 * original.R + 0.587 * original.G + 0.114 * original.B) / 255.0;
+
             if (!_isDarkTheme)
             {
-                lbl.ForeColor = original;
+                lbl.ForeColor = luma >= 0.5 ? DrawingHelpers.Darken(original, 0.35) : original;
                 return;
             }
 
-            double luma = (0.299 * original.R + 0.587 * original.G + 0.114 * original.B) / 255.0;
             lbl.ForeColor = luma < 0.55 ? DrawingHelpers.Lighten(original, 0.65) : original;
         }
 
@@ -1517,9 +2611,7 @@ namespace LFSDriftBuddy
             Size = new Size(890, 670 + TitleBarHeight);
 
             MinimumSize = new Size(890, 670 + TitleBarHeight);
-
-            int maxWindowHeight = Screen.PrimaryScreen?.WorkingArea.Height ?? 1200;
-            MaximumSize = new Size(890, maxWindowHeight);
+            MaximumSize = new Size(890, 670 + TitleBarHeight);
 
             DoubleBuffered = true;
 
@@ -1532,7 +2624,6 @@ namespace LFSDriftBuddy
                 Location = new Point(1, 1),
                 Size = new Size(ClientSize.Width - 2 - MinimalScrollbar.TrackWidth, ClientSize.Height - 2),
                 Anchor = AnchorStyles.Top | AnchorStyles.Bottom | AnchorStyles.Left | AnchorStyles.Right,
-                AutoScroll = true,
                 BackColor = BackColor,
             };
             Controls.Add(_mainScrollPanel);
@@ -1543,40 +2634,16 @@ namespace LFSDriftBuddy
 
             ComputeGridLayout();
 
-            _mainScrollPanel.AutoScrollMinSize = new Size(0, _gridContentHeight);
+            _mainScrollPanel.ContentHeight = _gridContentHeight;
             _mainScrollbar.SyncToTarget();
 
             _wheelInput = new SteeringWheelInput(
-                this.Handle,
-                //(0, () => BeginInvoke((Action)(() => { _hud.ShowInGameAward("0"); }))),
-                //(1, () => BeginInvoke((Action)(() => { _hud.ShowInGameAward("1"); }))),
-                //(2, () => BeginInvoke((Action)(() => { _hud.ShowInGameAward("2"); }))),
-                //(3, () => BeginInvoke((Action)(() => { _hud.ShowInGameAward("3"); }))),
-                //(4, () => BeginInvoke((Action)(() => { _hud.ShowInGameAward("4"); }))),
-                //(5, () => BeginInvoke((Action)(() => { _hud.ShowInGameAward("5"); }))),
-                //(6, () => BeginInvoke((Action)(() => { _hud.ShowInGameAward("6"); }))),
-                //(7, () => BeginInvoke((Action)(() => { _hud.ShowInGameAward("7"); }))),
-                //(8, () => BeginInvoke((Action)(() => { _hud.ShowInGameAward("8"); }))),
-                //(9, () => BeginInvoke((Action)(() => { _hud.ShowInGameAward("9"); }))),
-                (10, () => BeginInvoke((Action)(() =>
-                {
-                    if (!_connectionSwitch.Checked)
-                    {
-                        _insim.Connect(_hostBox.Text.Trim(), (int)_portBox.Value, _adminBox.Text);
-                    }
-
-                })))
-                //(11, () => BeginInvoke((Action)(() => { _hud.ShowInGameAward("11"); }))),
-                //(12, () => BeginInvoke((Action)(() => { _hud.ShowInGameAward("12"); }))),
-                //(13, () => BeginInvoke((Action)(() => { _hud.ShowInGameAward("13"); }))),
-                //(14, () => BeginInvoke((Action)(() => { _hud.ShowInGameAward("14"); }))),
-                //(15, () => BeginInvoke((Action)(() => { _hud.ShowInGameAward("15"); }))),
-                //(16, () => BeginInvoke((Action)(() => { _hud.ShowInGameAward("16"); })))
+                this.Handle
 
             );
 
-            _wheelInput.WheelNotFound += devices =>
-            BeginInvoke((Action)(() => ShowWheelSetupDialog(devices)));
+            _assistLoop = new AssistLoop(_wheelInput, _controllerAssistState, _assistEngine, _virtualPad);
+            _assistLoop.Log += msg => BeginInvoke((Action)(() => AppendStatusMessage(msg, StatusErrorColor)));
 
             headerPanel = CreateCard(
                 "",
@@ -1584,11 +2651,13 @@ namespace LFSDriftBuddy
                 420,
                 170, locKey: "header.title");
 
-            Color disconnectedColor = Color.FromArgb(130, 130, 165);
-            _connectionStateLabel = MakeLabel(headerPanel, "", 200, 10, 200, 15, disconnectedColor, new Font("Segoe UI", 8f), ContentAlignment.MiddleRight, locKey: "status.disconnected");
+            Color disconnectedColor = ApplePalette.StatusIdle;
+            _connectionStateLabel = MakeLabel(headerPanel, "", 16, 8, 388, 18, disconnectedColor, new Font("Segoe UI", 8f), ContentAlignment.TopRight, locKey: "status.disconnected");
             _connectionStateLabel.Tag = "status:live";
-            _outGaugeStateLabel = MakeLabel(headerPanel, "", 200, 25, 200, 15, disconnectedColor, new Font("Segoe UI", 8f), ContentAlignment.MiddleRight, locKey: "status.outgauge.disconnected");
+            _connectionStateLabel.AutoEllipsis = false;
+            _outGaugeStateLabel = MakeLabel(headerPanel, "", 16, 27, 388, 30, disconnectedColor, new Font("Segoe UI", 8f), ContentAlignment.TopRight, locKey: "status.outgauge.disconnected");
             _outGaugeStateLabel.Tag = "status:live";
+            _outGaugeStateLabel.AutoEllipsis = false;
 
             MakeLabel(headerPanel, "Dark Mode", 24, 60, 155, 30,
             Color.FromArgb(60, 60, 60), new Font("Segoe UI", 12f), ContentAlignment.MiddleLeft, locKey: "header.theme");
@@ -1623,7 +2692,7 @@ namespace LFSDriftBuddy
                 "Connection",
                 GridSlot.ConnectionInSim,
                 420,
-                170, locKey: "connection.title");
+                295, locKey: "connection.title");
 
             var connectionLabel = MakeLabel(connectionPanel, "STATUS", 300, 14, 55, 22,
             Color.FromArgb(60, 60, 60), null, ContentAlignment.MiddleRight, locKey: "connection.status");
@@ -1689,11 +2758,46 @@ namespace LFSDriftBuddy
 
             _adminBox = MakeTextBox(connectionPanel, "", 250, 130, 150, 30);
 
+            var connSeparator2 = new Panel { Location = new Point(24, 178), Size = new Size(372, 1), BackColor = ApplePalette.Border, Tag = "theme:border" };
+            connectionPanel.Controls.Add(connSeparator2);
+
+            MakeLabel(connectionPanel, Localization.T("general.lfsfolder"), 24, 188, 372, 22,
+                Color.FromArgb(60, 60, 60), new Font("Segoe UI", 12f), ContentAlignment.MiddleLeft, locKey: "general.lfsfolder");
+
+            _lfsFolderStatusLabel = MakeLabel(connectionPanel, "", 24, 214, 372, 20,
+                Color.FromArgb(140, 140, 170), new Font("Segoe UI", 8.5f), ContentAlignment.MiddleLeft);
+            UpdateLfsFolderStatusLabel();
+
+            var lfsBrowseBtn = MakeButton(connectionPanel, Localization.T("general.browse"), 24, 244, 176, 30, locKey: "general.browse");
+            lfsBrowseBtn.Click += (s, e) => BrowseLfsFolder();
+            _localizedControls.Add((lfsBrowseBtn, "general.browse"));
+
+            var lfsConfigureBtn = MakeButton(connectionPanel, Localization.T("general.configure"), 220, 244, 176, 30, ApplePalette.Blue, locKey: "general.configure");
+            lfsConfigureBtn.Click += (s, e) => ConfigureLfsCfg();
+            _localizedControls.Add((lfsConfigureBtn, "general.configure"));
+
+            var inputControllerPanel = CreateCard(
+                "Input Device",
+                GridSlot.InputController,
+                420,
+                170, locKey: "inputcontroller.title");
+
+            var inputControllerConfigureBtn = MakeButton(inputControllerPanel, Localization.T("controllerassist.setup.button"), 420 - 10 - 170, 10, 170, 30, locKey: "controllerassist.setup.button");
+            inputControllerConfigureBtn.Click += (s, e) => ShowWheelSetupDialog(_wheelInput.GetAvailableDevices());
+
+            _inputControllerTilesPanel = new Panel
+            {
+                Location = new Point(16, 54),
+                Size = new Size(420 - 32, 100),
+                BackColor = Color.Transparent,
+            };
+            inputControllerPanel.Controls.Add(_inputControllerTilesPanel);
+
             var outGaugeConnectionPanel = CreateCard(
                 "OutGauge Connection",
                 GridSlot.ConnectionOutGauge,
                 420,
-                100, locKey: "connection.outgauge.title");
+                115, locKey: "connection.outgauge.title");
 
             MakeLabel(outGaugeConnectionPanel, "STATUS", 300, 14, 55, 22,
                 Color.FromArgb(60, 60, 60), null, ContentAlignment.MiddleRight, locKey: "connection.status");
@@ -1722,8 +2826,41 @@ namespace LFSDriftBuddy
                 65535,
                 _outGauge.UdpPort);
 
-            //MakeLabel(outGaugeConnectionPanel, Localization.T("connection.outgauge.subtitle"), 24, 55, 380, 34,
-            //    Color.FromArgb(140, 140, 170), new Font("Segoe UI", 7.5f), ContentAlignment.TopLeft, locKey: "connection.outgauge.subtitle");
+
+            var outSimConnectionPanel = CreateCard(
+                "OutSim2 Connection",
+                GridSlot.ConnectionOutSim,
+                420,
+                170, locKey: "connection.outsim.title");
+
+            MakeLabel(outSimConnectionPanel, "STATUS", 300, 14, 55, 22,
+                Color.FromArgb(60, 60, 60), null, ContentAlignment.MiddleRight, locKey: "connection.status");
+
+            _outSimConnectionSwitch = new MacToggleSwitch
+            {
+                Location = new Point(360, 10),
+                Checked = false
+            };
+            _outSimConnectionSwitch.CheckedChanged += (s, e) =>
+            {
+                ApplyOutSimConnectionState(_outSimConnectionSwitch.Checked);
+                SaveSettings();
+            };
+            outSimConnectionPanel.Controls.Add(_outSimConnectionSwitch);
+
+            MakeLabel(outSimConnectionPanel, Localization.T("connection.port"), 24, 60, 155, 30,
+                Color.FromArgb(60, 60, 60), new Font("Segoe UI", 12f), ContentAlignment.MiddleLeft, locKey: "connection.port");
+            _outSimPortBox = MakeNumericUpDown(
+                outSimConnectionPanel, 250, 60, 150, 30, 1, 65535, _outSim.UdpPort);
+
+            MakeLabel(outSimConnectionPanel, Localization.T("connection.outsim.opts"), 24, 95, 155, 30,
+                Color.FromArgb(60, 60, 60), new Font("Segoe UI", 12f), ContentAlignment.MiddleLeft, locKey: "connection.outsim.opts");
+            _outSimOptsBox = MakeTextBox(outSimConnectionPanel, "bf", 250, 95, 150, 30, HorizontalAlignment.Left);
+            _outSimOptsBox.Leave += (s, e) => SaveSettings();
+
+            _outSimStatusLabel = MakeLabel(outSimConnectionPanel, "", 24, 132, 372, 20,
+                Color.FromArgb(140, 140, 170), new Font("Segoe UI", 8.5f), ContentAlignment.MiddleLeft);
+            UpdateOutSimStatusLabel();
 
             speedometerPanel = CreateCard(
                 "Speedometer",
@@ -1742,6 +2879,7 @@ namespace LFSDriftBuddy
             _speedoTachoEnabledCheck.CheckedChanged += (s, e) =>
             {
                 _overlay.SpeedoTachoEnabled = _speedoTachoEnabledCheck.Checked;
+                _speedoTachoCheckedBeforeOutGaugeOff = _speedoTachoEnabledCheck.Checked;
                 UpdateOverlayAttachment();
                 SaveSettings();
             };
@@ -1870,10 +3008,10 @@ namespace LFSDriftBuddy
             MakeLabel(scorePanel, Localization.T("hud.advanced_outgauge.subtitle"), 24, 255, 380, 32,
                 Color.FromArgb(140, 140, 170), new Font("Segoe UI", 7.5f), ContentAlignment.TopLeft, locKey: "hud.advanced_outgauge.subtitle");
 
-            var driftLevelsBtn = MakeButton(scorePanel, "DRIFT LEVELS", 24, 190, 181, 30, ButtonColor, locKey: "score.levels.button");
+            var driftLevelsBtn = MakeButton(scorePanel, "DRIFT LEVELS", 24, 190, 181, 30, ApplePalette.Blue, locKey: "score.levels.button");
             driftLevelsBtn.Click += (s, e) => ShowAngleLevelsMenu();
 
-            var speedLevelsBtn = MakeButton(scorePanel, "SPEED LEVELS", 215, 190, 181, 30, ButtonColor, locKey: "score.levels.speed_button");
+            var speedLevelsBtn = MakeButton(scorePanel, "SPEED LEVELS", 215, 190, 181, 30, ApplePalette.Blue, locKey: "score.levels.speed_button");
             speedLevelsBtn.Click += (s, e) => ShowSpeedLevelsMenu();
 
             const int scoreColW = 94;
@@ -1920,7 +3058,7 @@ namespace LFSDriftBuddy
             {
                 Location = new Point(355, 405),
                 Size = new Size(40, 20),
-                Checked = false
+                Checked = true
             };
             _collisionDetectCheck.CheckedChanged += (s, e) =>
             {
@@ -1948,7 +3086,7 @@ namespace LFSDriftBuddy
             MakeLabel(scorePanel, Localization.T("score.objectcollisiondetect.subtitle"), 24, 496, 372, 32,
                 Color.FromArgb(140, 140, 170), new Font("Segoe UI", 7.5f), ContentAlignment.TopLeft, locKey: "score.objectcollisiondetect.subtitle");
 
-            var hitLevelsBtn = MakeButton(scorePanel, "HIT LEVELS", 24, 532, 372, 30, ButtonColor, locKey: "derby.levels.button");
+            var hitLevelsBtn = MakeButton(scorePanel, "HIT LEVELS", 24, 532, 372, 30, ApplePalette.Blue, locKey: "derby.levels.button");
             hitLevelsBtn.Click += (s, e) => ShowHitLevelsMenu();
 
             hudPanel = CreateCard(
@@ -2023,12 +3161,13 @@ namespace LFSDriftBuddy
                 _showHudCheck.Enabled = on;
                 if (on)
                 {
-                    if (_lastHudStyleWasOverlay) _showOverlayCheck.Checked = true;
-                    else _showHudCheck.Checked = true;
+                    if (_scoreOverlayBeforeHudMasterOff) _showOverlayCheck.Checked = true;
+                    else if (_insimHudBeforeHudMasterOff) _showHudCheck.Checked = true;
                 }
                 else
                 {
-                    _lastHudStyleWasOverlay = _showOverlayCheck.Checked;
+                    _scoreOverlayBeforeHudMasterOff = _showOverlayCheck.Checked;
+                    _insimHudBeforeHudMasterOff = _showHudCheck.Checked;
                     _showOverlayCheck.Checked = false;
                     _showHudCheck.Checked = false;
                 }
@@ -2056,7 +3195,7 @@ namespace LFSDriftBuddy
             MakeLabel(hudPanel, Localization.T("hud.REVLimitter.subtitle"), 24, 398, 380, 32,
                 Color.FromArgb(140, 140, 170), new Font("Segoe UI", 7.5f), ContentAlignment.TopLeft, locKey: "hud.REVLimitter.subtitle");
 
-            var scoreColorsBtn = MakeButton(hudPanel, Localization.T("hud.scorecolors"), 90, 190, 250, 32, ApplePalette.Blue);
+            var scoreColorsBtn = MakeButton(hudPanel, Localization.T("hud.scorecolors"), 90, 190, 250, 30, ApplePalette.Blue);
             scoreColorsBtn.Click += (s, e) => ShowScoreColorsMenu();
             _localizedControls.Add((scoreColorsBtn, "hud.scorecolors"));
 
@@ -2100,27 +3239,56 @@ namespace LFSDriftBuddy
 
             revLimiterPanel.Controls.Add(_revEnableSwitch);
 
-            _vehicleInfoLabel = MakeLabel(revLimiterPanel, "---", 24, 53, 380, 16,
+            _vehicleInfoLabel = MakeLabel(revLimiterPanel, "---", 24, 53, 190, 16,
                 Color.FromArgb(140, 140, 170), new Font("Segoe UI", 8.5f));
 
-            revBindingsBtn = MakeButton(revLimiterPanel, "BIND FUNCTIONS", 250, 276, 150, 32, locKey: "rev.bindfunctions");
+            MakeLabel(revLimiterPanel, Localization.T("rev.unsupported.label"), 215, 50, 135, 22,
+                Color.FromArgb(140, 140, 170), new Font("Segoe UI", 8f), ContentAlignment.MiddleRight, locKey: "rev.unsupported.label");
+            _revUnsupportedSwitch = new MacToggleSwitch
+            {
+                Location = new Point(355, 51),
+                Size = new Size(40, 20),
+                Checked = false
+            };
+            _revUnsupportedSwitch.CheckedChanged += (s, e) =>
+            {
+                if (string.IsNullOrEmpty(_currentCarName))
+                {
+                    _revUnsupportedSwitch.SetCheckedSilent(false);
+                    return;
+                }
+                SetCurrentCarRevUnsupported(_revUnsupportedSwitch.Checked, detectedAutomatically: false);
+            };
+            revLimiterPanel.Controls.Add(_revUnsupportedSwitch);
+
+            _revLockedLabel = MakeLabel(revLimiterPanel, "", 24, 74, 380, 22,
+                ApplePalette.StatusWarn, new Font("Segoe UI", 9f), ContentAlignment.TopLeft);
+
+            revBindingsBtn = MakeButton(revLimiterPanel, "BIND FUNCTIONS", 250, 286, 150, 30, locKey: "rev.bindfunctions");
             revBindingsBtn.Click += (s, e) => OpenRevLimiterBindings();
 
             _globalHotkey = new GlobalHotkey();
 
-            MakeLabel(revLimiterPanel, "RPM", 24, 80, 60, 30,
+            _settingsOverlayHotkey = new GlobalHotkey(
+                (Keys.D, () =>
+                {
+                    if ((ModifierKeys & Keys.Control) == 0) return;
+                    BeginInvoke((Action)ToggleInGameSettingsOverlay);
+                }));
+
+            MakeLabel(revLimiterPanel, "RPM", 24, 94, 60, 30,
                 Color.FromArgb(60, 60, 60), new Font("Segoe UI", 12f), ContentAlignment.MiddleLeft, locKey: "rev.rpm");
-            _rpmLabel = MakeLabel(revLimiterPanel, "0", 90, 75, 90, 36, null, new Font("Segoe UI", 18f, FontStyle.Bold), ContentAlignment.MiddleLeft);
-            _revCutLabel = MakeLabel(revLimiterPanel, "", 190, 75, 50, 36,
+            _rpmLabel = MakeLabel(revLimiterPanel, "0", 90, 89, 90, 36, null, new Font("Segoe UI", 18f, FontStyle.Bold), ContentAlignment.MiddleLeft);
+            _revCutLabel = MakeLabel(revLimiterPanel, "", 190, 89, 50, 36,
                 ApplePalette.Text, new Font("Segoe UI", 14f, FontStyle.Bold));
 
-            _calibrateBtn1 = MakeButton(revLimiterPanel, "CALIBRATE", 250, 79, 150, 30, locKey: "rev.calibrate");
+            _calibrateBtn1 = MakeButton(revLimiterPanel, "CALIBRATE", 250, 94, 150, 30, locKey: "rev.calibrate");
 
             _calibrateBtn1.Click += async (s, e) => await RPMLimitterCalibrate();
 
             _rpmBar = new MacProgressBar
             {
-                Location = new Point(24, 120),
+                Location = new Point(24, 134),
                 Size = new Size(376, 18),
                 Minimum = 0,
                 Maximum = CalibratedMAXRPM,
@@ -2128,12 +3296,12 @@ namespace LFSDriftBuddy
             };
             revLimiterPanel.Controls.Add(_rpmBar);
 
-            _revLimitLabel = MakeLabel(revLimiterPanel, "RPM Limit", 24, 155, 220, 30,
+            _revLimitLabel = MakeLabel(revLimiterPanel, "RPM Limit", 24, 169, 220, 30,
                 Color.FromArgb(60, 60, 60), new Font("Segoe UI", 12f), ContentAlignment.MiddleLeft, locKey: "rev.limit");
             _revLimiterNumeric = MakeNumericUpDown(
                 revLimiterPanel,
                 250,
-                155,
+                169,
                 150,
                 30,
                 500,
@@ -2149,12 +3317,12 @@ namespace LFSDriftBuddy
                 }
             );
 
-            MakeLabel(revLimiterPanel, "Cut time [ms]", 24, 190, 220, 30,
+            MakeLabel(revLimiterPanel, "Cut time [ms]", 24, 204, 220, 30,
                 Color.FromArgb(60, 60, 60), new Font("Segoe UI", 12f), ContentAlignment.MiddleLeft, locKey: "rev.cutms");
             _revCutMS = MakeNumericUpDown(
                 revLimiterPanel,
                 250,
-                190,
+                204,
                 150,
                 30,
                 25,
@@ -2168,11 +3336,11 @@ namespace LFSDriftBuddy
                 }
             );
 
-            MakeLabel(revLimiterPanel, Localization.T("rev.autocalibrate"), 24, 228, 300, 22,
+            MakeLabel(revLimiterPanel, Localization.T("rev.autocalibrate"), 24, 242, 300, 22,
                 Color.FromArgb(60, 60, 60), new Font("Segoe UI", 12f), ContentAlignment.MiddleLeft, locKey: "rev.autocalibrate");
             _revAutoCalibrateNewCarCheck = new MacToggleSwitch
             {
-                Location = new Point(355, 224),
+                Location = new Point(355, 238),
                 Size = new Size(40, 20),
                 Checked = true
             };
@@ -2182,10 +3350,10 @@ namespace LFSDriftBuddy
                 _revAutoCalibrateCheckedBeforeRevOff = _revAutoCalibrateNewCarCheck.Checked;
                 SaveSettings();
             };
-            MakeLabel(revLimiterPanel, Localization.T("rev.autocalibrate.subtitle"), 24, 252, 380, 18,
+            MakeLabel(revLimiterPanel, Localization.T("rev.autocalibrate.subtitle"), 24, 266, 380, 18,
                 Color.FromArgb(140, 140, 170), new Font("Segoe UI", 7.5f), ContentAlignment.TopLeft, locKey: "rev.autocalibrate.subtitle");
 
-            MakeLabel(revLimiterPanel, "Bind revlimitter functions", 24, 282, 220, 26,
+            MakeLabel(revLimiterPanel, "Bind revlimitter functions", 24, 290, 220, 26,
                       Color.FromArgb(60, 60, 60), new Font("Segoe UI", 12f), ContentAlignment.MiddleLeft, locKey: "rev.calibratehint");
 
             indicatorPanel = CreateCard(
@@ -2209,7 +3377,6 @@ namespace LFSDriftBuddy
                 _bindLeftBtn.Enabled = on;
                 _bindRightBtn.Enabled = on;
                 _bindHazardBtn.Enabled = on;
-                _wheelSetupBtn.Enabled = on;
                 _indicatorArmThresholdNumeric.Enabled = on;
                 _indicatorCenterThresholdNumeric.Enabled = on;
 
@@ -2274,7 +3441,6 @@ namespace LFSDriftBuddy
 
             const int indCol1X = 24, indCol2X = 450, indColW = 380;
 
-            // ── Column 1: status/info, dashboard lamps, then key bindings ───────────
             const int bindColW = 190, bindColGap = 20;
             int bindCol2X = indCol1X + bindColW + bindColGap;
 
@@ -2317,10 +3483,6 @@ namespace LFSDriftBuddy
                 groupHeaderColor, groupHeaderFont, ContentAlignment.MiddleLeft, locKey: "indicators.keybind");
             y1 += 24;
 
-            // 2×2 grid: each cell shows a readable action name above a button that always
-            // displays the CURRENT binding (key or wheel/pad button) — not just a static action
-            // label — so the assignment is visible at a glance instead of hiding behind a bare
-            // "LEFT"/"RIGHT".
             int bindRow = 0;
             Button MakeBindRow(string bindNameKey, InputBinding current)
             {
@@ -2389,7 +3551,6 @@ namespace LFSDriftBuddy
                 SaveSettings();
             });
 
-            // ── Column 2: steering wheel + auto-cancel-on-center settings ───────────
             int y2 = 64;
 
 
@@ -2397,12 +3558,6 @@ namespace LFSDriftBuddy
                 groupHeaderColor, groupHeaderFont, ContentAlignment.MiddleLeft, locKey: "indicators.group.wheel");
 
             y2 += 20;
-
-            _wheelSetupBtn = MakeButton(indicatorPanel, Localization.T("indicators.wheelsetup"), indCol2X, y2, indColW, 34,
-                locKey: "indicators.wheelsetup");
-            _wheelSetupBtn.Click += (s, e) => ShowWheelSetupDialog(_wheelInput.GetAvailableDevices());
-
-            y2 += 34;
 
             MakeLabel(indicatorPanel, Localization.T("indicators.centeroff"), indCol2X, y2, indColW - 50, 30,
                 Color.FromArgb(60, 60, 60), new Font("Segoe UI", 12f), ContentAlignment.MiddleLeft, locKey: "indicators.centeroff");
@@ -2424,8 +3579,8 @@ namespace LFSDriftBuddy
 
             MakeLabel(indicatorPanel, Localization.T("indicators.armthreshold"), indCol2X, y2, indColW - 90, 22,
                 Color.FromArgb(60, 60, 60), new Font("Segoe UI", 12f), ContentAlignment.MiddleLeft, locKey: "indicators.armthreshold");
-            
-           
+
+
 
             _indicatorArmThresholdNumeric = MakeNumericUpDown(
                 indicatorPanel, indCol2X + indColW - 90, y2, 70, 28, 1, 100, _indicatorArmThresholdPct, 1,
@@ -2437,7 +3592,7 @@ namespace LFSDriftBuddy
 
             MakeLabel(indicatorPanel, Localization.T("indicators.armthreshold.subtitle"), indCol2X, y2, indColW - 50, 28,
                 Color.FromArgb(140, 140, 170), new Font("Segoe UI", 7.5f), ContentAlignment.TopLeft, locKey: "indicators.armthreshold.subtitle");
-            
+
             y2 += 34;
 
             MakeLabel(indicatorPanel, Localization.T("indicators.centerthreshold"), indCol2X, y2, indColW - 90, 22,
@@ -2453,7 +3608,9 @@ namespace LFSDriftBuddy
             MakeLabel(indicatorPanel, Localization.T("indicators.centerthreshold.subtitle"), indCol2X, y2, indColW - 50, 30,
                 Color.FromArgb(140, 140, 170), new Font("Segoe UI", 7.5f), ContentAlignment.TopLeft, locKey: "indicators.centerthreshold.subtitle");
 
-            // ── Column 3: sound settings ─────────────────────────────────────────────
+            var indCol2Divider = new Panel { Location = new Point(indCol2X, 293), Size = new Size(indColW, 1), BackColor = ApplePalette.Border, Tag = "theme:border" };
+            indicatorPanel.Controls.Add(indCol2Divider);
+
             int y3 = 315;
 
 
@@ -2517,26 +3674,279 @@ namespace LFSDriftBuddy
 
             indicatorPanel.Controls.Add(_indicatorVolumeSlider);
 
+            const int caLeftX = 24, caLeftW = 260;
+            const int caRightX = 304, caRightW = 522;
+
+            var controllerAssistPanel = CreateCard(
+                "Controller Assist",
+                GridSlot.ControllerAssist,
+                850,
+                540, locKey: "controllerassist.title");
+
+            MakeLabel(controllerAssistPanel, "STATUS", 730, 14, 55, 22,
+                Color.FromArgb(60, 60, 60), null, ContentAlignment.MiddleRight, locKey: "connection.status");
+
+            _caMasterSwitch = new MacToggleSwitch
+            {
+                Location = new Point(790, 10),
+                Checked = false
+            };
+            _caMasterSwitch.CheckedChanged += (s, e) => ApplyControllerAssistMasterState(_caMasterSwitch.Checked);
+            controllerAssistPanel.Controls.Add(_caMasterSwitch);
+
+            _caBindBtn = MakeButton(controllerAssistPanel, "", 580, 9, 140, 30, ApplePalette.Blue);
+            _caBindBtn.Click += (s, e) => BindKey(Localization.T("controllerassist.bindname"), b =>
+            {
+                ApplyRevBinding(ref _caToggleBinding, b, ExecuteControllerAssistToggle);
+                RefreshControllerAssistBindLabel();
+                SaveSettings();
+            });
+            RefreshControllerAssistBindLabel();
+
+            _caLockedLabel = MakeLabel(controllerAssistPanel, Localization.T("controllerassist.locked"), 24, 60, 800, 34,
+                ApplePalette.StatusWarn, new Font("Segoe UI", 9f), ContentAlignment.TopLeft, locKey: "controllerassist.locked");
+
+            var caGroupHeaderFont = new Font("Segoe UI", 7.5f, FontStyle.Bold);
+            Color caGroupHeaderColor = Color.FromArgb(140, 140, 170);
+
+
+            MakeLabel(controllerAssistPanel, Localization.T("controllerassist.group.telemetry"), caLeftX, 104, caLeftW, 16,
+                caGroupHeaderColor, caGroupHeaderFont, ContentAlignment.MiddleLeft, locKey: "controllerassist.group.telemetry");
+
+            Label AddTelemetryField(int x, int y, int w, string labelKey, Color valueColor)
+            {
+                MakeLabel(controllerAssistPanel, Localization.T(labelKey), x, y, w, 16,
+                    Color.FromArgb(140, 140, 170), new Font("Segoe UI", 8f, FontStyle.Bold), ContentAlignment.MiddleLeft, locKey: labelKey);
+                return MakeLabel(controllerAssistPanel, "0", x, y + 18, w, 26,
+                    valueColor, new Font("Segoe UI Semibold", 14f), ContentAlignment.MiddleLeft);
+            }
+
+            const int statColW = 123, statColGap = 14;
+            int statCol2X = caLeftX + statColW + statColGap;
+            _caTelemetrySpeedValue = AddTelemetryField(caLeftX, 124, statColW, "controllerassist.telemetry.speed", ApplePalette.TextBlue);
+            _caTelemetryRearSlipValue = AddTelemetryField(statCol2X, 124, statColW, "controllerassist.telemetry.rearslip", ApplePalette.TextOrange);
+            _caTelemetryRawSteerValue = AddTelemetryField(caLeftX, 176, statColW, "controllerassist.telemetry.rawsteer", ApplePalette.Text);
+            _caTelemetryOutputValue = AddTelemetryField(statCol2X, 176, statColW, "controllerassist.telemetry.output", ApplePalette.TextGreen);
+            _caTelemetryContributionValue = AddTelemetryField(caLeftX, 228, statColW, "controllerassist.telemetry.contribution", ApplePalette.TextPurple);
+            _caTelemetryVibrationValue = AddTelemetryField(statCol2X, 228, statColW, "controllerassist.telemetry.vibration", ApplePalette.TextRed);
+
+            var caLeftDivider = new Panel { Location = new Point(caLeftX, 282), Size = new Size(caLeftW, 1), BackColor = ApplePalette.Border, Tag = "theme:border" };
+            controllerAssistPanel.Controls.Add(caLeftDivider);
+
+            MakeLabel(controllerAssistPanel, Localization.T("controllerassist.group.vibration"), caLeftX, 296, caLeftW, 16,
+                caGroupHeaderColor, caGroupHeaderFont, ContentAlignment.MiddleLeft, locKey: "controllerassist.group.vibration");
+
+            var caVibrationLabel = MakeLabel(controllerAssistPanel, Localization.T("controllerassist.vibration"), caLeftX, 318, 180, 22,
+                Color.FromArgb(60, 60, 60), new Font("Segoe UI", 12f), ContentAlignment.MiddleLeft, locKey: "controllerassist.vibration");
+            _caVibrationSwitch = new MacToggleSwitch { Location = new Point(caLeftX + caLeftW - 40, 314), Size = new Size(40, 20), Checked = true };
+            _caVibrationSwitch.CheckedChanged += (s, e) =>
+            {
+                _assistEngine.RumbleEnabled = _caVibrationSwitch.Checked;
+                SaveSettings();
+            };
+            controllerAssistPanel.Controls.Add(_caVibrationSwitch);
+
+            MakeLabel(controllerAssistPanel, Localization.T("controllerassist.vibrationstrength"), caLeftX, 350, caLeftW, 18,
+                Color.FromArgb(140, 140, 170), new Font("Segoe UI", 8.5f), locKey: "controllerassist.vibrationstrength");
+            _caVibrationStrengthSlider = new MacSlider
+            {
+                Location = new Point(caLeftX, 368),
+                Size = new Size(190, 22),
+                Minimum = 0,
+                Maximum = 100,
+                Value = (int)Math.Round(_assistEngine.Rumble.RumbleStrength * 100),
+            };
+            _caVibrationStrengthValueLabel = MakeLabel(controllerAssistPanel, $"{_assistEngine.Rumble.RumbleStrength * 100:0}%", caLeftX + 216, 368, 44, 22,
+                ApplePalette.Text, new Font("Segoe UI", 9f), ContentAlignment.MiddleLeft);
+            _caVibrationStrengthSlider.ValueChanged += (s, e) =>
+            {
+                _assistEngine.Rumble.RumbleStrength = _caVibrationStrengthSlider.Value / 100.0;
+                _caVibrationStrengthValueLabel.Text = $"{_caVibrationStrengthSlider.Value}%";
+                SaveSettings();
+            };
+            controllerAssistPanel.Controls.Add(_caVibrationStrengthSlider);
+
+            var caRumbleBtn = MakeButton(controllerAssistPanel, Localization.T("controllerassist.rumble.button"), caLeftX, 400, caLeftW, 30, ApplePalette.Blue, locKey: "controllerassist.rumble.button");
+            caRumbleBtn.Click += (s, e) => ShowControllerAssistRumbleMenu();
+
+
+            MakeLabel(controllerAssistPanel, Localization.T("controllerassist.group.controller"), caRightX, 104, caRightW, 16,
+                caGroupHeaderColor, caGroupHeaderFont, ContentAlignment.MiddleLeft, locKey: "controllerassist.group.controller");
+
+            _caPadStatusLabel = MakeLabel(controllerAssistPanel, "", caRightX, 124, caRightW, 20,
+                Color.FromArgb(140, 140, 170), new Font("Segoe UI", 8.5f), ContentAlignment.MiddleLeft);
+
+            MakeLabel(controllerAssistPanel, Localization.T("controllerassist.group.drivers"), caRightX, 150, caRightW, 16,
+                caGroupHeaderColor, caGroupHeaderFont, ContentAlignment.MiddleLeft, locKey: "controllerassist.group.drivers");
+
+            const int driverBtnW = 130, driverBtnH = 26;
+            int driverStatusW = caRightW - driverBtnW - 10;
+
+            _caVirtualPadStatusLabel = MakeLabel(controllerAssistPanel, "", caRightX, 170, driverStatusW, 20,
+                Color.FromArgb(140, 140, 170), new Font("Segoe UI", 8.5f), ContentAlignment.MiddleLeft);
+            _caVigemInstallBtn = MakeButton(controllerAssistPanel, Localization.T("drivers.button.install"), caRightX + driverStatusW + 10, 168, driverBtnW, driverBtnH, locKey: "drivers.button.install");
+            _caVigemInstallBtn.Click += (s, e) => InstallDriverAsync(DriverKind.ViGEmBus, _caVigemInstallBtn);
+
+            _caHidHideStatusLabel = MakeLabel(controllerAssistPanel, "", caRightX, 196, driverStatusW, 20,
+                Color.FromArgb(140, 140, 170), new Font("Segoe UI", 8.5f), ContentAlignment.MiddleLeft);
+            _caHidHideInstallBtn = MakeButton(controllerAssistPanel, Localization.T("drivers.button.install"), caRightX + driverStatusW + 10, 194, driverBtnW, driverBtnH, locKey: "drivers.button.install");
+            _caHidHideInstallBtn.Click += (s, e) => InstallDriverAsync(DriverKind.HidHide, _caHidHideInstallBtn);
+
+            var caHidePadLabel = MakeLabel(controllerAssistPanel, Localization.T("controllerassist.hidepad"), caRightX, 224, caRightW - 50, 22,
+                Color.FromArgb(60, 60, 60), new Font("Segoe UI", 9.5f), ContentAlignment.MiddleLeft, locKey: "controllerassist.hidepad");
+            _caHidePadSwitch = new MacToggleSwitch { Location = new Point(caRightX + caRightW - 40, 220), Size = new Size(40, 20) };
+            _caHidePadSwitch.CheckedChanged += (s, e) =>
+            {
+                SaveSettings();
+                if (_caMasterSwitch.Checked)
+                    ApplyPadCloakState(_caHidePadSwitch.Checked);
+            };
+            controllerAssistPanel.Controls.Add(_caHidePadSwitch);
+
+            var caRightDivider = new Panel { Location = new Point(caRightX, 252), Size = new Size(caRightW, 1), BackColor = ApplePalette.Border, Tag = "theme:border" };
+            controllerAssistPanel.Controls.Add(caRightDivider);
+
+            var caSteeringAssistLabel = MakeLabel(controllerAssistPanel, Localization.T("controllerassist.steeringassist"), caRightX, 266, 250, 22,
+                Color.FromArgb(60, 60, 60), new Font("Segoe UI", 12f), ContentAlignment.MiddleLeft, locKey: "controllerassist.steeringassist");
+            _caSteeringAssistSwitch = new MacToggleSwitch { Location = new Point(caRightX + caRightW - 40, 262), Size = new Size(40, 20), Checked = true };
+            _caSteeringAssistSwitch.CheckedChanged += (s, e) =>
+            {
+                _assistEngine.MasterEnabled = _caSteeringAssistSwitch.Checked;
+                SaveSettings();
+            };
+            controllerAssistPanel.Controls.Add(_caSteeringAssistSwitch);
+
+            var caPresetLabel = MakeLabel(controllerAssistPanel, Localization.T("controllerassist.preset"), caRightX, 298, 100, 22,
+                Color.FromArgb(60, 60, 60), new Font("Segoe UI", 12f), ContentAlignment.MiddleLeft, locKey: "controllerassist.preset");
+
+            void SelectPreset(AssistPreset preset)
+            {
+                _assistEngine.Settings = AssistSettings.ForPreset(preset);
+                RefreshControllerAssistPresetButtons();
+                SaveSettings();
+            }
+
+            const int presetBtnW = 123, presetBtnGap = 10;
+            _caPresetOffBtn = MakeButton(controllerAssistPanel, Localization.T("controllerassist.preset.off"), caRightX, 320, presetBtnW, 30, locKey: "controllerassist.preset.off");
+            _caPresetOffBtn.Click += (s, e) => SelectPreset(AssistPreset.Off);
+            _caPresetLightBtn = MakeButton(controllerAssistPanel, Localization.T("controllerassist.preset.light"), caRightX + (presetBtnW + presetBtnGap), 320, presetBtnW, 30, locKey: "controllerassist.preset.light");
+            _caPresetLightBtn.Click += (s, e) => SelectPreset(AssistPreset.Light);
+            _caPresetMediumBtn = MakeButton(controllerAssistPanel, Localization.T("controllerassist.preset.medium"), caRightX + (presetBtnW + presetBtnGap) * 2, 320, presetBtnW, 30, locKey: "controllerassist.preset.medium");
+            _caPresetMediumBtn.Click += (s, e) => SelectPreset(AssistPreset.Medium);
+            _caPresetStrongBtn = MakeButton(controllerAssistPanel, Localization.T("controllerassist.preset.strong"), caRightX + (presetBtnW + presetBtnGap) * 3, 320, presetBtnW, 30, locKey: "controllerassist.preset.strong");
+            _caPresetStrongBtn.Click += (s, e) => SelectPreset(AssistPreset.Strong);
+
+            MakeLabel(controllerAssistPanel, Localization.T("controllerassist.trim.countersteer"), caRightX, 362, caRightW, 18,
+                Color.FromArgb(140, 140, 170), new Font("Segoe UI", 8.5f), locKey: "controllerassist.trim.countersteer");
+            _caCountersteerTrimSlider = new MacSlider
+            {
+                Location = new Point(caRightX, 380),
+                Size = new Size(caRightW - 70, 22),
+                Minimum = -50,
+                Maximum = 50,
+                Value = (int)_assistEngine.CountersteerTrimPercent,
+                CenterValue = 0,
+            };
+            _caCountersteerTrimValueLabel = MakeLabel(controllerAssistPanel, $"{_assistEngine.CountersteerTrimPercent:0}%", caRightX + caRightW - 60, 380, 60, 22,
+                ApplePalette.Text, new Font("Segoe UI", 9f), ContentAlignment.MiddleLeft);
+            _caCountersteerTrimSlider.ValueChanged += (s, e) =>
+            {
+                _assistEngine.CountersteerTrimPercent = _caCountersteerTrimSlider.Value;
+                _caCountersteerTrimValueLabel.Text = $"{_caCountersteerTrimSlider.Value}%";
+                SaveSettings();
+            };
+            controllerAssistPanel.Controls.Add(_caCountersteerTrimSlider);
+
+            MakeLabel(controllerAssistPanel, Localization.T("controllerassist.trim.strength"), caRightX, 412, caRightW, 18,
+                Color.FromArgb(140, 140, 170), new Font("Segoe UI", 8.5f), locKey: "controllerassist.trim.strength");
+            _caAssistStrengthTrimSlider = new MacSlider
+            {
+                Location = new Point(caRightX, 430),
+                Size = new Size(caRightW - 70, 22),
+                Minimum = -50,
+                Maximum = 50,
+                Value = (int)_assistEngine.AssistStrengthTrimPercent,
+                CenterValue = 0,
+            };
+            _caAssistStrengthTrimValueLabel = MakeLabel(controllerAssistPanel, $"{_assistEngine.AssistStrengthTrimPercent:0}%", caRightX + caRightW - 60, 430, 60, 22,
+                ApplePalette.Text, new Font("Segoe UI", 9f), ContentAlignment.MiddleLeft);
+            _caAssistStrengthTrimSlider.ValueChanged += (s, e) =>
+            {
+                _assistEngine.AssistStrengthTrimPercent = _caAssistStrengthTrimSlider.Value;
+                _caAssistStrengthTrimValueLabel.Text = $"{_caAssistStrengthTrimSlider.Value}%";
+                SaveSettings();
+            };
+            controllerAssistPanel.Controls.Add(_caAssistStrengthTrimSlider);
+
+            var caTuningBtn = MakeButton(controllerAssistPanel, Localization.T("controllerassist.tuning.button"), caRightX, 462, 250, 30, ApplePalette.Blue, locKey: "controllerassist.tuning.button");
+            caTuningBtn.Click += (s, e) => ShowControllerAssistTuningMenu();
+
+            var caOverlayBarLabel = MakeLabel(controllerAssistPanel, Localization.T("controllerassist.overlaybar"), caRightX, 502, 350, 22,
+                Color.FromArgb(60, 60, 60), new Font("Segoe UI", 12f), ContentAlignment.MiddleLeft, locKey: "controllerassist.overlaybar");
+            _caOverlayBarSwitch = new MacToggleSwitch { Location = new Point(caRightX + caRightW - 40, 498), Size = new Size(40, 20) };
+            _caOverlayBarSwitch.CheckedChanged += (s, e) =>
+            {
+                _overlay.ControllerAssistBarVisible = _caOverlayBarSwitch.Checked;
+                SaveSettings();
+            };
+            controllerAssistPanel.Controls.Add(_caOverlayBarSwitch);
+
+            _caControls.AddRange(new Control[]
+            {
+                caVibrationLabel, _caVibrationSwitch, _caVibrationStrengthSlider, _caVibrationStrengthValueLabel, caRumbleBtn,
+                caSteeringAssistLabel, _caSteeringAssistSwitch,
+                caPresetLabel, _caPresetOffBtn, _caPresetLightBtn, _caPresetMediumBtn, _caPresetStrongBtn,
+                _caCountersteerTrimSlider, _caCountersteerTrimValueLabel,
+                _caAssistStrengthTrimSlider, _caAssistStrengthTrimValueLabel,
+                caTuningBtn, caOverlayBarLabel, _caOverlayBarSwitch,
+                caHidePadLabel, _caHidePadSwitch,
+            });
+
+            RefreshControllerAssistPresetButtons();
+
             statusPanel = CreateCard(
-                "",
+                "Warnings & Events",
                 GridSlot.Status,
                 420,
-                135);
+                245, locKey: "status.title");
+
+            var logClearBtn = MakeLabel(statusPanel, Localization.T("status.clear"), 420 - 16 - 60, 16, 60, 20,
+                ApplePalette.Secondary, new Font("Segoe UI Semibold", 8.5f), ContentAlignment.MiddleRight, locKey: "status.clear");
+            logClearBtn.Cursor = Cursors.Hand;
+            logClearBtn.MouseEnter += (s, e) => logClearBtn.ForeColor = ApplePalette.Blue;
+            logClearBtn.MouseLeave += (s, e) => logClearBtn.ForeColor = ApplePalette.Secondary;
+            logClearBtn.Click += (s, e) => _statusLabel.Clear();
+
+            var logConsoleWrapper = new Panel
+            {
+                Location = new Point(16, 48),
+                Size = new Size(420 - 32, 245 - 48 - 16),
+                BackColor = Color.Transparent,
+            };
+            logConsoleWrapper.Paint += (s, e) =>
+            {
+                e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
+                Rectangle rect = new Rectangle(0, 0, logConsoleWrapper.Width - 1, logConsoleWrapper.Height - 1);
+                using GraphicsPath path = DrawingHelpers.RoundedPath(rect, 10);
+                using Pen border = new Pen(ApplePalette.Border);
+                e.Graphics.DrawPath(border, path);
+            };
+            statusPanel.Controls.Add(logConsoleWrapper);
 
             _statusLabel = new NoWheelRichTextBox
             {
-                Location = new Point(20, 14),
-                Size = new Size(385, 120),
+                Location = new Point(6, 6),
+                Size = new Size(logConsoleWrapper.Width - 12, logConsoleWrapper.Height - 12),
                 ReadOnly = true,
                 BorderStyle = BorderStyle.None,
                 ScrollBars = RichTextBoxScrollBars.Vertical,
-                Font = new Font("Segoe UI", 8f),
+                Font = new Font("Consolas", 8f),
                 BackColor = ApplePalette.Card,
                 ForeColor = ApplePalette.Text,
                 WordWrap = true,
                 Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right | AnchorStyles.Bottom,
             };
-            statusPanel.Controls.Add(_statusLabel);
+            logConsoleWrapper.Controls.Add(_statusLabel);
             AppendStatusMessage(Localization.T("status.hint"));
 
             ResumeLayout();
@@ -2545,6 +3955,7 @@ namespace LFSDriftBuddy
 
             this.Paint += MainForm_Paint;
         }
+
 
         protected override void OnPaintBackground(PaintEventArgs e)
         {
@@ -2566,7 +3977,7 @@ namespace LFSDriftBuddy
                 g.DrawPath(border, path);
             }
         }
-        private void OpenLanguagePicker(Button anchorBtn)
+        private void OpenLanguagePicker(Button anchorBtn, Form ownerForm = null)
         {
             Form popup = new Form { StartPosition = FormStartPosition.CenterParent };
             var card = BuildPopupChrome(popup, 240, 320, out _);
@@ -2614,7 +4025,7 @@ namespace LFSDriftBuddy
                 y += 52;
             }
 
-            ShowModalPopup(popup);
+            ShowModalPopup(popup, ownerForm);
         }
 
         private InputBinding _revToggleBinding = InputBinding.None;
@@ -2630,7 +4041,7 @@ namespace LFSDriftBuddy
         private void ExecuteRevToggle()
         {
             if (!_insim.IsConnected) return;
-            BeginInvoke((Action)(() => { _revEnableSwitch.Checked = !_revEnableSwitch.Checked; }));
+            BeginInvoke((Action)(() => { if (_revEnableSwitch.Enabled) _revEnableSwitch.Checked = !_revEnableSwitch.Checked; }));
         }
 
         private void ExecuteRevCalibrate()
@@ -2676,10 +4087,6 @@ namespace LFSDriftBuddy
             return InputBinding.FromKey((Keys)keyCode);
         }
 
-        // Bind buttons show the CURRENT binding as their text (see MakeBindRow in BuildUI) — at
-        // construction time that already matches _indicators'/​_lightToggleBinding's constructed
-        // defaults, but once LoadSettings overwrites them from disk the button text goes stale
-        // until this re-syncs it.
         private void RefreshIndicatorBindButtonLabels()
         {
             if (_bindLeftBtn == null) return;
@@ -2690,6 +4097,35 @@ namespace LFSDriftBuddy
             _bindRightBtn.Text = Display(GetIndicatorBinding(_indicators.RightKeyCode, _indicators.RightWheelButton));
             _bindHazardBtn.Text = Display(GetIndicatorBinding(_indicators.HazardKeyCode, _indicators.HazardWheelButton));
             _bindLightBtn.Text = Display(_lightToggleBinding);
+            RefreshControllerAssistBindLabel();
+        }
+
+        private void RefreshControllerAssistBindLabel()
+        {
+            if (_caBindBtn == null) return;
+            _caBindBtn.Text = _caToggleBinding.Kind == InputKind.None
+                ? Localization.T("controllerassist.bindbtn")
+                : _caToggleBinding.ToString();
+        }
+
+        private void ExecuteControllerAssistToggle()
+        {
+            BeginInvoke((Action)(() =>
+            {
+                if (!_caMasterSwitch.Enabled) return;
+
+                if (!_caMasterSwitch.Checked)
+                {
+                    _caMasterSwitch.Checked = true;
+                    return;
+                }
+
+                if (!_caSteeringAssistSwitch.Enabled) return;
+
+                _caSteeringAssistSwitch.Checked = !_caSteeringAssistSwitch.Checked;
+                _overlay.ShowControllerAssistNotification(
+                    Localization.T(_caSteeringAssistSwitch.Checked ? "controllerassist.notification.on" : "controllerassist.notification.off"));
+            }));
         }
 
         private void ApplyIndicatorBinding(
@@ -2718,9 +4154,6 @@ namespace LFSDriftBuddy
             }
             else
             {
-                // Explicit unbind (Delete in KeyBindingForm) — the wheel binding was already
-                // removed above; also clear the keyboard code so KeyboardHook_OnKeyDown's
-                // "keyCode == LeftKeyCode" check can never match a real keypress again.
                 setKeyCode((int)Keys.None);
                 setWheelButton(null);
             }
@@ -2743,6 +4176,7 @@ namespace LFSDriftBuddy
 
         private async Task RPMLimitterCalibrate()
         {
+            if (_revCarUnsupported) return;
 
             if (!_outGauge.IsRunning)
             {
@@ -2778,18 +4212,19 @@ namespace LFSDriftBuddy
             _revLimiter.Enabled = wasEnabledBeforeCalibration;
             _revEnableSwitch.SetCheckedSilent(wasEnabledBeforeCalibration);
             SyncRevAutoCalibrateAvailability();
+            ApplyRevUnsupportedState();
             _hud.ShowInGameAward(Localization.T("rev.limit") + CalibratedMAXRPM);
             _hud.ShowInGameRPMLimitter(CalibratedMAXRPM.ToString());
             _revLimiterCalibrationPrompt?.ShowDoneState(CalibratedMAXRPM);
-            await Task.Delay(1000);
+            await Task.Delay(500);
 
             _hud.ShowInGameAward(Localization.T("rev.calibration_award.done"));
-            await Task.Delay(1000);
+            await Task.Delay(500);
             _hud.ShowInGameAward(Localization.T("rev.limit") + CalibratedMAXRPM);
-            await Task.Delay(1000);
+            await Task.Delay(500);
             _hud.ShowInGameAward(Localization.T("rev.calibration_award.done"));
 
-            await Task.Delay(3000);
+            await Task.Delay(1500);
             _hud.ShowInGameAward($"");
             _revLimitLabel.Text = Localization.T("rev.limit");
             SaveSettings();
@@ -2798,7 +4233,7 @@ namespace LFSDriftBuddy
             _revLimiterCalibrationPrompt = null;
         }
 
-        private enum GridSlot { Header, ConnectionInSim, ConnectionOutGauge, Score, RevLimiter, Speedometer, Hud, Indicators, Status }
+        private enum GridSlot { Header, ConnectionInSim, ConnectionOutGauge, ConnectionOutSim, Score, RevLimiter, Speedometer, Hud, Indicators, ControllerAssist, Status, InputController }
 
         private const int GridMargin = 20;
         private const int GridGap = 10;
@@ -2814,17 +4249,20 @@ namespace LFSDriftBuddy
             var slots = new (GridSlot slot, int col, int width, int height)[]
             {
                 (GridSlot.Header,             0, 420, 170),
+                (GridSlot.ConnectionInSim,    0, 420, 295),
                 (GridSlot.Score,              0, 420, 586),
                 (GridSlot.Speedometer,        0, 420, 450),
 
-                (GridSlot.ConnectionInSim,    1, 420, 170),
-                (GridSlot.ConnectionOutGauge, 1, 420, 100),
+                (GridSlot.InputController,    1, 420, 170),
+                (GridSlot.ConnectionOutGauge, 1, 420, 115),
+                (GridSlot.ConnectionOutSim,   1, 420, 170),
                 (GridSlot.RevLimiter,         1, 420, 330),
                 (GridSlot.Hud,                1, 420, 450),
-                (GridSlot.Status,             1, 420, 135),
+                (GridSlot.Status,             1, 420, 245),
 
                 (GridSlot.Indicators,        -1, 850, 460),
-              
+                (GridSlot.ControllerAssist,  -1, 850, 540),
+
             };
 
             int startY = GridMargin + TitleBarHeight;
@@ -2882,6 +4320,7 @@ namespace LFSDriftBuddy
                     12f);
 
                 lbl.ForeColor = ApplePalette.Title;
+                lbl.Tag = "theme:title";
 
                 panel.Controls.Add(lbl);
 
@@ -2909,6 +4348,7 @@ namespace LFSDriftBuddy
             {
                 _savedWheelGuid = dlg.SelectedDeviceGuid;
                 _savedWheelAxis = dlg.SelectedAxis;
+                SyncControllerAssistAvailability();
                 SaveSettings();
                 AppendStatusMessage(string.Format(Localization.T("wheelconfig.configured"), _wheelInput.DeviceName, _wheelInput.SteeringAxis));
             }
@@ -3016,37 +4456,31 @@ namespace LFSDriftBuddy
 
                 foreach (var d in _devices)
                 {
-                    var btn = _owner.MakeButton(_content, d.Name, 0, y, _content.Width, 34);
+                    bool isXInput = SteeringWheelInput.IsXInputPad(d.Name);
+                    if (isXInput && _owner.VirtualPadMayBePresent && d.Guid != _wheelInput.DeviceGuid)
+                        continue;
+
+                    string label = isXInput
+                        ? $"{d.Name}   {Localization.T("controllerassist.badge")}"
+                        : d.Name;
+                    var btn = _owner.MakeButton(_content, label, 0, y, _content.Width, 78);
 
                     var guid = d.Guid;
-                    var name = d.Name;
                     btn.Click += (s, e) =>
                     {
                         SelectedDeviceGuid = guid;
-
-                        // Xbox/XInput pads always steer off LeftThumbX regardless of which axis
-                        // is "selected" (see SteeringWheelInput.PollXInput) — the calibration
-                        // screen has nothing real to detect for them, so just confirm X directly
-                        // instead of making the user sit through it or click a button.
-                        if (SteeringWheelInput.IsXInputPad(name))
-                        {
-                            SelectedAxis = JoystickOffset.X;
-                            _wheelInput.ConnectToDevice(SelectedDeviceGuid, JoystickOffset.X);
-                            DialogResult = DialogResult.OK;
-                            Close();
-                            return;
-                        }
-
                         ShowAxisCalibration();
                     };
 
-                    y += 40;
+                    y += 84;
                 }
 
                 var cancelBtn = _owner.MakeButton(_content, Localization.T("wheelconfig.abort"),
-                    0, _content.Height - 34, _content.Width, 32);
+                    0, _content.Height - 34, _content.Width, 30);
                 cancelBtn.Click += (s, e) => { DialogResult = DialogResult.Cancel; Close(); };
             }
+
+            private const int CalibrationSeconds = 10;
 
             private void ShowAxisCalibration()
             {
@@ -3084,7 +4518,7 @@ namespace LFSDriftBuddy
 
                 _calibHint = new Label
                 {
-                    Text = Localization.T("wheelconfig.detection"),
+                    Text = string.Format(Localization.T("wheelconfig.detection"), CalibrationSeconds),
                     Location = new Point(0, y + 6),
                     Size = new Size(_content.Width, 18),
                     ForeColor = ApplePalette.Secondary
@@ -3100,20 +4534,20 @@ namespace LFSDriftBuddy
                 };
                 _content.Controls.Add(manualLabel);
 
-                int mx = 0, my = y + 50;
+                int mx = 0, my = y + 46;
                 foreach (var axis in AxisChoices)
                 {
-                    var b = _owner.MakeButton(_content, axis.ToString(), mx, my, 105, 26);
+                    var b = _owner.MakeButton(_content, axis.ToString(), mx, my, 105, 30);
 
                     var ax = axis;
                     b.Click += (s, e) => Confirm(ax);
 
                     mx += 112;
-                    if (mx > 220) { mx = 0; my += 30; }
+                    if (mx > 220) { mx = 0; my += 34; }
                 }
 
                 var backBtn = _owner.MakeButton(_content, Localization.T("wheelconfig.otherdevice"),
-                    0, _content.Height - 30, _content.Width, 28);
+                    0, _content.Height - 34, _content.Width, 30);
                 backBtn.Click += (s, e) => { StopCalibration(); ShowDeviceList(); };
 
                 _axisMin.Clear();
@@ -3121,9 +4555,18 @@ namespace LFSDriftBuddy
                 _calibrating = true;
                 _wheelInput.RawAxesChanged += OnRawAxes;
 
-                _calibTimer = new System.Windows.Forms.Timer { Interval = 10000 };
+                int secondsLeft = CalibrationSeconds;
+                _calibTimer = new System.Windows.Forms.Timer { Interval = 1000 };
                 _calibTimer.Tick += (s, e) =>
                 {
+                    secondsLeft--;
+                    if (secondsLeft > 0)
+                    {
+                        if (_calibHint != null)
+                            _calibHint.Text = string.Format(Localization.T("wheelconfig.detection"), secondsLeft);
+                        return;
+                    }
+
                     _calibTimer.Stop();
                     _calibrating = false;
                     _wheelInput.RawAxesChanged -= OnRawAxes;
@@ -3321,7 +4764,7 @@ namespace LFSDriftBuddy
                 _liveRpmLabel.Visible = false;
 
                 _calibrateButton = _owner.MakeButton(card, Localization.T("rev.calibrate"),
-                    20, Height - 56, Width - 40, 36);
+                    20, Height - 56, Width - 40, 30);
                 _calibrateButton.Click += async (s, e) =>
                 {
                     _calibrateButton.Enabled = false;
@@ -3371,7 +4814,7 @@ namespace LFSDriftBuddy
         (Color.LightBlue,  "^9"),
     };
 
-        private void ShowHudColorsMenu()
+        private void ShowHudColorsMenu(Form ownerForm = null)
         {
             Form popup = new Form { StartPosition = FormStartPosition.CenterParent };
             var card = BuildPopupChrome(popup, 300, 310, out _);
@@ -3388,7 +4831,7 @@ namespace LFSDriftBuddy
                 MakeLabel(card, label, 20, y + 6, 150, 20, ApplePalette.Text);
 
                 var swatch = MakeButton(card, "", 195, y, 85, 30, getColor());
-                swatch.Click += (s, e) => OpenCustomColorPicker(swatch, getColor(), label, setColor, includeAlpha: true);
+                swatch.Click += (s, e) => OpenCustomColorPicker(swatch, getColor(), label, setColor, includeAlpha: true, ownerForm: ownerForm);
                 card.Controls.Add(swatch);
 
                 y += 40;
@@ -3400,10 +4843,10 @@ namespace LFSDriftBuddy
             AddRow("hud.color.ticks", () => _speedoTachoTickColor, c => { _speedoTachoTickColor = c; _overlay.SpeedoTachoTickColor = c; RefreshSpeedoPreview(); });
             AddRow("hud.color.background", () => _speedoTachoBackgroundColor, c => { _speedoTachoBackgroundColor = c; _overlay.SpeedoTachoBackgroundColor = c; RefreshSpeedoPreview(); });
 
-            ShowModalPopup(popup);
+            ShowModalPopup(popup, ownerForm);
         }
 
-        private void ShowScoreColorsMenu()
+        private void ShowScoreColorsMenu(Form ownerForm = null)
         {
             Form popup = new Form { StartPosition = FormStartPosition.CenterParent };
             var card = BuildPopupChrome(popup, 380, 400, out _);
@@ -3419,7 +4862,7 @@ namespace LFSDriftBuddy
                 MakeLabel(card, label, 20, y + 6, 260, 20, ApplePalette.Text);
 
                 var swatch = MakeButton(card, "", 290, y, 70, 30, initialColor);
-                swatch.Click += (s, e) => HandleColorButtonClick(swatch, slot);
+                swatch.Click += (s, e) => HandleColorButtonClick(swatch, slot, ownerForm);
 
                 y += 40;
                 return swatch;
@@ -3443,11 +4886,11 @@ namespace LFSDriftBuddy
             _colorBtn6 = AddColorRow(Localization.T("hud.scorecolor.backward"),
                 useOverlayColors ? OverlayColor6 : InSimCodeToColor(InSimColor6), 6);
 
-            try { ShowModalPopup(popup); }
+            try { ShowModalPopup(popup, ownerForm); }
             finally { _colorBtnIdle = _colorBtn1 = _colorBtn2 = _colorBtn3 = _colorBtn4 = _colorBtn5 = _colorBtn6 = null; }
         }
 
-        private void ShowAngleLevelsMenu()
+        private void ShowAngleLevelsMenu(Form ownerForm = null)
         {
             Form popup = new Form { StartPosition = FormStartPosition.CenterParent };
             var card = BuildPopupChrome(popup, 340, 356, out _);
@@ -3492,10 +4935,10 @@ namespace LFSDriftBuddy
                 });
             y += 36;
 
-            ShowModalPopup(popup);
+            ShowModalPopup(popup, ownerForm);
         }
 
-        private void ShowSpeedLevelsMenu()
+        private void ShowSpeedLevelsMenu(Form ownerForm = null)
         {
             Form popup = new Form { StartPosition = FormStartPosition.CenterParent };
             var card = BuildPopupChrome(popup, 340, 320, out _);
@@ -3531,10 +4974,10 @@ namespace LFSDriftBuddy
             AddSpeedRow(string.Format(Localization.T("score.levels.speed_level"), 4), 3);
             AddSpeedRow(string.Format(Localization.T("score.levels.speed_level"), 5), 4);
 
-            ShowModalPopup(popup);
+            ShowModalPopup(popup, ownerForm);
         }
 
-        private void ShowHitLevelsMenu()
+        private void ShowHitLevelsMenu(Form ownerForm = null)
         {
             Form popup = new Form { StartPosition = FormStartPosition.CenterParent };
             var card = BuildPopupChrome(popup, 340, 320, out _);
@@ -3570,10 +5013,10 @@ namespace LFSDriftBuddy
             AddHitRow(Localization.T("derby.levels.tier4"), 3);
             AddHitRow(Localization.T("derby.levels.tier5"), 4);
 
-            ShowModalPopup(popup);
+            ShowModalPopup(popup, ownerForm);
         }
 
-        private void ShowSpeedoElementsMenu()
+        private void ShowSpeedoElementsMenu(Form ownerForm = null)
         {
             Form popup = new Form { StartPosition = FormStartPosition.CenterParent };
             var card = BuildPopupChrome(popup, 340, 450, out _);
@@ -3657,14 +5100,10 @@ namespace LFSDriftBuddy
             card.Controls.Add(_redlineThicknessSlider);
             y += 40;
 
-            try { ShowModalPopup(popup); }
+            try { ShowModalPopup(popup, ownerForm); }
             finally { _redlineThicknessSlider = null; }
         }
 
-        // Image.FromFile keeps its source file locked for the image's whole lifetime, which
-        // breaks re-importing a new background over the same file later (GDI+ "generic error").
-        // Load through a stream and copy into a detached Bitmap instead, releasing the handle
-        // immediately.
         private static Image LoadDetachedImage(string path)
         {
             using var fs = new FileStream(path, FileMode.Open, FileAccess.Read);
@@ -3852,7 +5291,7 @@ namespace LFSDriftBuddy
                 SaveSettings();
             };
 
-            var importBtn = MakeButton(card, Localization.T("speedometer.background.import"), 20, y, 150, 32, ApplePalette.Blue);
+            var importBtn = MakeButton(card, Localization.T("speedometer.background.import"), 20, y, 150, 30, ApplePalette.Blue);
             importBtn.Click += (s, e) =>
             {
                 using var dlg = new OpenFileDialog
@@ -3872,10 +5311,6 @@ namespace LFSDriftBuddy
                     _speedoBackgroundImage?.Dispose();
                     _speedoBackgroundImage = null;
 
-                    // Read the source fully into memory before touching destPath — the picked
-                    // file may BE destPath (re-importing the same photo already sitting in
-                    // Data\Images), and Image.FromFile keeps a lock on it that would make
-                    // saving back to that same path fail with a GDI+ "generic error".
                     byte[] sourceBytes = File.ReadAllBytes(dlg.FileName);
                     using (var ms = new MemoryStream(sourceBytes))
                     using (var src = Image.FromStream(ms))
@@ -3903,7 +5338,7 @@ namespace LFSDriftBuddy
                 }
             };
 
-            var removeBtn = MakeButton(card, Localization.T("speedometer.background.remove"), 190, y, 150, 32, Color.FromArgb(200, 20, 20));
+            var removeBtn = MakeButton(card, Localization.T("speedometer.background.remove"), 190, y, 150, 30, Color.FromArgb(200, 20, 20));
             removeBtn.Click += (s, e) =>
             {
                 _overlay.SpeedoBackgroundImage = null;
@@ -3935,7 +5370,7 @@ namespace LFSDriftBuddy
             finally { _speedoBackgroundCrop = null; _speedoBackgroundZoomSlider = null; _speedoBackgroundOpacitySlider = null; }
         }
 
-        private void OpenRevLimiterBindings()
+        private void OpenRevLimiterBindings(Form ownerForm = null)
         {
             Form popup = new Form { StartPosition = FormStartPosition.CenterParent };
             var card = BuildPopupChrome(popup, 300, 320, out _);
@@ -3952,7 +5387,7 @@ namespace LFSDriftBuddy
                 var bindBtn = MakeButton(
                     card,
                     current.Kind == InputKind.None ? Localization.T("rev.bindings.unbound") : current.ToString(),
-                    170, y, 110, 28, ApplePalette.Blue);
+                    170, y - 4, 110, 30, ApplePalette.Blue);
 
                 bindBtn.Click += (s, e) =>
                 {
@@ -3976,10 +5411,10 @@ namespace LFSDriftBuddy
             MakeRow("rev.bindings.increase", _revIncreaseBinding,
                 b => ApplyRevBinding(ref _revIncreaseBinding, b, ExecuteRevIncrease));
 
-            ShowModalPopup(popup);
+            ShowModalPopup(popup, ownerForm);
         }
 
-        private void OpenInSimPalette(Button targetBtn, Action<string> setColor)
+        private void OpenInSimPalette(Button targetBtn, Action<string> setColor, Form ownerForm = null)
         {
             Form popup = new Form { StartPosition = FormStartPosition.CenterParent };
             var card = BuildPopupChrome(popup, 240, 270, out _);
@@ -4049,7 +5484,7 @@ namespace LFSDriftBuddy
                 }
             }
 
-            ShowModalPopup(popup);
+            ShowModalPopup(popup, ownerForm);
         }
         [DllImport("winmm.dll")]
         private static extern int waveOutSetVolume(IntPtr hwo, uint dwVolume);
@@ -4067,6 +5502,9 @@ namespace LFSDriftBuddy
 
         [DllImport("user32.dll", SetLastError = true)]
         private static extern bool PostMessage(IntPtr hWnd, uint Msg, IntPtr wParam, IntPtr lParam);
+
+        [DllImport("user32.dll")]
+        private static extern IntPtr GetForegroundWindow();
 
         private const uint WM_KEYDOWN = 0x0100;
         private const uint WM_KEYUP = 0x0101;
@@ -4102,6 +5540,510 @@ namespace LFSDriftBuddy
                 if (h != IntPtr.Zero) return h;
             }
             return IntPtr.Zero;
+        }
+
+        private GlobalHotkey _settingsOverlayHotkey;
+        private InGameSettingsOverlay _inGameSettingsOverlay;
+        private bool _ovRefreshing = false;
+        private readonly List<Panel> _ovColumns = new();
+        private Label _ovHintLabel;
+
+        private MacToggleSwitch _ovInSimConnected;
+        private MacToggleSwitch _ovOutGaugeConnected;
+        private Label _ovInSimStatusLabel;
+        private Label _ovOutGaugeStatusLabel;
+        private MacToggleSwitch _ovDarkMode;
+        private Button _ovLangBtn;
+        private MacToggleSwitch _ovRevEnabled;
+        private MinimalNumericUpDown _ovRevLimitNumeric;
+        private MinimalNumericUpDown _ovRevCutMSNumeric;
+        private MacToggleSwitch _ovRevAutoCalibrate;
+        private MacToggleSwitch _ovSpeedoEnabled;
+        private MacToggleSwitch _ovAirSpeed;
+        private MacToggleSwitch _ovPlainDigits;
+        private MacToggleSwitch _ovInstantSpeed;
+        private MacToggleSwitch _ovSpeedUnit;
+        private Label _ovSpeedoPresetLabel;
+        private MacToggleSwitch _ovHudEnabled;
+        private MacToggleSwitch _ovHudStyleForza;
+        private MacToggleSwitch _ovHudStyleBtn;
+        private MacToggleSwitch _ovRpmHud;
+        private MacToggleSwitch _ovIndicatorsEnabled;
+        private MacToggleSwitch _ovIndicatorAutoCancel;
+        private MacToggleSwitch _ovIndicatorSounds;
+        private MacSlider _ovIndicatorVolumeSlider;
+        private Label _ovIndicatorVolumeValueLabel;
+        private MinimalNumericUpDown _ovIndicatorArmThresholdNumeric;
+        private MinimalNumericUpDown _ovIndicatorCenterThresholdNumeric;
+        private MinimalNumericUpDown _ovMinDriftSpeedNumeric;
+        private MinimalNumericUpDown _ovMaxBurnoutSpeedNumeric;
+        private MacToggleSwitch _ovAdvancedOutGauge;
+        private MacToggleSwitch _ovCarCollisionDetect;
+        private MacToggleSwitch _ovObjectCollisionDetect;
+
+        private void ToggleInGameSettingsOverlay()
+        {
+            if (_inGameSettingsOverlay.Visible)
+            {
+                _inGameSettingsOverlay.RestoreAndHide();
+                return;
+            }
+
+            IntPtr lfsHwnd = FindLfsWindow();
+            if (lfsHwnd == IntPtr.Zero || GetForegroundWindow() != lfsHwnd) return;
+
+            _inGameSettingsOverlay.ShowOverWindow(lfsHwnd, ReflowInGameSettingsOverlayColumns, RefreshInGameSettingsOverlayValues);
+        }
+
+        private RoundedPanel MakeOvColumn(Control parent, int w, int h)
+        {
+            var col = new RoundedPanel
+            {
+                Location = new Point(0, 0),
+                Size = new Size(w, h),
+                BackColor = ApplePalette.Card,
+                Radius = 16,
+            };
+            parent.Controls.Add(col);
+            _ovColumns.Add(col);
+            return col;
+        }
+
+        private void ReflowInGameSettingsOverlayColumns(int availableWidth)
+        {
+            const int colW = 210, colGap = 20, colH = 380, rowGap = 20, margin = 30;
+
+            if (_ovColumns.Count == 0) return;
+
+            int usable = Math.Max(colW, availableWidth - margin);
+            int colsPerRow = Math.Max(1, Math.Min(_ovColumns.Count, (usable + colGap) / (colW + colGap)));
+            int rows = (int)Math.Ceiling(_ovColumns.Count / (double)colsPerRow);
+
+            for (int i = 0; i < _ovColumns.Count; i++)
+            {
+                int row = i / colsPerRow;
+                int col = i % colsPerRow;
+                _ovColumns[i].Location = new Point(col * (colW + colGap), row * (colH + rowGap));
+            }
+
+            int contentW = colsPerRow * (colW + colGap) - colGap;
+            int contentH = rows * (colH + rowGap) - rowGap;
+
+            _ovHintLabel.Location = new Point(0, contentH + 14);
+            _ovHintLabel.Size = new Size(contentW, 20);
+
+            _inGameSettingsOverlay.ContentHost.Size = new Size(contentW, contentH + 14 + 20);
+        }
+
+        private MacToggleSwitch AddOvToggleRow(Control parent, string labelKey, int y, EventHandler onChanged)
+        {
+            var label = MakeLabel(parent, Localization.T(labelKey), 14, y + 6, 120, 20,
+                ApplePalette.Text, new Font("Segoe UI", 9.5f), ContentAlignment.MiddleLeft, locKey: labelKey);
+            _localizedControls.Add((label, labelKey));
+            var toggle = new MacToggleSwitch { Location = new Point(140, y), Size = new Size(40, 20) };
+            toggle.CheckedChanged += onChanged;
+            parent.Controls.Add(toggle);
+            return toggle;
+        }
+
+        private void BuildInGameSettingsOverlayContent(Panel host)
+        {
+            const int colW = 210, colH = 380, pad = 14;
+
+            var connCol = MakeOvColumn(host, colW, colH);
+            var connTitleLabel = MakeLabel(connCol, Localization.T("ingamesettings.connections"), pad, 12, colW - pad * 2, 22,
+                ApplePalette.Title, new Font("Segoe UI Semibold", 11f), locKey: "ingamesettings.connections");
+            _localizedControls.Add((connTitleLabel, "ingamesettings.connections"));
+
+            _ovInSimConnected = AddOvToggleRow(connCol, "ingamesettings.insim", 48, (s, e) =>
+            {
+                if (_ovRefreshing) return;
+                _connectionSwitch.Checked = _ovInSimConnected.Checked;
+            });
+            _ovInSimStatusLabel = MakeLabel(connCol, "", pad, 78, colW - pad * 2, 18,
+                ApplePalette.StatusIdle, new Font("Segoe UI", 8f));
+            connCol.Controls.Add(_ovInSimStatusLabel);
+
+            _ovOutGaugeConnected = AddOvToggleRow(connCol, "ingamesettings.outgauge", 116, (s, e) =>
+            {
+                if (_ovRefreshing) return;
+                _outGaugeConnectionSwitch.Checked = _ovOutGaugeConnected.Checked;
+            });
+            _ovOutGaugeStatusLabel = MakeLabel(connCol, "", pad, 146, colW - pad * 2, 18,
+                ApplePalette.StatusIdle, new Font("Segoe UI", 8f));
+            connCol.Controls.Add(_ovOutGaugeStatusLabel);
+
+            _ovDarkMode = AddOvToggleRow(connCol, "header.theme", 190, (s, e) =>
+            {
+                if (_ovRefreshing) return;
+                _themeSwitch.Checked = _ovDarkMode.Checked;
+            });
+
+            var ovLangLabel = MakeLabel(connCol, Localization.T("header.language"), pad, 236, colW - pad * 2, 18,
+                Color.FromArgb(140, 140, 170), new Font("Segoe UI", 8.5f), locKey: "header.language");
+            _localizedControls.Add((ovLangLabel, "header.language"));
+            _ovLangBtn = MakeButton(connCol, Localization.LanguageDisplayName(Localization.CurrentLanguage),
+                pad, 256, colW - pad * 2, 30, ApplePalette.Blue);
+            _ovLangBtn.Click += (s, e) => OpenLanguagePicker(_ovLangBtn, _inGameSettingsOverlay);
+
+            var revCol = MakeOvColumn(host, colW, colH);
+            var revTitleLabel = MakeLabel(revCol, "Rev Limiter", pad, 12, colW - pad * 2, 22,
+                ApplePalette.Title, new Font("Segoe UI Semibold", 11f), locKey: "rev.title");
+            _localizedControls.Add((revTitleLabel, "rev.title"));
+            _ovRevEnabled = AddOvToggleRow(revCol, "ingamesettings.enabled", 48, (s, e) =>
+            {
+                if (_ovRefreshing) return;
+                if (!_revEnableSwitch.Enabled)
+                {
+                    _ovRevEnabled.SetCheckedSilent(_revEnableSwitch.Checked);
+                    return;
+                }
+                _revEnableSwitch.Checked = _ovRevEnabled.Checked;
+            });
+            var revRpmLabel = MakeLabel(revCol, Localization.T("rev.rpm"), pad, 92, colW - pad * 2, 18,
+                Color.FromArgb(140, 140, 170), new Font("Segoe UI", 8.5f), locKey: "rev.rpm");
+            _localizedControls.Add((revRpmLabel, "rev.rpm"));
+            _ovRevLimitNumeric = new MinimalNumericUpDown
+            {
+                Location = new Point(pad, 112),
+                Size = new Size(colW - pad * 2, 30),
+                Minimum = 500,
+                Maximum = 20000,
+                Increment = 100,
+            };
+            _ovRevLimitNumeric.ValueChanged += v =>
+            {
+                if (_ovRefreshing) return;
+                _revLimiterNumeric.Value = v;
+            };
+            revCol.Controls.Add(_ovRevLimitNumeric);
+
+            var revCutLabel = MakeLabel(revCol, Localization.T("rev.cutms"), pad, 146, colW - pad * 2, 18,
+                Color.FromArgb(140, 140, 170), new Font("Segoe UI", 8.5f), locKey: "rev.cutms");
+            _localizedControls.Add((revCutLabel, "rev.cutms"));
+            _ovRevCutMSNumeric = new MinimalNumericUpDown
+            {
+                Location = new Point(pad, 166),
+                Size = new Size(colW - pad * 2, 30),
+                Minimum = 25,
+                Maximum = 500,
+                Increment = 5,
+            };
+            _ovRevCutMSNumeric.ValueChanged += v =>
+            {
+                if (_ovRefreshing) return;
+                _revCutMS.Value = v;
+            };
+            revCol.Controls.Add(_ovRevCutMSNumeric);
+
+            _ovRevAutoCalibrate = AddOvToggleRow(revCol, "ingamesettings.autocalibrate", 206, (s, e) =>
+            {
+                if (_ovRefreshing) return;
+                _revAutoCalibrateNewCarCheck.Checked = _ovRevAutoCalibrate.Checked;
+            });
+
+            var revBindFunctionsBtn = MakeButton(revCol, Localization.T("rev.bindfunctions"), pad, 250, colW - pad * 2, 30, ApplePalette.Blue, locKey: "rev.bindfunctions");
+            revBindFunctionsBtn.Click += (s, e) => OpenRevLimiterBindings(_inGameSettingsOverlay);
+            _localizedControls.Add((revBindFunctionsBtn, "rev.bindfunctions"));
+
+            var speedoCol = MakeOvColumn(host, colW, colH);
+            MakeLabel(speedoCol, "Speedometer", pad, 12, colW - pad * 2, 22,
+                ApplePalette.Title, new Font("Segoe UI Semibold", 11f));
+            _ovSpeedoEnabled = AddOvToggleRow(speedoCol, "ingamesettings.enabled", 48, (s, e) =>
+            {
+                if (_ovRefreshing) return;
+                _speedoTachoEnabledCheck.Checked = _ovSpeedoEnabled.Checked;
+            });
+            _ovAirSpeed = AddOvToggleRow(speedoCol, "speedometer.elements.airspeed", 88, (s, e) =>
+            {
+                if (_ovRefreshing) return;
+                _overlay.SpeedoTachoAirSpeed = _ovAirSpeed.Checked;
+                SaveSettings();
+            });
+            _ovPlainDigits = AddOvToggleRow(speedoCol, "ingamesettings.plaindigits", 128, (s, e) =>
+            {
+                if (_ovRefreshing) return;
+                _overlay.SpeedoTachoPlainDigits = _ovPlainDigits.Checked;
+                SaveSettings();
+            });
+            _ovInstantSpeed = AddOvToggleRow(speedoCol, "ingamesettings.instantspeed", 168, (s, e) =>
+            {
+                if (_ovRefreshing) return;
+                _overlay.SpeedoTachoInstantSpeed = _ovInstantSpeed.Checked;
+                SaveSettings();
+            });
+
+            _ovSpeedoPresetLabel = MakeLabel(speedoCol, "", pad, 208, colW - pad * 2, 18,
+                Color.FromArgb(140, 140, 170), new Font("Segoe UI", 8.5f), ContentAlignment.MiddleCenter);
+            speedoCol.Controls.Add(_ovSpeedoPresetLabel);
+
+            var speedoPresetPrevBtn = MakeButton(speedoCol, "‹", pad, 230, 50, 32, ApplePalette.Blue);
+            speedoPresetPrevBtn.Click += (s, e) =>
+            {
+                SwitchSpeedoPreset(_activeSpeedoPresetIndex == 0 ? 1 : 0);
+                _ovSpeedoPresetLabel.Text = string.Format(Localization.T("speedometer.preset.label"), _activeSpeedoPresetIndex + 1);
+            };
+            var speedoPresetNextBtn = MakeButton(speedoCol, "›", colW - pad - 50, 230, 50, 32, ApplePalette.Blue);
+            speedoPresetNextBtn.Click += (s, e) =>
+            {
+                SwitchSpeedoPreset(_activeSpeedoPresetIndex == 0 ? 1 : 0);
+                _ovSpeedoPresetLabel.Text = string.Format(Localization.T("speedometer.preset.label"), _activeSpeedoPresetIndex + 1);
+            };
+
+            _ovSpeedUnit = AddOvToggleRow(speedoCol, "speedometer.usemph", 270, (s, e) =>
+            {
+                if (_ovRefreshing) return;
+                _speedUnitToggle.Checked = _ovSpeedUnit.Checked;
+            });
+
+            var speedoElementsBtn = MakeButton(speedoCol, Localization.T("speedometer.elements.button"), pad, 310, (colW - pad * 2 - 8) / 2, 30, ApplePalette.Blue, locKey: "speedometer.elements.button");
+            speedoElementsBtn.Click += (s, e) => ShowSpeedoElementsMenu(_inGameSettingsOverlay);
+            _localizedControls.Add((speedoElementsBtn, "speedometer.elements.button"));
+
+            var speedoColorsBtn = MakeButton(speedoCol, Localization.T("hud.colors"), pad + (colW - pad * 2 - 8) / 2 + 8, 310, (colW - pad * 2 - 8) / 2, 30, ApplePalette.Blue, locKey: "hud.colors");
+            speedoColorsBtn.Click += (s, e) => ShowHudColorsMenu(_inGameSettingsOverlay);
+            _localizedControls.Add((speedoColorsBtn, "hud.colors"));
+
+            var hudCol = MakeOvColumn(host, colW, colH);
+            MakeLabel(hudCol, "HUD", pad, 12, colW - pad * 2, 22,
+                ApplePalette.Title, new Font("Segoe UI Semibold", 11f));
+            _ovHudEnabled = AddOvToggleRow(hudCol, "ingamesettings.enabled", 48, (s, e) =>
+            {
+                if (_ovRefreshing) return;
+                _hudMasterEnabledCheck.Checked = _ovHudEnabled.Checked;
+                _ovHudStyleForza.Enabled = _showOverlayCheck.Enabled;
+                _ovHudStyleBtn.Enabled = _showHudCheck.Enabled;
+                _ovRefreshing = true;
+                _ovHudStyleForza.SetCheckedSilent(_showOverlayCheck.Checked);
+                _ovHudStyleBtn.SetCheckedSilent(_showHudCheck.Checked);
+                _ovRefreshing = false;
+            });
+            _ovHudStyleForza = AddOvToggleRow(hudCol, "hud.showoverlay", 88, (s, e) =>
+            {
+                if (_ovRefreshing) return;
+                _showOverlayCheck.Checked = _ovHudStyleForza.Checked;
+                _ovRefreshing = true;
+                _ovHudStyleBtn.SetCheckedSilent(_showHudCheck.Checked);
+                _ovRefreshing = false;
+            });
+            _ovHudStyleBtn = AddOvToggleRow(hudCol, "ingamesettings.isbtnhud", 128, (s, e) =>
+            {
+                if (_ovRefreshing) return;
+                _showHudCheck.Checked = _ovHudStyleBtn.Checked;
+                _ovRefreshing = true;
+                _ovHudStyleForza.SetCheckedSilent(_showOverlayCheck.Checked);
+                _ovRefreshing = false;
+            });
+            _ovRpmHud = AddOvToggleRow(hudCol, "ingamesettings.rpmhud", 168, (s, e) =>
+            {
+                if (_ovRefreshing) return;
+                _showRPMHudCheck.Checked = _ovRpmHud.Checked;
+            });
+            var hudColorsBtn = MakeButton(hudCol, Localization.T("ingamesettings.hudcolors"), pad, 208, colW - pad * 2, 30, ApplePalette.Blue, locKey: "ingamesettings.hudcolors");
+            hudColorsBtn.Click += (s, e) => ShowScoreColorsMenu(_inGameSettingsOverlay);
+            _localizedControls.Add((hudColorsBtn, "ingamesettings.hudcolors"));
+
+            var indicatorsCol = MakeOvColumn(host, colW, colH);
+            var indicatorsTitleLabel = MakeLabel(indicatorsCol, Localization.T("indicators.title"), pad, 12, colW - pad * 2, 22,
+                ApplePalette.Title, new Font("Segoe UI Semibold", 11f), locKey: "indicators.title");
+            _localizedControls.Add((indicatorsTitleLabel, "indicators.title"));
+            _ovIndicatorsEnabled = AddOvToggleRow(indicatorsCol, "ingamesettings.enabled", 48, (s, e) =>
+            {
+                if (_ovRefreshing) return;
+                _indicatorsMasterEnabledCheck.Checked = _ovIndicatorsEnabled.Checked;
+            });
+            _ovIndicatorAutoCancel = AddOvToggleRow(indicatorsCol, "ingamesettings.autocancel", 88, (s, e) =>
+            {
+                if (_ovRefreshing) return;
+                _indicatorAutoCancelCheck.Checked = _ovIndicatorAutoCancel.Checked;
+            });
+            _ovIndicatorSounds = AddOvToggleRow(indicatorsCol, "ingamesettings.sounds", 128, (s, e) =>
+            {
+                if (_ovRefreshing) return;
+                _indicatorSoundsCheck.Checked = _ovIndicatorSounds.Checked;
+            });
+
+            var ovVolumeLabel = MakeLabel(indicatorsCol, Localization.T("indicators.volume"), pad, 168, 100, 18,
+                Color.FromArgb(140, 140, 170), new Font("Segoe UI", 8.5f), locKey: "indicators.volume");
+            _localizedControls.Add((ovVolumeLabel, "indicators.volume"));
+            _ovIndicatorVolumeValueLabel = MakeLabel(indicatorsCol, "", colW - pad - 40, 168, 40, 18,
+                ApplePalette.Text, new Font("Segoe UI", 8.5f), ContentAlignment.MiddleRight);
+            indicatorsCol.Controls.Add(_ovIndicatorVolumeValueLabel);
+
+            _ovIndicatorVolumeSlider = new MacSlider
+            {
+                Location = new Point(pad, 190),
+                Size = new Size(colW - pad * 2, 22),
+                Minimum = 0,
+                Maximum = 100,
+            };
+            _ovIndicatorVolumeSlider.ValueChanged += (s, e) =>
+            {
+                if (_ovRefreshing) return;
+                _indicatorVolumeSlider.Value = _ovIndicatorVolumeSlider.Value;
+            };
+            indicatorsCol.Controls.Add(_ovIndicatorVolumeSlider);
+
+            var ovArmThresholdLabel = MakeLabel(indicatorsCol, Localization.T("indicators.armthreshold"), pad, 232, colW - pad * 2, 18,
+                Color.FromArgb(140, 140, 170), new Font("Segoe UI", 8.5f), locKey: "indicators.armthreshold");
+            _localizedControls.Add((ovArmThresholdLabel, "indicators.armthreshold"));
+            _ovIndicatorArmThresholdNumeric = new MinimalNumericUpDown
+            {
+                Location = new Point(pad, 252),
+                Size = new Size(colW - pad * 2, 28),
+                Minimum = 1,
+                Maximum = 100,
+            };
+            _ovIndicatorArmThresholdNumeric.ValueChanged += v =>
+            {
+                if (_ovRefreshing) return;
+                _indicatorArmThresholdNumeric.Value = v;
+            };
+            indicatorsCol.Controls.Add(_ovIndicatorArmThresholdNumeric);
+
+            var ovCenterThresholdLabel = MakeLabel(indicatorsCol, Localization.T("indicators.centerthreshold"), pad, 288, colW - pad * 2, 18,
+                Color.FromArgb(140, 140, 170), new Font("Segoe UI", 8.5f), locKey: "indicators.centerthreshold");
+            _localizedControls.Add((ovCenterThresholdLabel, "indicators.centerthreshold"));
+            _ovIndicatorCenterThresholdNumeric = new MinimalNumericUpDown
+            {
+                Location = new Point(pad, 308),
+                Size = new Size(colW - pad * 2, 28),
+                Minimum = 1,
+                Maximum = 90,
+            };
+            _ovIndicatorCenterThresholdNumeric.ValueChanged += v =>
+            {
+                if (_ovRefreshing) return;
+                _indicatorCenterThresholdNumeric.Value = v;
+            };
+            indicatorsCol.Controls.Add(_ovIndicatorCenterThresholdNumeric);
+
+            var scoreCol = MakeOvColumn(host, colW, colH);
+            MakeLabel(scoreCol, "Score", pad, 12, colW - pad * 2, 22,
+                ApplePalette.Title, new Font("Segoe UI Semibold", 11f));
+            var minDriftLabel = MakeLabel(scoreCol, Localization.T("score.mindriftspeed"), pad, 40, colW - pad * 2, 32,
+                Color.FromArgb(140, 140, 170), new Font("Segoe UI", 8.5f), ContentAlignment.TopLeft, locKey: "score.mindriftspeed");
+            _localizedControls.Add((minDriftLabel, "score.mindriftspeed"));
+            _ovMinDriftSpeedNumeric = new MinimalNumericUpDown
+            {
+                Location = new Point(pad, 74),
+                Size = new Size(colW - pad * 2, 30),
+                Minimum = 0,
+                Maximum = 100,
+                Increment = 1,
+            };
+            _ovMinDriftSpeedNumeric.ValueChanged += v =>
+            {
+                if (_ovRefreshing) return;
+                _minDriftSpeedNumeric.Value = v;
+            };
+            scoreCol.Controls.Add(_ovMinDriftSpeedNumeric);
+
+            var maxBurnoutLabel = MakeLabel(scoreCol, Localization.T("score.maxburnoutspeed"), pad, 114, colW - pad * 2, 32,
+                Color.FromArgb(140, 140, 170), new Font("Segoe UI", 8.5f), ContentAlignment.TopLeft, locKey: "score.maxburnoutspeed");
+            _localizedControls.Add((maxBurnoutLabel, "score.maxburnoutspeed"));
+            _ovMaxBurnoutSpeedNumeric = new MinimalNumericUpDown
+            {
+                Location = new Point(pad, 148),
+                Size = new Size(colW - pad * 2, 30),
+                Minimum = 0,
+                Maximum = 150,
+                Increment = 1,
+            };
+            _ovMaxBurnoutSpeedNumeric.ValueChanged += v =>
+            {
+                if (_ovRefreshing) return;
+                _maxBurnoutSpeedNumeric.Value = v;
+            };
+            scoreCol.Controls.Add(_ovMaxBurnoutSpeedNumeric);
+
+            _ovAdvancedOutGauge = AddOvToggleRow(scoreCol, "ingamesettings.advancedoutgauge", 188, (s, e) =>
+            {
+                if (_ovRefreshing) return;
+                _advancedOutGaugeCheck.Checked = _ovAdvancedOutGauge.Checked;
+            });
+            _ovCarCollisionDetect = AddOvToggleRow(scoreCol, "ingamesettings.cars", 224, (s, e) =>
+            {
+                if (_ovRefreshing) return;
+                _collisionDetectCheck.Checked = _ovCarCollisionDetect.Checked;
+            });
+            _ovObjectCollisionDetect = AddOvToggleRow(scoreCol, "ingamesettings.objects", 260, (s, e) =>
+            {
+                if (_ovRefreshing) return;
+                _objectCollisionDetectCheck.Checked = _ovObjectCollisionDetect.Checked;
+            });
+
+            int halfW = (colW - pad * 2 - 8) / 2;
+            var angleLevelsBtn = MakeButton(scoreCol, Localization.T("score.levels.button"), pad, 296, halfW, 30, ApplePalette.Blue, locKey: "score.levels.button");
+            angleLevelsBtn.Click += (s, e) => ShowAngleLevelsMenu(_inGameSettingsOverlay);
+            _localizedControls.Add((angleLevelsBtn, "score.levels.button"));
+
+            var speedLevelsBtn = MakeButton(scoreCol, Localization.T("score.levels.speed_button"), pad + halfW + 8, 296, halfW, 30, ApplePalette.Blue, locKey: "score.levels.speed_button");
+            speedLevelsBtn.Click += (s, e) => ShowSpeedLevelsMenu(_inGameSettingsOverlay);
+            _localizedControls.Add((speedLevelsBtn, "score.levels.speed_button"));
+
+            var hitLevelsBtn = MakeButton(scoreCol, Localization.T("derby.levels.button"), pad, 336, colW - pad * 2, 30, ApplePalette.Blue, locKey: "derby.levels.button");
+            hitLevelsBtn.Click += (s, e) => ShowHitLevelsMenu(_inGameSettingsOverlay);
+            _localizedControls.Add((hitLevelsBtn, "derby.levels.button"));
+
+            _ovHintLabel = MakeLabel(host, Localization.T("ingamesettings.hint"), 0, 0,
+                colW, 20, Color.FromArgb(140, 140, 170), new Font("Segoe UI", 8.5f),
+                ContentAlignment.MiddleCenter, locKey: "ingamesettings.hint");
+            _localizedControls.Add((_ovHintLabel, "ingamesettings.hint"));
+
+            ReflowInGameSettingsOverlayColumns(_ovColumns.Count * 230);
+        }
+
+        private void RefreshInGameSettingsOverlayValues()
+        {
+            _ovRefreshing = true;
+
+            _ovInSimConnected.Enabled = _connectionSwitch.Enabled;
+            _ovInSimConnected.SetCheckedSilent(_connectionSwitch.Checked);
+            _ovInSimStatusLabel.Text = _connectionStateLabel.Text;
+            _ovInSimStatusLabel.ForeColor = _connectionStateLabel.ForeColor;
+            _ovOutGaugeConnected.SetCheckedSilent(_outGaugeConnectionSwitch.Checked);
+            _ovOutGaugeStatusLabel.Text = _outGaugeStateLabel.Text;
+            _ovOutGaugeStatusLabel.ForeColor = _outGaugeStateLabel.ForeColor;
+            _ovDarkMode.SetCheckedSilent(_themeSwitch.Checked);
+
+            _ovRevEnabled.SetCheckedSilent(_revEnableSwitch.Checked);
+            _ovRevLimitNumeric.Value = _revLimiterNumeric.Value;
+            _ovRevCutMSNumeric.Value = _revCutMS.Value;
+            _ovRevAutoCalibrate.Enabled = _revAutoCalibrateNewCarCheck.Enabled;
+            _ovRevAutoCalibrate.SetCheckedSilent(_revAutoCalibrateNewCarCheck.Checked);
+            _ovSpeedoEnabled.SetCheckedSilent(_speedoTachoEnabledCheck.Checked);
+            _ovAirSpeed.SetCheckedSilent(_overlay.SpeedoTachoAirSpeed);
+            _ovPlainDigits.SetCheckedSilent(_overlay.SpeedoTachoPlainDigits);
+            _ovInstantSpeed.SetCheckedSilent(_overlay.SpeedoTachoInstantSpeed);
+            _ovSpeedUnit.SetCheckedSilent(_speedUnitToggle.Checked);
+            _ovSpeedoPresetLabel.Text = string.Format(Localization.T("speedometer.preset.label"), _activeSpeedoPresetIndex + 1);
+            _ovHudEnabled.SetCheckedSilent(_hudMasterEnabledCheck.Checked);
+            _ovHudStyleForza.Enabled = _showOverlayCheck.Enabled;
+            _ovHudStyleForza.SetCheckedSilent(_showOverlayCheck.Checked);
+            _ovHudStyleBtn.Enabled = _showHudCheck.Enabled;
+            _ovHudStyleBtn.SetCheckedSilent(_showHudCheck.Checked);
+            _ovRpmHud.Enabled = _showRPMHudCheck.Enabled;
+            _ovRpmHud.SetCheckedSilent(_showRPMHudCheck.Checked);
+            _ovIndicatorsEnabled.SetCheckedSilent(_indicatorsMasterEnabledCheck.Checked);
+            _ovIndicatorAutoCancel.Enabled = _indicatorAutoCancelCheck.Enabled;
+            _ovIndicatorAutoCancel.SetCheckedSilent(_indicatorAutoCancelCheck.Checked);
+            _ovIndicatorSounds.Enabled = _indicatorSoundsCheck.Enabled;
+            _ovIndicatorSounds.SetCheckedSilent(_indicatorSoundsCheck.Checked);
+            _ovIndicatorVolumeSlider.SetValueSilent(_indicatorVolumeSlider.Value);
+            _ovIndicatorVolumeValueLabel.Text = $"{_indicatorVolumeSlider.Value}%";
+            _ovIndicatorArmThresholdNumeric.Enabled = _indicatorArmThresholdNumeric.Enabled;
+            _ovIndicatorArmThresholdNumeric.Value = _indicatorArmThresholdNumeric.Value;
+            _ovIndicatorCenterThresholdNumeric.Enabled = _indicatorCenterThresholdNumeric.Enabled;
+            _ovIndicatorCenterThresholdNumeric.Value = _indicatorCenterThresholdNumeric.Value;
+            _ovMinDriftSpeedNumeric.Value = _minDriftSpeedNumeric.Value;
+            _ovMaxBurnoutSpeedNumeric.Value = _maxBurnoutSpeedNumeric.Value;
+            _ovAdvancedOutGauge.Enabled = _advancedOutGaugeCheck.Enabled;
+            _ovAdvancedOutGauge.SetCheckedSilent(_advancedOutGaugeCheck.Checked);
+            _ovCarCollisionDetect.SetCheckedSilent(_collisionDetectCheck.Checked);
+            _ovObjectCollisionDetect.SetCheckedSilent(_objectCollisionDetectCheck.Checked);
+
+            _ovRefreshing = false;
         }
 
         private byte _driverNamePlid = 0;
@@ -4174,6 +6116,7 @@ namespace LFSDriftBuddy
             _localPlayerParked = true;
             _overlay.ResetCarData();
             _overlay.ResetOutGaugeData();
+            _controllerAssistState.Reset();
 
             if (_showHudCheck.Checked)
                 _hud.ClearAllButtons();
@@ -4423,11 +6366,9 @@ namespace LFSDriftBuddy
             }));
         }
 
-        private static readonly Color StatusErrorColor = Color.FromArgb(220, 80, 80);
-        private static readonly Color StatusSuccessColor = Color.FromArgb(100, 200, 120);
+        private static Color StatusErrorColor => ApplePalette.StatusError;
+        private static Color StatusSuccessColor => ApplePalette.StatusOk;
 
-        // Appends one line to the status log instead of overwriting it, so the whole history of
-        // messages stays visible and scrollable (see statusPanel) rather than only the latest one.
         private void AppendStatusMessage(string message, Color? color = null)
         {
             if (_statusLabel == null || string.IsNullOrEmpty(message)) return;
@@ -4458,6 +6399,15 @@ namespace LFSDriftBuddy
 
         private DateTime _lastIndicatorCancelTime = DateTime.MinValue;
         private const int IndicatorCancelSuppressMs = 250;
+
+        // A car can flip via Roll (tripping sideways) or Pitch (tumbling nose-over-tail off a
+        // wall/curb) or any mix of the two, so checking Roll alone misses head-on flips. The
+        // car's local up vector (0,0,1) rotated by pitch and roll has world Z component
+        // cos(Pitch) * cos(Roll) regardless of which order the two rotations are applied in;
+        // that's positive while upright and crosses zero at 90 degrees of combined tilt.
+        // -0.5 corresponds to roughly 120 degrees of combined tilt from upright, past a car
+        // resting hard on its side, short of requiring a dead-on roof landing.
+        private const double UpsideDownUpZThreshold = -0.5;
 
         private long _outGaugePacketCount = 0;
         private uint _lastShowLightsRaw = 0;
@@ -4567,12 +6517,23 @@ namespace LFSDriftBuddy
         {
             BeginInvoke((Action)(() =>
             {
+                // A reconnect within the goodbye-notification window of a previous disconnect
+                // must cancel that disconnect's pending overlay-detach timer, or it fires late
+                // and rips the whole overlay (score/speedo/laps/steering bar) away right after
+                // this reattaches it.
+                if (_overlayDetachTimer != null)
+                {
+                    _overlayDetachTimer.Stop();
+                    _overlayDetachTimer.Dispose();
+                    _overlayDetachTimer = null;
+                }
+
                 _connectionSwitch.SetCheckedSilent(true);
                 _connectionSwitch.Enabled = true;
                 _resetBtn.Enabled = true;
                 _revLimiter.Start();
                 _connectionStateLabel.Text = Localization.T("status.connected");
-                _connectionStateLabel.ForeColor = Color.FromArgb(60, 220, 100);
+                _connectionStateLabel.ForeColor = ApplePalette.StatusOk;
 
                 _hud.InvalidateCache();
 
@@ -4600,6 +6561,9 @@ namespace LFSDriftBuddy
                 };
                 parkedCheckTimer.Start();
 
+                if (_inGameSettingsOverlay.Visible)
+                    RefreshInGameSettingsOverlayValues();
+
             }));
         }
 
@@ -4611,7 +6575,7 @@ namespace LFSDriftBuddy
                 _resetBtn.Enabled = false;
                 _revLimiter.Stop();
                 _connectionStateLabel.Text = Localization.T("status.disconnected");
-                _connectionStateLabel.ForeColor = Color.FromArgb(130, 130, 165);
+                _connectionStateLabel.ForeColor = ApplePalette.StatusIdle;
                 _speedKmh = 0; _driftAngle = 0;
 
                 _angleValueLabel.Text = "0°";
@@ -4621,17 +6585,21 @@ namespace LFSDriftBuddy
                     Localization.T("overlay.disconnected"),
                     OverlayColor4,
                     5.0);
-                var detachTimer = new System.Windows.Forms.Timer { Interval = 5200 };
-                detachTimer.Tick += (ts, te) =>
+                _overlayDetachTimer?.Stop();
+                _overlayDetachTimer?.Dispose();
+                _overlayDetachTimer = new System.Windows.Forms.Timer { Interval = 5200 };
+                _overlayDetachTimer.Tick += (ts, te) =>
                 {
-                    detachTimer.Stop();
-                    detachTimer.Dispose();
+                    _overlayDetachTimer?.Stop();
+                    _overlayDetachTimer?.Dispose();
+                    _overlayDetachTimer = null;
                     _overlay.Detach();
                 };
-                detachTimer.Start();
+                _overlayDetachTimer.Start();
 
                 _overlay.ResetOutGaugeData();
                 _overlay.ResetCarData();
+                _controllerAssistState.Reset();
                 _outGaugeFreshness.Reset();
                 _drift.SetOutGaugeDataFresh(false);
                 _hud.InvalidateCache();
@@ -4639,6 +6607,9 @@ namespace LFSDriftBuddy
                 _localPlayerNickAtPark = null;
                 _lastKnownPlayerPLID = 0;
                 _myOwnPlid = 0;
+
+                if (_inGameSettingsOverlay.Visible)
+                    RefreshInGameSettingsOverlayValues();
             }));
         }
 
@@ -4649,7 +6620,10 @@ namespace LFSDriftBuddy
                 _connectionSwitch.SetCheckedSilent(false);
                 _connectionSwitch.Enabled = true;
                 _connectionStateLabel.Text = Localization.T("status.disconnected");
-                _connectionStateLabel.ForeColor = Color.FromArgb(130, 130, 165);
+                _connectionStateLabel.ForeColor = ApplePalette.StatusIdle;
+
+                if (_inGameSettingsOverlay.Visible)
+                    RefreshInGameSettingsOverlayValues();
             }));
         }
 
@@ -4684,12 +6658,6 @@ namespace LFSDriftBuddy
             _bestDeepDriftValueLabel.Text = $"{_drift.BestDeepDriftDurationMs / 1000.0:F1}s";
         }
 
-        // Contact outside of a drift is purely informational (name + side, no scoring). Contact
-        // WHILE drifting is checked again 2s later: if the drift is still going and roughly
-        // unchanged, it was a stylish "kiss" (small reward); if the drift broke, spun, or changed
-        // speed a lot, or the hit was simply too strong to begin with, it's a penalty. Either way
-        // it only ever touches the EXISTING drift score (CurrentRunPoints/TotalScore) — this has
-        // no scoring, combo, or run of its own.
         private const int CollisionTooStrongTier = 4;
         private const double CollisionKissAngleToleranceDeg = 15.0;
         private const double CollisionKissSpeedToleranceKmh = 15.0;
@@ -5008,7 +6976,9 @@ namespace LFSDriftBuddy
 
             btn.Paint += (s, e) =>
             {
-                Color currentColor = (Color)btn.Tag;
+                Color currentColor = btn.Enabled
+                    ? (Color)btn.Tag
+                    : (_isDarkTheme ? Color.FromArgb(58, 58, 62) : Color.FromArgb(212, 212, 216));
 
                 var g = e.Graphics;
                 g.SmoothingMode = SmoothingMode.AntiAlias;
@@ -5020,7 +6990,7 @@ namespace LFSDriftBuddy
                 using (SolidBrush parentBrush = new SolidBrush(parent.BackColor))
                     g.FillRectangle(parentBrush, full);
 
-                if (isHover)
+                if (isHover && btn.Enabled)
                 {
                     for (int i = 5; i >= 1; i--)
                     {
@@ -5048,12 +7018,16 @@ namespace LFSDriftBuddy
                         g.DrawPath(border, path);
                 }
 
+                Color textColor = btn.Enabled
+                    ? btn.ForeColor
+                    : (_isDarkTheme ? Color.FromArgb(120, 120, 126) : Color.FromArgb(150, 150, 155));
+
                 TextRenderer.DrawText(
                     g,
                     btn.Text,
                     btn.Font,
                     rect,
-                    btn.ForeColor,
+                    textColor,
                     TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.WordBreak);
             };
 
@@ -5151,7 +7125,7 @@ namespace LFSDriftBuddy
                 SetButtonColor(_colorBtn6, useOverlayColors ? OverlayColor6 : InSimCodeToColor(InSimColor6));
         }
 
-        private void OpenCustomColorPicker(Button targetBtn, Color initialColor, string title, Action<Color> onApply, bool includeAlpha = false)
+        private void OpenCustomColorPicker(Button targetBtn, Color initialColor, string title, Action<Color> onApply, bool includeAlpha = false, Form ownerForm = null)
         {
             Color initial = initialColor;
 
@@ -5293,13 +7267,13 @@ namespace LFSDriftBuddy
                 px += presetSize + presetGap;
             }
 
-            var applyBtn = MakeButton(card, Localization.T("common.ok"), 20, includeAlpha ? 252 : 218, 260, 36, ApplePalette.Blue);
+            var applyBtn = MakeButton(card, Localization.T("common.ok"), 20, includeAlpha ? 252 : 218, 260, 30, ApplePalette.Blue);
             applyBtn.Click += (s, e) => { SaveSettings(); popup.Close(); };
 
-            ShowModalPopup(popup);
+            ShowModalPopup(popup, ownerForm);
         }
 
-        private void HandleColorButtonClick(Button btn, int slot)
+        private void HandleColorButtonClick(Button btn, int slot, Form ownerForm = null)
         {
             bool overlayOn = _showOverlayCheck != null && _showOverlayCheck.Checked;
             bool insimHudOn = _showHudCheck != null && _showHudCheck.Checked;
@@ -5311,7 +7285,7 @@ namespace LFSDriftBuddy
                     SetOverlayColorSlot(slot, c);
                     if (!_isDrifting && !_isSpeeding)
                         _overlay.UpdateAccentColor(OverlayColorIdle);
-                });
+                }, ownerForm: ownerForm);
             }
             else
             {
@@ -5320,7 +7294,7 @@ namespace LFSDriftBuddy
                     SetInSimColorSlot(slot, code);
                     SaveSettings();
                     RefreshColorButtonSwatches();
-                });
+                }, ownerForm);
             }
         }
 
@@ -5336,8 +7310,8 @@ namespace LFSDriftBuddy
 
             _titleBar.Paint += (s, e) =>
             {
-                using (var pen = new Pen(ApplePalette.Border))
-                    e.Graphics.DrawLine(pen, 0, _titleBar.Height + 1, _titleBar.Width, _titleBar.Height + 1);
+                using (var pen = new Pen(ApplePalette.Border, 1.6f))
+                    e.Graphics.DrawLine(pen, 0, _titleBar.Height - 1, _titleBar.Width, _titleBar.Height - 1);
             };
 
             _titleBarLabel = new Label
@@ -5357,29 +7331,29 @@ namespace LFSDriftBuddy
             _btnMinimize.Click += (s, e) => WindowState = FormWindowState.Minimized;
             _btnClose.Click += (s, e) => Close();
 
-            void LayoutButtons()
-            {
-                int btnHeight = _titleBar.Height;
-
-                _btnClose.Size = new Size(_btnClose.Width, btnHeight);
-                _btnClose.Location = new Point(_titleBar.Width - _btnClose.Width, 0);
-
-                _btnMinimize.Size = new Size(_btnMinimize.Width, btnHeight);
-                _btnMinimize.Location = new Point(_btnClose.Left - _btnMinimize.Width, 0);
-            }
-
-            _titleBar.Resize += (s, e) => LayoutButtons();
+            _titleBar.Resize += (s, e) => LayoutTitleBarButtons();
 
             _titleBar.Controls.Add(_titleBarLabel);
             _titleBar.Controls.Add(_btnMinimize);
             _titleBar.Controls.Add(_btnClose);
 
-            LayoutButtons();
+            LayoutTitleBarButtons();
             _titleBar.MouseDown += TitleBar_MouseDown;
             _titleBarLabel.MouseDown += TitleBar_MouseDown;
 
             Controls.Add(_titleBar);
             _titleBar.BringToFront();
+        }
+
+        private void LayoutTitleBarButtons()
+        {
+            int btnHeight = _titleBar.Height - 1;
+
+            _btnClose.Size = new Size(_btnClose.Width, btnHeight);
+            _btnClose.Location = new Point(_titleBar.Width - _btnClose.Width, 0);
+
+            _btnMinimize.Size = new Size(_btnMinimize.Width, btnHeight);
+            _btnMinimize.Location = new Point(_btnClose.Left - _btnMinimize.Width, 0);
         }
 
         private void TitleBar_MouseDown(object sender, MouseEventArgs e)
@@ -5399,29 +7373,6 @@ namespace LFSDriftBuddy
 
         private const int WM_NCLBUTTONDOWN = 0xA1;
         private const int HT_CAPTION = 0x2;
-
-        private const int WM_NCHITTEST = 0x0084;
-        private const int HT_CLIENT = 0x1;
-        private const int HT_BOTTOM = 0xF;
-        private const int ResizeBorderThickness = 20;
-
-        protected override void WndProc(ref Message m)
-        {
-            if (m.Msg == WM_NCHITTEST)
-            {
-                base.WndProc(ref m);
-                if ((int)m.Result == HT_CLIENT)
-                {
-                    int x = unchecked((short)((long)m.LParam & 0xFFFF));
-                    int y = unchecked((short)(((long)m.LParam >> 16) & 0xFFFF));
-                    Point clientPt = PointToClient(new Point(x, y));
-                    if (clientPt.Y >= ClientSize.Height - ResizeBorderThickness)
-                        m.Result = (IntPtr)HT_BOTTOM;
-                }
-                return;
-            }
-            base.WndProc(ref m);
-        }
 
         private Color InSimCodeToColor(string code)
         {
@@ -5447,24 +7398,102 @@ namespace LFSDriftBuddy
             btn.Invalidate();
         }
 
+        private StartupCoverForm? _startupCover;
+
+        protected override void OnLoad(EventArgs e)
+        {
+            base.OnLoad(e);
+
+            _startupCover = new StartupCoverForm(Bounds, ApplePalette.Background);
+            _startupCover.Show();
+            _startupCover.SetAlpha(255);
+            _startupCover.ForceTopmost();
+        }
+
         protected override void OnShown(EventArgs e)
         {
             base.OnShown(e);
             ActiveControl = null;
+
+            if (_startupCover == null) return;
+
+            _startupCover.Bounds = Bounds;
+            _startupCover.SetAlpha(255);
+
+            var fadeTimer = new System.Windows.Forms.Timer { Interval = 15 };
+            int ticks = 0;
+            fadeTimer.Tick += (s, e2) =>
+            {
+                ticks++;
+                if (ticks <= 2)
+                    return;
+
+                int alpha = Math.Max(0, 255 - (ticks - 2) * 30);
+                _startupCover.SetAlpha(alpha);
+
+                if (alpha <= 0)
+                {
+                    fadeTimer.Stop();
+                    fadeTimer.Dispose();
+                    _startupCover.Close();
+                    _startupCover.Dispose();
+                    _startupCover = null;
+                }
+            };
+            fadeTimer.Start();
+        }
+
+        private class StartupCoverForm : LayeredForm
+        {
+            private Bitmap? _bmp;
+            private readonly Color _bgColor;
+
+            public StartupCoverForm(Rectangle bounds, Color bgColor)
+            {
+                _bgColor = bgColor;
+                Bounds = bounds;
+            }
+
+            public void SetAlpha(int alpha)
+            {
+                _bmp?.Dispose();
+                _bmp = new Bitmap(Math.Max(1, Width), Math.Max(1, Height), System.Drawing.Imaging.PixelFormat.Format32bppArgb);
+                using (var g = Graphics.FromImage(_bmp))
+                using (var brush = new SolidBrush(Color.FromArgb(alpha, _bgColor)))
+                {
+                    g.FillRectangle(brush, 0, 0, _bmp.Width, _bmp.Height);
+                }
+                SetBitmap(_bmp);
+            }
+
+            protected override void OnFormClosed(FormClosedEventArgs e)
+            {
+                _bmp?.Dispose();
+                base.OnFormClosed(e);
+            }
         }
 
         protected override void OnFormClosing(FormClosingEventArgs e)
         {
+            PadCloak.Unhide();
             SaveSettings();
             _drift.FlushStats();
             _outGaugeFreshnessPoll.Stop();
             _outGaugeFreshnessPoll.Dispose();
+            _controllerAssistDisplayTimer.Stop();
+            _controllerAssistDisplayTimer.Dispose();
             Localization.LanguageChanged -= ApplyLanguage;
             if (_insim.IsConnected) { _insim.DeleteAllButtons(); System.Threading.Thread.Sleep(120); }
             _insim.Dispose();
             _outGauge.Dispose();
+            _outSim.Dispose();
+            _assistLoop?.Dispose();
+            _virtualPad.Dispose();
             _revLimiter.Dispose();
             _globalHotkey.Dispose();
+            _settingsOverlayHotkey?.Dispose();
+            _inGameSettingsOverlay?.RestoreAndHide();
+            _inGameSettingsOverlay?.Dispose();
             _wheelInput?.Dispose();
             _overlay?.Dispose();
             _hud?.Dispose();
@@ -5697,6 +7726,8 @@ namespace LFSDriftBuddy
         public Color FillColor { get; set; } = Color.FromArgb(0, 122, 255);
         public Color KnobColor { get; set; } = Color.White;
 
+        public int? CenterValue { get; set; } = null;
+
         public MacSlider()
         {
             SetStyle(
@@ -5811,13 +7842,25 @@ namespace LFSDriftBuddy
 
             int knobX = ValueToX(_value);
 
-            int fillWidth = Math.Max(0, knobX - knobRadius);
+            int fillStart, fillWidth;
+            if (CenterValue.HasValue)
+            {
+                int centerX = ValueToX(CenterValue.Value);
+                fillStart = Math.Min(centerX, knobX);
+                fillWidth = Math.Abs(knobX - centerX);
+            }
+            else
+            {
+                fillStart = knobRadius;
+                fillWidth = Math.Max(0, knobX - knobRadius);
+            }
+
             if (fillWidth > 0)
             {
-                Rectangle fillRect = new Rectangle(knobRadius, trackY, fillWidth, trackHeight);
+                Rectangle fillRect = new Rectangle(fillStart, trackY, fillWidth, trackHeight);
                 using (GraphicsPath fillPath = DrawingHelpers.RoundedPath(fillRect, radius))
                 using (var gradient = new LinearGradientBrush(
-                           new Rectangle(knobRadius, trackY, Math.Max(fillWidth, 1), trackHeight),
+                           new Rectangle(fillStart, trackY, Math.Max(fillWidth, 1), trackHeight),
                            DrawingHelpers.Lighten(FillColor, 0.10),
                            FillColor,
                            LinearGradientMode.Vertical))
@@ -6043,12 +8086,25 @@ namespace LFSDriftBuddy
         public static readonly Color Red =
             Color.FromArgb(255, 69, 58);
 
+        public static readonly Color Purple =
+            Color.FromArgb(175, 82, 222);
+
         public static Color Background { get; private set; } = Color.FromArgb(245, 245, 247);
         public static Color Card { get; private set; } = Color.White;
         public static Color Border { get; private set; } = Color.FromArgb(224, 224, 229);
         public static Color Title { get; private set; } = Color.FromArgb(28, 28, 30);
         public static Color Text { get; private set; } = Color.FromArgb(58, 58, 60);
         public static Color Secondary { get; private set; } = Color.FromArgb(120, 120, 128);
+
+        public static Color StatusOk { get; private set; } = Color.FromArgb(60, 220, 100);
+        public static Color StatusWarn { get; private set; } = Color.FromArgb(230, 170, 60);
+        public static Color StatusError { get; private set; } = Color.FromArgb(220, 80, 80);
+        public static Color StatusIdle { get; private set; } = Color.FromArgb(130, 130, 165);
+        public static Color TextBlue { get; private set; } = Blue;
+        public static Color TextGreen { get; private set; } = Green;
+        public static Color TextOrange { get; private set; } = Orange;
+        public static Color TextRed { get; private set; } = Red;
+        public static Color TextPurple { get; private set; } = Purple;
 
         public static bool IsDark { get; private set; } = false;
 
@@ -6064,6 +8120,16 @@ namespace LFSDriftBuddy
                 Title = Color.FromArgb(245, 245, 247);
                 Text = Color.FromArgb(220, 220, 225);
                 Secondary = Color.FromArgb(150, 150, 160);
+
+                StatusOk = Color.FromArgb(60, 220, 100);
+                StatusWarn = Color.FromArgb(230, 170, 60);
+                StatusError = Color.FromArgb(220, 80, 80);
+                StatusIdle = Color.FromArgb(130, 130, 165);
+                TextBlue = Blue;
+                TextGreen = Green;
+                TextOrange = Orange;
+                TextRed = Red;
+                TextPurple = Purple;
             }
             else
             {
@@ -6073,6 +8139,16 @@ namespace LFSDriftBuddy
                 Title = Color.FromArgb(28, 28, 30);
                 Text = Color.FromArgb(58, 58, 60);
                 Secondary = Color.FromArgb(120, 120, 128);
+
+                StatusOk = Color.FromArgb(30, 140, 60);
+                StatusWarn = Color.FromArgb(170, 110, 20);
+                StatusError = Color.FromArgb(190, 40, 40);
+                StatusIdle = Color.FromArgb(90, 90, 130);
+                TextBlue = Color.FromArgb(0, 90, 200);
+                TextGreen = Color.FromArgb(30, 140, 60);
+                TextOrange = Color.FromArgb(200, 110, 0);
+                TextRed = Color.FromArgb(200, 40, 30);
+                TextPurple = Color.FromArgb(130, 50, 180);
             }
         }
     }
@@ -6128,18 +8204,79 @@ namespace LFSDriftBuddy
 
     public class NoScrollBarPanel : Panel
     {
-        [DllImport("user32.dll")]
-        private static extern bool ShowScrollBar(IntPtr hWnd, int wBar, [MarshalAs(UnmanagedType.Bool)] bool bShow);
-        private const int SB_VERT = 1;
-        private const int WM_NCCALCSIZE = 0x0083;
-        private const int WM_NCPAINT = 0x0085;
-        private const int WM_SIZE = 0x0005;
+        private int _scrollY;
+        private int _contentHeight;
 
-        protected override void WndProc(ref Message m)
+        public int ContentHeight
         {
-            base.WndProc(ref m);
-            if (m.Msg == WM_NCCALCSIZE || m.Msg == WM_NCPAINT || m.Msg == WM_SIZE)
-                ShowScrollBar(Handle, SB_VERT, false);
+            get => _contentHeight;
+            set
+            {
+                _contentHeight = Math.Max(0, value);
+                int clamped = Math.Clamp(_scrollY, 0, MaxScrollY);
+                if (clamped != _scrollY)
+                    ScrollTo(clamped);
+                else
+                    ScrollChanged?.Invoke(_scrollY);
+            }
+        }
+
+        public int ScrollY => _scrollY;
+        public int MaxScrollY => Math.Max(0, _contentHeight - ClientSize.Height);
+
+        public event Action<int>? ScrollChanged;
+
+        public NoScrollBarPanel()
+        {
+            DoubleBuffered = true;
+        }
+
+        public void ScrollTo(int y)
+        {
+            int clamped = Math.Clamp(y, 0, MaxScrollY);
+            int delta = clamped - _scrollY;
+            _scrollY = clamped;
+            if (delta == 0) return;
+
+            SuspendLayout();
+            try
+            {
+                foreach (Control c in Controls)
+                    c.Top -= delta;
+            }
+            finally
+            {
+                ResumeLayout(performLayout: false);
+            }
+
+            Invalidate();
+            ScrollChanged?.Invoke(_scrollY);
+        }
+
+        private const int WheelStepPx = 110;
+        private int _lastWheelTick;
+        private int _pendingWheelDelta;
+
+        protected override void OnMouseWheel(MouseEventArgs e)
+        {
+            base.OnMouseWheel(e);
+            int stepPx = (int)Math.Round(e.Delta / 120.0 * WheelStepPx);
+            if (stepPx == 0) return;
+
+            _pendingWheelDelta += stepPx;
+            int now = Environment.TickCount;
+            if (now - _lastWheelTick < 16) return;
+            _lastWheelTick = now;
+
+            int toApply = _pendingWheelDelta;
+            _pendingWheelDelta = 0;
+            ScrollTo(_scrollY - toApply);
+        }
+
+        protected override void OnResize(EventArgs e)
+        {
+            base.OnResize(e);
+            ScrollTo(_scrollY);
         }
     }
 
@@ -6168,44 +8305,77 @@ namespace LFSDriftBuddy
 
     public class MinimalScrollbar : Control
     {
-        public const int TrackWidth = 10;
-        private const int HoverTrackWidth = TrackWidth * 2;
-        private const int ThumbWidth = 4;
-        private const int HoverThumbWidth = ThumbWidth * 2;
+        public const int TrackWidth = 14;
+        private const int ThumbWidth = 6;
+        private const float HoverGrowFactor = 1.10f;
         private const int MinThumbHeight = 24;
 
-        private Panel _target;
+        private NoScrollBarPanel _target;
         private bool _hover;
         private bool _widened;
         private bool _dragging;
         private int _dragStartY;
         private int _dragStartScroll;
+        private int _knownScrollValue;
+        private int _lastDragScrollTick;
+        private float _thumbWidthMul = 1.0f;
+        private float _thumbWidthMulTarget = 1.0f;
+        private readonly System.Windows.Forms.Timer _hoverAnimTimer;
 
         public MinimalScrollbar()
         {
             SetStyle(ControlStyles.UserPaint | ControlStyles.AllPaintingInWmPaint |
-                ControlStyles.OptimizedDoubleBuffer, true);
+                ControlStyles.OptimizedDoubleBuffer | ControlStyles.ResizeRedraw, true);
             BackColor = ApplePalette.Background;
             Width = TrackWidth;
             Cursor = Cursors.Default;
 
             Anchor = AnchorStyles.Top | AnchorStyles.Bottom | AnchorStyles.Right;
+
+            _hoverAnimTimer = new System.Windows.Forms.Timer { Interval = 16 };
+            _hoverAnimTimer.Tick += (s, e) =>
+            {
+                float diff = _thumbWidthMulTarget - _thumbWidthMul;
+                if (Math.Abs(diff) < 0.002f)
+                {
+                    _thumbWidthMul = _thumbWidthMulTarget;
+                    _hoverAnimTimer.Stop();
+                }
+                else
+                {
+                    _thumbWidthMul += diff * 0.3f;
+                }
+                Invalidate();
+            };
         }
 
-        public void AttachTo(Panel target)
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing) _hoverAnimTimer.Dispose();
+            base.Dispose(disposing);
+        }
+
+        private void RefreshScrollValue()
+        {
+            if (_target != null) _knownScrollValue = _target.ScrollY;
+        }
+
+        public void AttachTo(NoScrollBarPanel target)
         {
             _target = target;
-            target.Resize += (s, e) => { SyncBounds(); Invalidate(); };
+            target.Resize += (s, e) => { SyncBounds(); RefreshScrollValue(); Invalidate(); };
+            target.ScrollChanged += v => { _knownScrollValue = v; Invalidate(); };
 
-            target.Scroll += (s, e) => Invalidate();
-            target.MouseWheel += (s, e) => Invalidate();
-
-            target.Layout += (s, e) => Invalidate();
             SyncBounds();
+            RefreshScrollValue();
             Invalidate();
         }
 
-        public void SyncToTarget() => Invalidate();
+        public void SyncToTarget()
+        {
+            RefreshScrollValue();
+            Invalidate();
+        }
 
         public void ApplyThemeColor(Color background)
         {
@@ -6217,30 +8387,28 @@ namespace LFSDriftBuddy
         {
             if (_widened == widened) return;
             _widened = widened;
-            SyncBounds();
-            Invalidate();
+            _thumbWidthMulTarget = widened ? HoverGrowFactor : 1.0f;
+            _hoverAnimTimer.Start();
         }
 
         private void SyncBounds()
         {
             if (_target?.Parent == null) return;
-            int width = _widened ? HoverTrackWidth : TrackWidth;
-            int rightEdge = _target.Right + TrackWidth;
-            Location = new Point(rightEdge - width, _target.Top);
-            Size = new Size(width, _target.Height);
+            Location = new Point(_target.Right, _target.Top);
+            Size = new Size(TrackWidth, _target.Height);
         }
 
         private (int top, int height) ComputeThumb()
         {
             if (_target == null) return (0, Height);
             int trackH = Height;
-            int max = Math.Max(1, _target.VerticalScroll.Maximum);
-            int large = Math.Max(1, _target.VerticalScroll.LargeChange);
-            if (max <= large) return (0, trackH);
+            int contentHeight = Math.Max(1, _target.ContentHeight);
+            int viewportHeight = Math.Max(1, _target.ClientSize.Height);
+            if (contentHeight <= viewportHeight) return (0, trackH);
 
-            int thumbH = Math.Max(MinThumbHeight, (int)((long)trackH * large / max));
-            int scrollableRange = Math.Max(1, max - large);
-            int value = Math.Clamp(_target.VerticalScroll.Value, 0, scrollableRange);
+            int thumbH = Math.Max(MinThumbHeight, (int)((long)trackH * viewportHeight / contentHeight));
+            int scrollableRange = Math.Max(1, _target.MaxScrollY);
+            int value = Math.Clamp(_knownScrollValue, 0, scrollableRange);
             int thumbY = (int)((long)(trackH - thumbH) * value / scrollableRange);
             return (thumbY, thumbH);
         }
@@ -6256,11 +8424,12 @@ namespace LFSDriftBuddy
             var (top, height) = ComputeThumb();
 
             e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
+            e.Graphics.PixelOffsetMode = System.Drawing.Drawing2D.PixelOffsetMode.HighQuality;
             Color thumbColor = _hover || _dragging
                 ? Color.FromArgb(220, 150, 150, 150)
                 : Color.FromArgb(130, 150, 150, 150);
 
-            int thumbWidth = _widened ? HoverThumbWidth : ThumbWidth;
+            int thumbWidth = Math.Max(1, (int)Math.Round(ThumbWidth * _thumbWidthMul));
             int thumbX = (Width - thumbWidth) / 2;
             Rectangle rect = new Rectangle(thumbX, top, thumbWidth, height);
             using var path = DrawingHelpers.RoundedPath(rect, thumbWidth / 2);
@@ -6268,8 +8437,7 @@ namespace LFSDriftBuddy
             e.Graphics.FillPath(brush, path);
         }
 
-        private bool CanScroll => _target != null
-            && _target.VerticalScroll.Maximum > Math.Max(1, _target.VerticalScroll.LargeChange);
+        private bool CanScroll => _target != null && _target.ContentHeight > _target.ClientSize.Height;
 
         protected override void OnMouseDown(MouseEventArgs e)
         {
@@ -6280,7 +8448,7 @@ namespace LFSDriftBuddy
 
             _dragging = true;
             _dragStartY = e.Y;
-            _dragStartScroll = _target.VerticalScroll.Value;
+            _dragStartScroll = _knownScrollValue;
             Capture = true;
         }
 
@@ -6293,16 +8461,20 @@ namespace LFSDriftBuddy
 
             if (!_dragging || _target == null) return;
 
-            int max = _target.VerticalScroll.Maximum;
-            int large = Math.Max(1, _target.VerticalScroll.LargeChange);
-            int scrollableRange = Math.Max(1, max - large);
+            int scrollableRange = Math.Max(1, _target.MaxScrollY);
             int trackRange = Math.Max(1, Height - height);
 
             int deltaPixels = e.Y - _dragStartY;
             int deltaValue = (int)((long)deltaPixels * scrollableRange / trackRange);
             int newValue = Math.Clamp(_dragStartScroll + deltaValue, 0, scrollableRange);
 
-            _target.AutoScrollPosition = new Point(0, newValue);
+            if (newValue == _knownScrollValue) return;
+
+            int now = Environment.TickCount;
+            if (now - _lastDragScrollTick < 16) return;
+            _lastDragScrollTick = now;
+
+            _target.ScrollTo(newValue);
             Invalidate();
         }
 
@@ -6311,6 +8483,8 @@ namespace LFSDriftBuddy
             base.OnMouseUp(e);
             _dragging = false;
             Capture = false;
+            RefreshScrollValue();
+            Invalidate();
         }
 
         protected override void OnMouseEnter(EventArgs e)
@@ -6518,9 +8692,6 @@ namespace LFSDriftBuddy
         private const int DemoSpeedKmh = 118;
         private const double KmhToMph = 0.621371;
 
-        // Cycles through a few RPM/rev-cut states (mirrors ForzaHudPreviewControl) so the color
-        // pickers below (Redline, in particular) are actually visible in the live preview instead
-        // of a single fixed frame that could never reach the redline branch at all.
         private static readonly (float rpm, bool revCut)[] _tachoTiers =
         {
             (5600f, false),
@@ -6556,8 +8727,6 @@ namespace LFSDriftBuddy
         private static Font MakeFont(float size) =>
             _activeFontFamily != null ? new Font(_activeFontFamily, size, FontStyle.Bold) : new Font("Segoe UI", size, FontStyle.Bold);
 
-        // Fixed, non-configurable backdrop behind the settings-panel preview only — purely
-        // decorative context for this widget, never shown in the real in-game overlay.
         private static readonly Image _previewWallpaper = LoadPreviewWallpaper();
 
         private static Image LoadPreviewWallpaper()
@@ -6567,11 +8736,6 @@ namespace LFSDriftBuddy
                 string path = Path.Combine(System.Windows.Forms.Application.StartupPath, "Data", "Images", "speedo_preview_background.png");
                 if (File.Exists(path))
                 {
-                    // Image.FromFile keeps the source file locked for the image's whole lifetime.
-                    // This field lives for the entire process, so load through a stream and copy
-                    // into a detached Bitmap instead — otherwise re-importing a background to that
-                    // same path later fails with a GDI+ "generic error" because the file is still
-                    // held open here.
                     using var fs = new FileStream(path, FileMode.Open, FileAccess.Read);
                     using var temp = Image.FromStream(fs);
                     return new Bitmap(temp);
@@ -6690,7 +8854,8 @@ namespace LFSDriftBuddy
             }
 
             const float contentSize = Radius * 2f;
-            float scale = Math.Min(Width, Height) / contentSize;
+            const float previewMargin = 25f;
+            float scale = Math.Max(0.01f, Math.Min(Width, Height) - previewMargin * 2f) / contentSize * 1.1f;
             GraphicsState savedState = g.Save();
             g.TranslateTransform(
                 (Width - contentSize * scale) / 2f - (Cx - Radius) * scale,
@@ -6716,8 +8881,6 @@ namespace LFSDriftBuddy
                 float redlineStartAngle = startAngle + redlineStartFrac * sweepAngle;
                 float redlineSweep = sweepAngle - redlineStartFrac * sweepAngle;
 
-                // Keep the outer edge pinned to the dial's true edge and let extra thickness eat
-                // inward only, instead of the stroke growing outward past the dial too.
                 float redlineWidth = Math.Max(1f, RedlineThickness);
                 float redlineRadius = radius - redlineWidth / 2f;
                 var redlineRect = new RectangleF(cx - redlineRadius, cy - redlineRadius, redlineRadius * 2, redlineRadius * 2);
@@ -6991,7 +9154,7 @@ namespace LFSDriftBuddy
             g.SmoothingMode = SmoothingMode.AntiAlias;
             g.TextRenderingHint = System.Drawing.Text.TextRenderingHint.AntiAliasGridFit;
 
-            float scale = Math.Min(Width / DesignWidth, Height / DesignHeight);
+            float scale = Math.Min(Width / DesignWidth, Height / DesignHeight) * 1.1f;
             GraphicsState savedState = g.Save();
             g.TranslateTransform(
                 (Width - DesignWidth * scale) / 2f,
@@ -7065,6 +9228,7 @@ namespace LFSDriftBuddy
     {
         public int MaxRpm { get; set; }
         public int CutMs { get; set; }
+        public bool Unsupported { get; set; }
     }
 
     public class SpeedoPresetData
@@ -7116,12 +9280,29 @@ namespace LFSDriftBuddy
 
         public bool OutGaugeConnectionEnabled { get; set; } = true;
 
+        public bool OutSimConnectionEnabled { get; set; } = true;
+        public int OutSimPort { get; set; } = 30020;
+        public string OutSimOptsHex { get; set; } = "bf";
+
+        public string LfsGameFolder { get; set; } = "";
+
+        public bool ControllerAssistEnabled { get; set; } = true;
+        public bool ControllerAssistSteeringEnabled { get; set; } = true;
+        public bool ControllerAssistVibrationEnabled { get; set; } = true;
+        public bool ControllerAssistOverlayBarVisible { get; set; } = true;
+        public bool ControllerAssistHidePhysicalPad { get; set; } = true;
+        public AssistSettings ControllerAssistSettings { get; set; } = AssistSettings.ForPreset(AssistPreset.Medium);
+        public RumbleSettings ControllerAssistRumble { get; set; } = new RumbleSettings();
+        public double ControllerAssistCountersteerTrimPercent { get; set; } = 0.0;
+        public double ControllerAssistStrengthTrimPercent { get; set; } = 0.0;
+
         public bool DarkTheme { get; set; } = true;
 
         public InputBinding IndicatorLeftBinding { get; set; } = InputBinding.FromKey(Keys.D7);
         public InputBinding IndicatorRightBinding { get; set; } = InputBinding.FromKey(Keys.D8);
         public InputBinding IndicatorHazardBinding { get; set; } = InputBinding.FromKey(Keys.D9);
         public InputBinding LightToggleBinding { get; set; } = InputBinding.None;
+        public InputBinding ControllerAssistToggleBinding { get; set; } = InputBinding.None;
 
         public string SteeringWheelDeviceGuid { get; set; } = "";
         public string SteeringWheelAxis { get; set; } = "X";
@@ -7163,6 +9344,11 @@ namespace LFSDriftBuddy
 
         public bool IndicatorsMasterEnabled { get; set; } = true;
 
+        public bool LfsNoticeDontShow { get; set; } = false;
+        public bool HudMasterEnabled { get; set; } = true;
+        public bool ShowScoreOverlay { get; set; } = true;
+        public bool ShowInsimHud { get; set; } = false;
+
         public double[] AngleLevelThresholds { get; set; } = { 25.0, 40.0, 50.0, 60.0, 70.0 };
         public double[] SpeedLevelThresholds { get; set; } = { 100.0, 150.0, 200.0, 250.0, 300.0 };
         public double BackwardDriftAngleThreshold { get; set; } = 95.0;
@@ -7170,7 +9356,7 @@ namespace LFSDriftBuddy
         public double MinDriftSpeedKmh { get; set; } = 20.0;
         public double MaxBurnoutSpeedKmh { get; set; } = 20.0;
 
-        public bool CollisionDetectionEnabled { get; set; } = false;
+        public bool CollisionDetectionEnabled { get; set; } = true;
         public double[] HitLevelThresholds { get; set; } = { 5.0, 10.0, 30.0, 50.0, 100.0 };
         public bool ObjectCollisionDetectionEnabled { get; set; } = true;
     }

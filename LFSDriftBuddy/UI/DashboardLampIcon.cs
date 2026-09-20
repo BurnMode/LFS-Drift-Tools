@@ -2,7 +2,7 @@ using System.Drawing;
 using System.Drawing.Drawing2D;
 using System.Windows.Forms;
 
-namespace LFSDriftBuddy
+namespace LFSDriftTools
 {
     public enum DashLampKind { TurnLeft, TurnRight, HighBeam }
 
@@ -36,7 +36,7 @@ namespace LFSDriftBuddy
             get
             {
                 var cp = base.CreateParams;
-                cp.ExStyle |= 0x20; // WS_EX_TRANSPARENT
+                cp.ExStyle |= 0x20;
                 return cp;
             }
         }

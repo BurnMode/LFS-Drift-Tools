@@ -5,7 +5,7 @@ using System.Net.Sockets;
 using System.Text;
 using System.Threading;
 
-namespace LFSDriftBuddy.InSim
+namespace LFSDriftTools.InSim
 {
     public class CarDataEventArgs : EventArgs
     {
@@ -460,14 +460,6 @@ namespace LFSDriftBuddy.InSim
             });
         }
 
-        // IS_CON layout, corrected against two live captures (2025-xx test): Size(1) Type(1)
-        // ReqI(1) SubT(1) SpClose(2,word, 0.1 m/s units) Time(2,word) + 4 more header bytes of
-        // unknown purpose (offsets 8-11, not needed here) — 12 bytes total before the two
-        // 16-byte CarContOBJ blocks (car A at offset 12, car B at offset 28): PLID Info Steer
-        // ThrBrk CluHan GearSp Speed Direction Heading AccelF AccelR, followed by position bytes
-        // we don't need. Confirmed live: local player's PLID consistently landed at offset 28
-        // (Car B) in both test captures, and Car B's Speed/ThrBrk/AccelF all read as sensible
-        // non-zero values matching an actual moving, accelerating car at impact.
         private static DerbyCarContact ParseCarContOBJ(byte[] p, int offset)
         {
             byte thrBrk = p[offset + 3];

@@ -4,7 +4,7 @@ using System.Runtime.InteropServices;
 using System.Threading;
 using System.Windows.Forms;
 
-namespace LFSDriftBuddy
+namespace LFSDriftTools
 {
         public class IndicatorManager : IDisposable
     {

@@ -1,4 +1,4 @@
-using LFSDriftBuddy;
+using LFSDriftTools;
 using SharpDX.DirectInput;
 using System;
 using System.Collections.Generic;
@@ -28,6 +28,10 @@ public class SteeringWheelInput : IDisposable
     public event Action<List<(Guid Guid, string Name)>> WheelNotFound;
 
     public event Action<Dictionary<JoystickOffset, int>> RawAxesChanged;
+
+    public bool IsXInputDevice => _useXInput;
+    public event Action<XInputApi.Gamepad> XInputStateChanged;
+    public int XInputUserIndex => _useXInput ? _xinputUserIndex : -1;
 
     private const int AxisRange = 10000;
 
@@ -68,6 +72,7 @@ public class SteeringWheelInput : IDisposable
         _buttonBindings.Remove(buttonIndex);
     }
     private XInputApi.Controller _xinputPad;
+    private int _xinputUserIndex = -1;
     private bool _useXInput = false;
     private readonly IntPtr _ownerHandle;
 
@@ -102,7 +107,6 @@ public class SteeringWheelInput : IDisposable
 
         if (wheelInfo == null)
         {
-            //Log?.Invoke(Localization.T("wheelconfig.nodetectauto"));
             var list = devices.Select(d => (d.InstanceGuid, d.ProductName)).ToList();
             WheelNotFound?.Invoke(list);
             return;
@@ -114,6 +118,26 @@ public class SteeringWheelInput : IDisposable
         JoystickOffset axis = axisOverride.Key != null ? axisOverride.Value : JoystickOffset.X;
 
         Connect(wheelInfo.InstanceGuid, axis, wheelInfo.ProductName);
+    }
+
+    public bool IsRecognizedWheel(Guid instanceGuid)
+    {
+        var info = _directInput
+            .GetDevices(DeviceClass.GameControl, DeviceEnumerationFlags.AttachedOnly)
+            .FirstOrDefault(d => d.InstanceGuid == instanceGuid);
+
+        if (info == null) return false;
+
+        return info.Type == DeviceType.Driving ||
+            KnownWheelNames.Any(name => info.ProductName.IndexOf(name, StringComparison.OrdinalIgnoreCase) >= 0);
+    }
+
+    public JoystickOffset GetDefaultAxisFor(string productName)
+    {
+        var axisOverride = KnownAxisOverrides.FirstOrDefault(kv =>
+            productName.IndexOf(kv.Key, StringComparison.OrdinalIgnoreCase) >= 0);
+
+        return axisOverride.Key != null ? axisOverride.Value : JoystickOffset.X;
     }
 
     public bool ConnectToDevice(Guid instanceGuid, JoystickOffset axis)
@@ -145,8 +169,9 @@ public class SteeringWheelInput : IDisposable
         }
 
         var state = _xinputPad.GetState();
+        XInputStateChanged?.Invoke(state.Gamepad);
 
-        double newSteering = Math.Round(state.Gamepad.LeftThumbX / 32767.0 * 100.0, 1);
+        double newSteering = Math.Round(GetXInputAxisPercent(state.Gamepad, SteeringAxis), 1);
         newSteering = Math.Max(-100, Math.Min(100, newSteering));
 
         if (Math.Abs(newSteering - SteeringPercent) >= 0.5)
@@ -215,13 +240,22 @@ public class SteeringWheelInput : IDisposable
             _wheel?.Dispose();
             _wheel = null;
 
-            _xinputPad = new[]
-           {
+            _xinputPad = null;
+            _xinputUserIndex = -1;
+            foreach (var idx in new[]
+            {
                 XInputApi.UserIndex.One, XInputApi.UserIndex.Two,
                 XInputApi.UserIndex.Three, XInputApi.UserIndex.Four
+            })
+            {
+                var c = new XInputApi.Controller(idx);
+                if (c.IsConnected)
+                {
+                    _xinputPad = c;
+                    _xinputUserIndex = (int)idx;
+                    break;
+                }
             }
-           .Select(i => new XInputApi.Controller(i))
-           .FirstOrDefault(c => c.IsConnected);
 
             if (_xinputPad == null)
             {
@@ -344,6 +378,16 @@ public class SteeringWheelInput : IDisposable
             Log?.Invoke(Localization.T("status.disconnectwheel"));
         }
     }
+
+    private static double GetXInputAxisPercent(XInputApi.Gamepad pad, JoystickOffset axis) => axis switch
+    {
+        JoystickOffset.Y => pad.LeftThumbY / 32767.0 * 100.0,
+        JoystickOffset.Z => pad.RightThumbX / 32767.0 * 100.0,
+        JoystickOffset.RotationX => pad.RightThumbY / 32767.0 * 100.0,
+        JoystickOffset.RotationY => pad.LeftTrigger / 255.0 * 100.0,
+        JoystickOffset.RotationZ => pad.RightTrigger / 255.0 * 100.0,
+        _ => pad.LeftThumbX / 32767.0 * 100.0
+    };
 
     private static int GetAxisValue(JoystickState state, JoystickOffset axis) => axis switch
     {

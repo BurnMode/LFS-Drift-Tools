@@ -1,7 +1,7 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 
-namespace LFSDriftBuddy
+namespace LFSDriftTools
 {
     public enum AppLanguage { English, Polish, Turkish, German, Spanish }
 
@@ -131,6 +131,926 @@ namespace LFSDriftBuddy
                     [AppLanguage.German] = "Getrennt",
                     [AppLanguage.Spanish] = "Desconectado",
                 },
+                ["ingamesettings.title"] = new()
+                {
+                    [AppLanguage.English] = "Quick Settings",
+                    [AppLanguage.Polish] = "Szybkie ustawienia",
+                    [AppLanguage.Turkish] = "Hızlı Ayarlar",
+                    [AppLanguage.German] = "Schnelleinstellungen",
+                    [AppLanguage.Spanish] = "Ajustes rápidos",
+                },
+                ["ingamesettings.enabled"] = new()
+                {
+                    [AppLanguage.English] = "Enabled",
+                    [AppLanguage.Polish] = "Włączone",
+                    [AppLanguage.Turkish] = "Etkin",
+                    [AppLanguage.German] = "Aktiviert",
+                    [AppLanguage.Spanish] = "Activado",
+                },
+                ["ingamesettings.plaindigits"] = new()
+                {
+                    [AppLanguage.English] = "Plain digits",
+                    [AppLanguage.Polish] = "Zwykłe cyfry",
+                    [AppLanguage.Turkish] = "Sade rakamlar",
+                    [AppLanguage.German] = "Einfache Ziffern",
+                    [AppLanguage.Spanish] = "Dígitos simples",
+                },
+                ["ingamesettings.instantspeed"] = new()
+                {
+                    [AppLanguage.English] = "Instant speed",
+                    [AppLanguage.Polish] = "Prędkość natychmiastowa",
+                    [AppLanguage.Turkish] = "Anlık hız",
+                    [AppLanguage.German] = "Momentangeschwindigkeit",
+                    [AppLanguage.Spanish] = "Velocidad instantánea",
+                },
+                ["ingamesettings.autocalibrate"] = new()
+                {
+                    [AppLanguage.English] = "Autocalibrate",
+                    [AppLanguage.Polish] = "Autokalibracja",
+                    [AppLanguage.Turkish] = "Otomatik kalibrasyon",
+                    [AppLanguage.German] = "Autokalibrierung",
+                    [AppLanguage.Spanish] = "Autocalibración",
+                },
+                ["ingamesettings.isbtnhud"] = new()
+                {
+                    [AppLanguage.English] = "IS_BTN HUD",
+                    [AppLanguage.Polish] = "HUD IS_BTN",
+                    [AppLanguage.Turkish] = "IS_BTN HUD",
+                    [AppLanguage.German] = "IS_BTN-HUD",
+                    [AppLanguage.Spanish] = "HUD IS_BTN",
+                },
+                ["ingamesettings.connections"] = new()
+                {
+                    [AppLanguage.English] = "Connections",
+                    [AppLanguage.Polish] = "Połączenia",
+                    [AppLanguage.Turkish] = "Bağlantılar",
+                    [AppLanguage.German] = "Verbindungen",
+                    [AppLanguage.Spanish] = "Conexiones",
+                },
+                ["ingamesettings.insim"] = new()
+                {
+                    [AppLanguage.English] = "InSim",
+                    [AppLanguage.Polish] = "InSim",
+                    [AppLanguage.Turkish] = "InSim",
+                    [AppLanguage.German] = "InSim",
+                    [AppLanguage.Spanish] = "InSim",
+                },
+                ["ingamesettings.outgauge"] = new()
+                {
+                    [AppLanguage.English] = "OutGauge",
+                    [AppLanguage.Polish] = "OutGauge",
+                    [AppLanguage.Turkish] = "OutGauge",
+                    [AppLanguage.German] = "OutGauge",
+                    [AppLanguage.Spanish] = "OutGauge",
+                },
+                ["ingamesettings.cars"] = new()
+                {
+                    [AppLanguage.English] = "Cars",
+                    [AppLanguage.Polish] = "Samochody",
+                    [AppLanguage.Turkish] = "Arabalar",
+                    [AppLanguage.German] = "Autos",
+                    [AppLanguage.Spanish] = "Coches",
+                },
+                ["ingamesettings.objects"] = new()
+                {
+                    [AppLanguage.English] = "Objects",
+                    [AppLanguage.Polish] = "Obiekty",
+                    [AppLanguage.Turkish] = "Nesneler",
+                    [AppLanguage.German] = "Objekte",
+                    [AppLanguage.Spanish] = "Objetos",
+                },
+                ["ingamesettings.advancedoutgauge"] = new()
+                {
+                    [AppLanguage.English] = "Adv. OutGauge",
+                    [AppLanguage.Polish] = "Zaaw. OutGauge",
+                    [AppLanguage.Turkish] = "Gel. OutGauge",
+                    [AppLanguage.German] = "Erw. OutGauge",
+                    [AppLanguage.Spanish] = "Av. OutGauge",
+                },
+                ["ingamesettings.autocancel"] = new()
+                {
+                    [AppLanguage.English] = "Auto-cancel",
+                    [AppLanguage.Polish] = "Auto-anuluj",
+                    [AppLanguage.Turkish] = "Otomatik iptal",
+                    [AppLanguage.German] = "Auto-Abbruch",
+                    [AppLanguage.Spanish] = "Autocancelar",
+                },
+                ["ingamesettings.sounds"] = new()
+                {
+                    [AppLanguage.English] = "Sounds",
+                    [AppLanguage.Polish] = "Dźwięki",
+                    [AppLanguage.Turkish] = "Sesler",
+                    [AppLanguage.German] = "Sounds",
+                    [AppLanguage.Spanish] = "Sonidos",
+                },
+                ["ingamesettings.rpmhud"] = new()
+                {
+                    [AppLanguage.English] = "RPM HUD",
+                    [AppLanguage.Polish] = "HUD obrotów",
+                    [AppLanguage.Turkish] = "RPM HUD",
+                    [AppLanguage.German] = "Drehzahl-HUD",
+                    [AppLanguage.Spanish] = "HUD de RPM",
+                },
+                ["ingamesettings.hudcolors"] = new()
+                {
+                    [AppLanguage.English] = "Score Colors",
+                    [AppLanguage.Polish] = "Kolory wyniku",
+                    [AppLanguage.Turkish] = "Puan Renkleri",
+                    [AppLanguage.German] = "Wertungsfarben",
+                    [AppLanguage.Spanish] = "Colores de puntuación",
+                },
+                ["general.title"] = new()
+                {
+                    [AppLanguage.English] = "General",
+                    [AppLanguage.Polish] = "Ogólne",
+                    [AppLanguage.Turkish] = "Genel",
+                    [AppLanguage.German] = "Allgemein",
+                    [AppLanguage.Spanish] = "General",
+                },
+                ["general.lfsfolder"] = new()
+                {
+                    [AppLanguage.English] = "LFS game folder",
+                    [AppLanguage.Polish] = "Folder gry LFS",
+                    [AppLanguage.Turkish] = "LFS oyun klasörü",
+                    [AppLanguage.German] = "LFS-Spielordner",
+                    [AppLanguage.Spanish] = "Carpeta del juego LFS",
+                },
+                ["general.folder.notset"] = new()
+                {
+                    [AppLanguage.English] = "Not set",
+                    [AppLanguage.Polish] = "Nie ustawiono",
+                    [AppLanguage.Turkish] = "Ayarlanmadı",
+                    [AppLanguage.German] = "Nicht festgelegt",
+                    [AppLanguage.Spanish] = "No establecida",
+                },
+                ["general.browse"] = new()
+                {
+                    [AppLanguage.English] = "Browse…",
+                    [AppLanguage.Polish] = "Przeglądaj…",
+                    [AppLanguage.Turkish] = "Gözat…",
+                    [AppLanguage.German] = "Durchsuchen…",
+                    [AppLanguage.Spanish] = "Examinar…",
+                },
+                ["general.configure"] = new()
+                {
+                    [AppLanguage.English] = "Configure LFS cfg",
+                    [AppLanguage.Polish] = "Skonfiguruj LFS cfg",
+                    [AppLanguage.Turkish] = "LFS cfg yapılandır",
+                    [AppLanguage.German] = "LFS cfg konfigurieren",
+                    [AppLanguage.Spanish] = "Configurar LFS cfg",
+                },
+                ["general.configure.success"] = new()
+                {
+                    [AppLanguage.English] = "cfg.txt updated. Restart LFS for it to take effect.",
+                    [AppLanguage.Polish] = "Zaktualizowano cfg.txt. Zrestartuj LFS, aby zmiany zadziałały.",
+                    [AppLanguage.Turkish] = "cfg.txt güncellendi. Etkili olması için LFS'i yeniden başlatın.",
+                    [AppLanguage.German] = "cfg.txt aktualisiert. LFS neu starten, damit es wirksam wird.",
+                    [AppLanguage.Spanish] = "cfg.txt actualizado. Reinicia LFS para que surta efecto.",
+                },
+                ["general.configure.alreadyvalid"] = new()
+                {
+                    [AppLanguage.English] = "cfg.txt is already configured correctly.",
+                    [AppLanguage.Polish] = "Konfiguracja cfg.txt jest już poprawna.",
+                    [AppLanguage.Turkish] = "cfg.txt zaten doğru yapılandırılmış.",
+                    [AppLanguage.German] = "cfg.txt ist bereits korrekt konfiguriert.",
+                    [AppLanguage.Spanish] = "cfg.txt ya está configurado correctamente.",
+                },
+                ["general.configure.title"] = new()
+                {
+                    [AppLanguage.English] = "cfg.txt configuration",
+                    [AppLanguage.Polish] = "Konfiguracja cfg.txt",
+                    [AppLanguage.Turkish] = "cfg.txt yapılandırması",
+                    [AppLanguage.German] = "cfg.txt-Konfiguration",
+                    [AppLanguage.Spanish] = "Configuración de cfg.txt",
+                },
+                ["general.configure.nofolder"] = new()
+                {
+                    [AppLanguage.English] = "Set the LFS game folder first.",
+                    [AppLanguage.Polish] = "Najpierw ustaw folder gry LFS.",
+                    [AppLanguage.Turkish] = "Önce LFS oyun klasörünü ayarlayın.",
+                    [AppLanguage.German] = "Zuerst den LFS-Spielordner festlegen.",
+                    [AppLanguage.Spanish] = "Primero establece la carpeta del juego LFS.",
+                },
+                ["general.configure.error"] = new()
+                {
+                    [AppLanguage.English] = "Couldn't write cfg.txt: {0}",
+                    [AppLanguage.Polish] = "Nie udało się zapisać cfg.txt: {0}",
+                    [AppLanguage.Turkish] = "cfg.txt yazılamadı: {0}",
+                    [AppLanguage.German] = "cfg.txt konnte nicht geschrieben werden: {0}",
+                    [AppLanguage.Spanish] = "No se pudo escribir cfg.txt: {0}",
+                },
+                ["controllerassist.title"] = new()
+                {
+                    [AppLanguage.English] = "Controller Assist",
+                    [AppLanguage.Polish] = "Wspomaganie kontrolera",
+                    [AppLanguage.Turkish] = "Kontrolör Yardımı",
+                    [AppLanguage.German] = "Controller-Assistenz",
+                    [AppLanguage.Spanish] = "Asistencia de mando",
+                },
+                ["controllerassist.locked"] = new()
+                {
+                    [AppLanguage.English] = "Requires a supported controller (currently: Xbox/XInput). Select it in Wheel Setup.",
+                    [AppLanguage.Polish] = "Wymaga obsługiwanego kontrolera (obecnie: Xbox/XInput). Wybierz go w konfiguracji kierownicy.",
+                    [AppLanguage.Turkish] = "Desteklenen bir kontrolör gerekir (şu an: Xbox/XInput). Wheel Setup'tan seçin.",
+                    [AppLanguage.German] = "Erfordert einen unterstützten Controller (derzeit: Xbox/XInput). In den Lenkrad-Einstellungen auswählen.",
+                    [AppLanguage.Spanish] = "Requiere un mando compatible (actualmente: Xbox/XInput). Selecciónalo en la configuración del volante.",
+                },
+                ["controllerassist.locked.outsim"] = new()
+                {
+                    [AppLanguage.English] = "Requires the OutSim2 connection to be enabled.",
+                    [AppLanguage.Polish] = "Wymaga włączonego połączenia OutSim2.",
+                    [AppLanguage.Turkish] = "OutSim2 bağlantısının etkin olması gerekir.",
+                    [AppLanguage.German] = "Erfordert eine aktivierte OutSim2-Verbindung.",
+                    [AppLanguage.Spanish] = "Requiere que la conexión OutSim2 esté activada.",
+                },
+                ["controllerassist.connected"] = new()
+                {
+                    [AppLanguage.English] = "Connected controller: {0}",
+                    [AppLanguage.Polish] = "Podłączony kontroler: {0}",
+                    [AppLanguage.Turkish] = "Bağlı kontrolör: {0}",
+                    [AppLanguage.German] = "Verbundener Controller: {0}",
+                    [AppLanguage.Spanish] = "Mando conectado: {0}",
+                },
+                ["controllerassist.autoselected"] = new()
+                {
+                    [AppLanguage.English] = "Controller Assist auto-selected controller: {0}",
+                    [AppLanguage.Polish] = "Controller Assist automatycznie wybrał kontroler: {0}",
+                    [AppLanguage.Turkish] = "Controller Assist kontrolörü otomatik seçti: {0}",
+                    [AppLanguage.German] = "Controller Assist hat den Controller automatisch ausgewählt: {0}",
+                    [AppLanguage.Spanish] = "Controller Assist seleccionó automáticamente el mando: {0}",
+                },
+                ["controllerassist.steeringassist"] = new()
+                {
+                    [AppLanguage.English] = "Steering Assist",
+                    [AppLanguage.Polish] = "Wspomaganie skrętu",
+                    [AppLanguage.Turkish] = "Direksiyon Yardımı",
+                    [AppLanguage.German] = "Lenkassistent",
+                    [AppLanguage.Spanish] = "Asistencia de dirección",
+                },
+                ["controllerassist.vibration"] = new()
+                {
+                    [AppLanguage.English] = "Vibration",
+                    [AppLanguage.Polish] = "Wibracje",
+                    [AppLanguage.Turkish] = "Titreşim",
+                    [AppLanguage.German] = "Vibration",
+                    [AppLanguage.Spanish] = "Vibración",
+                },
+                ["controllerassist.vibrationstrength"] = new()
+                {
+                    [AppLanguage.English] = "Vibration strength",
+                    [AppLanguage.Polish] = "Siła wibracji",
+                    [AppLanguage.Turkish] = "Titreşim gücü",
+                    [AppLanguage.German] = "Vibrationsstärke",
+                    [AppLanguage.Spanish] = "Intensidad de vibración",
+                },
+                ["controllerassist.group.telemetry"] = new()
+                {
+                    [AppLanguage.English] = "TELEMETRY",
+                    [AppLanguage.Polish] = "TELEMETRIA",
+                    [AppLanguage.Turkish] = "TELEMETRİ",
+                    [AppLanguage.German] = "TELEMETRIE",
+                    [AppLanguage.Spanish] = "TELEMETRÍA",
+                },
+                ["controllerassist.group.vibration"] = new()
+                {
+                    [AppLanguage.English] = "VIBRATION",
+                    [AppLanguage.Polish] = "WIBRACJE",
+                    [AppLanguage.Turkish] = "TİTREŞİM",
+                    [AppLanguage.German] = "VIBRATION",
+                    [AppLanguage.Spanish] = "VIBRACIÓN",
+                },
+                ["controllerassist.group.controller"] = new()
+                {
+                    [AppLanguage.English] = "CONTROLLER",
+                    [AppLanguage.Polish] = "KONTROLER",
+                    [AppLanguage.Turkish] = "KONTROLÖR",
+                    [AppLanguage.German] = "CONTROLLER",
+                    [AppLanguage.Spanish] = "MANDO",
+                },
+                ["controllerassist.group.drivers"] = new()
+                {
+                    [AppLanguage.English] = "DRIVERS",
+                    [AppLanguage.Polish] = "STEROWNIKI",
+                    [AppLanguage.Turkish] = "SÜRÜCÜLER",
+                    [AppLanguage.German] = "TREIBER",
+                    [AppLanguage.Spanish] = "CONTROLADORES",
+                },
+                ["controllerassist.hidepad"] = new()
+                {
+                    [AppLanguage.English] = "Hide physical pad from other apps",
+                    [AppLanguage.Polish] = "Ukryj fizyczny pad przed innymi aplikacjami",
+                    [AppLanguage.Turkish] = "Fiziksel kumandayı diğer uygulamalardan gizle",
+                    [AppLanguage.German] = "Physisches Pad vor anderen Apps verbergen",
+                    [AppLanguage.Spanish] = "Ocultar el mando físico de otras aplicaciones",
+                },
+                ["controllerassist.preset"] = new()
+                {
+                    [AppLanguage.English] = "Preset",
+                    [AppLanguage.Polish] = "Preset",
+                    [AppLanguage.Turkish] = "Hazır Ayar",
+                    [AppLanguage.German] = "Preset",
+                    [AppLanguage.Spanish] = "Preset",
+                },
+                ["controllerassist.preset.off"] = new()
+                {
+                    [AppLanguage.English] = "Off",
+                    [AppLanguage.Polish] = "Wył.",
+                    [AppLanguage.Turkish] = "Kapalı",
+                    [AppLanguage.German] = "Aus",
+                    [AppLanguage.Spanish] = "Apagado",
+                },
+                ["controllerassist.preset.light"] = new()
+                {
+                    [AppLanguage.English] = "Light",
+                    [AppLanguage.Polish] = "Lekki",
+                    [AppLanguage.Turkish] = "Hafif",
+                    [AppLanguage.German] = "Leicht",
+                    [AppLanguage.Spanish] = "Ligero",
+                },
+                ["controllerassist.preset.medium"] = new()
+                {
+                    [AppLanguage.English] = "Medium",
+                    [AppLanguage.Polish] = "Średni",
+                    [AppLanguage.Turkish] = "Orta",
+                    [AppLanguage.German] = "Mittel",
+                    [AppLanguage.Spanish] = "Medio",
+                },
+                ["controllerassist.preset.strong"] = new()
+                {
+                    [AppLanguage.English] = "Strong",
+                    [AppLanguage.Polish] = "Mocny",
+                    [AppLanguage.Turkish] = "Güçlü",
+                    [AppLanguage.German] = "Stark",
+                    [AppLanguage.Spanish] = "Fuerte",
+                },
+                ["controllerassist.overlaybar"] = new()
+                {
+                    [AppLanguage.English] = "Show steering bar in-game",
+                    [AppLanguage.Polish] = "Pokaż pasek skrętu w grze",
+                    [AppLanguage.Turkish] = "Oyun içi direksiyon çubuğunu göster",
+                    [AppLanguage.German] = "Lenkbalken im Spiel anzeigen",
+                    [AppLanguage.Spanish] = "Mostrar barra de dirección en el juego",
+                },
+                ["controllerassist.trim.countersteer"] = new()
+                {
+                    [AppLanguage.English] = "Countersteer trim",
+                    [AppLanguage.Polish] = "Trym przeciwskrętu",
+                    [AppLanguage.Turkish] = "Karşı direksiyon ince ayarı",
+                    [AppLanguage.German] = "Gegenlenk-Trimm",
+                    [AppLanguage.Spanish] = "Ajuste de contravolante",
+                },
+                ["controllerassist.trim.strength"] = new()
+                {
+                    [AppLanguage.English] = "Assist strength trim",
+                    [AppLanguage.Polish] = "Trym siły wspomagania",
+                    [AppLanguage.Turkish] = "Yardım gücü ince ayarı",
+                    [AppLanguage.German] = "Assistenzstärke-Trimm",
+                    [AppLanguage.Spanish] = "Ajuste de intensidad de asistencia",
+                },
+                ["controllerassist.tuning.button"] = new()
+                {
+                    [AppLanguage.English] = "Steering Tuning…",
+                    [AppLanguage.Polish] = "Strojenie asysty…",
+                    [AppLanguage.Turkish] = "Direksiyon Ayarları…",
+                    [AppLanguage.German] = "Lenkabstimmung…",
+                    [AppLanguage.Spanish] = "Ajuste de dirección…",
+                },
+                ["controllerassist.rumble.button"] = new()
+                {
+                    [AppLanguage.English] = "Rumble Channels…",
+                    [AppLanguage.Polish] = "Strojenie wibracji…",
+                    [AppLanguage.Turkish] = "Titreşim Kanalları…",
+                    [AppLanguage.German] = "Vibrationskanäle…",
+                    [AppLanguage.Spanish] = "Canales de vibración…",
+                },
+                ["controllerassist.pad.connected"] = new()
+                {
+                    [AppLanguage.English] = "⬤  Pad connected",
+                    [AppLanguage.Polish] = "⬤  Pad podłączony",
+                    [AppLanguage.Turkish] = "⬤  Kontrolör bağlı",
+                    [AppLanguage.German] = "⬤  Pad verbunden",
+                    [AppLanguage.Spanish] = "⬤  Mando conectado",
+                },
+                ["controllerassist.pad.disconnected"] = new()
+                {
+                    [AppLanguage.English] = "⬤  Pad not connected",
+                    [AppLanguage.Polish] = "⬤  Pad niepodłączony",
+                    [AppLanguage.Turkish] = "⬤  Kontrolör bağlı değil",
+                    [AppLanguage.German] = "⬤  Pad nicht verbunden",
+                    [AppLanguage.Spanish] = "⬤  Mando no conectado",
+                },
+                ["drivers.status.installed"] = new()
+                {
+                    [AppLanguage.English] = "Installed",
+                    [AppLanguage.Polish] = "Zainstalowany",
+                    [AppLanguage.Turkish] = "Kurulu",
+                    [AppLanguage.German] = "Installiert",
+                    [AppLanguage.Spanish] = "Instalado",
+                },
+                ["drivers.status.notinstalled"] = new()
+                {
+                    [AppLanguage.English] = "Not installed",
+                    [AppLanguage.Polish] = "Niezainstalowany",
+                    [AppLanguage.Turkish] = "Kurulu değil",
+                    [AppLanguage.German] = "Nicht installiert",
+                    [AppLanguage.Spanish] = "No instalado",
+                },
+                ["drivers.status.installing"] = new()
+                {
+                    [AppLanguage.English] = "Installing…",
+                    [AppLanguage.Polish] = "Instalowanie…",
+                    [AppLanguage.Turkish] = "Kuruluyor…",
+                    [AppLanguage.German] = "Installiere…",
+                    [AppLanguage.Spanish] = "Instalando…",
+                },
+                ["drivers.button.install"] = new()
+                {
+                    [AppLanguage.English] = "Install",
+                    [AppLanguage.Polish] = "Zainstaluj",
+                    [AppLanguage.Turkish] = "Kur",
+                    [AppLanguage.German] = "Installieren",
+                    [AppLanguage.Spanish] = "Instalar",
+                },
+                ["drivers.install_success"] = new()
+                {
+                    [AppLanguage.English] = "Driver installed successfully.",
+                    [AppLanguage.Polish] = "Sterownik zainstalowany pomyślnie.",
+                    [AppLanguage.Turkish] = "Sürücü başarıyla kuruldu.",
+                    [AppLanguage.German] = "Treiber erfolgreich installiert.",
+                    [AppLanguage.Spanish] = "Controlador instalado correctamente.",
+                },
+                ["drivers.install_failed_verify"] = new()
+                {
+                    [AppLanguage.English] = "Installer finished, but the driver still isn't detected. A restart might be required.",
+                    [AppLanguage.Polish] = "Instalator zakończył pracę, ale sterownik nadal nie jest wykrywany. Może być potrzebny restart.",
+                    [AppLanguage.Turkish] = "Kurulum tamamlandı, ancak sürücü hâlâ algılanmıyor. Yeniden başlatma gerekebilir.",
+                    [AppLanguage.German] = "Installation abgeschlossen, aber der Treiber wird weiterhin nicht erkannt. Ein Neustart könnte nötig sein.",
+                    [AppLanguage.Spanish] = "El instalador terminó, pero el controlador sigue sin detectarse. Puede requerirse un reinicio.",
+                },
+                ["drivers.install_cancelled"] = new()
+                {
+                    [AppLanguage.English] = "Installation cancelled.",
+                    [AppLanguage.Polish] = "Instalacja anulowana.",
+                    [AppLanguage.Turkish] = "Kurulum iptal edildi.",
+                    [AppLanguage.German] = "Installation abgebrochen.",
+                    [AppLanguage.Spanish] = "Instalación cancelada.",
+                },
+                ["drivers.install_failed_exception_detail"] = new()
+                {
+                    [AppLanguage.English] = "Installation failed: {0}",
+                    [AppLanguage.Polish] = "Instalacja nie powiodła się: {0}",
+                    [AppLanguage.Turkish] = "Kurulum başarısız oldu: {0}",
+                    [AppLanguage.German] = "Installation fehlgeschlagen: {0}",
+                    [AppLanguage.Spanish] = "La instalación falló: {0}",
+                },
+                ["drivers.installer_missing"] = new()
+                {
+                    [AppLanguage.English] = "Bundled installer file is missing.",
+                    [AppLanguage.Polish] = "Brakuje dołączonego pliku instalatora.",
+                    [AppLanguage.Turkish] = "Paketlenmiş kurulum dosyası eksik.",
+                    [AppLanguage.German] = "Die mitgelieferte Installationsdatei fehlt.",
+                    [AppLanguage.Spanish] = "Falta el archivo del instalador incluido.",
+                },
+                ["controllerassist.hidhide.notinstalled"] = new()
+                {
+                    [AppLanguage.English] = "Can't hide the pad, HidHide isn't installed.",
+                    [AppLanguage.Polish] = "Nie można ukryć pada, HidHide nie jest zainstalowany.",
+                    [AppLanguage.Turkish] = "Kumanda gizlenemiyor, HidHide kurulu değil.",
+                    [AppLanguage.German] = "Pad kann nicht verborgen werden, HidHide ist nicht installiert.",
+                    [AppLanguage.Spanish] = "No se puede ocultar el mando, HidHide no está instalado.",
+                },
+                ["controllerassist.hidhide.ambiguous"] = new()
+                {
+                    [AppLanguage.English] = "Can't hide the pad, multiple XInput controllers are connected.",
+                    [AppLanguage.Polish] = "Nie można ukryć pada, podłączonych jest kilka kontrolerów XInput.",
+                    [AppLanguage.Turkish] = "Kumanda gizlenemiyor, birden fazla XInput kontrolörü bağlı.",
+                    [AppLanguage.German] = "Pad kann nicht verborgen werden, mehrere XInput-Controller sind angeschlossen.",
+                    [AppLanguage.Spanish] = "No se puede ocultar el mando, hay varios mandos XInput conectados.",
+                },
+                ["controllerassist.hidhide.error"] = new()
+                {
+                    [AppLanguage.English] = "Can't hide the pad: {0}",
+                    [AppLanguage.Polish] = "Nie można ukryć pada: {0}",
+                    [AppLanguage.Turkish] = "Kumanda gizlenemiyor: {0}",
+                    [AppLanguage.German] = "Pad kann nicht verborgen werden: {0}",
+                    [AppLanguage.Spanish] = "No se puede ocultar el mando: {0}",
+                },
+                ["controllerassist.hidhide.hidden"] = new()
+                {
+                    [AppLanguage.English] = "Physical pad hidden from other apps (still readable here).",
+                    [AppLanguage.Polish] = "Fizyczny pad ukryty przed innymi aplikacjami (nadal widoczny tutaj).",
+                    [AppLanguage.Turkish] = "Fiziksel kumanda diğer uygulamalardan gizlendi (burada hâlâ okunabiliyor).",
+                    [AppLanguage.German] = "Physisches Pad vor anderen Apps verborgen (hier weiterhin lesbar).",
+                    [AppLanguage.Spanish] = "Mando físico oculto de otras aplicaciones (sigue siendo legible aquí).",
+                },
+                ["lfsnotice.title.emulated"] = new()
+                {
+                    [AppLanguage.English] = "LFS is not using the assist pad",
+                    [AppLanguage.Polish] = "LFS nie używa pada asysty",
+                    [AppLanguage.Turkish] = "LFS asistan kumandasını kullanmıyor",
+                    [AppLanguage.German] = "LFS verwendet das Assist-Pad nicht",
+                    [AppLanguage.Spanish] = "LFS no usa el mando de asistencia",
+                },
+                ["lfsnotice.title.physical"] = new()
+                {
+                    [AppLanguage.English] = "LFS may have lost the controller",
+                    [AppLanguage.Polish] = "LFS mógł stracić kontroler",
+                    [AppLanguage.Turkish] = "LFS kontrolörü kaybetmiş olabilir",
+                    [AppLanguage.German] = "LFS hat möglicherweise den Controller verloren",
+                    [AppLanguage.Spanish] = "LFS puede haber perdido el mando",
+                },
+                ["lfsnotice.emulated.message"] = new()
+                {
+                    [AppLanguage.English] = "LFS was already running when Controller Assist started, so it still uses your physical pad and ignores the assist.",
+                    [AppLanguage.Polish] = "LFS działał już w chwili włączenia Controller Assist, więc nadal używa fizycznego pada i pomija asystę.",
+                    [AppLanguage.Turkish] = "Controller Assist başladığında LFS zaten çalışıyordu, bu yüzden hâlâ fiziksel kumandanızı kullanıyor ve asistanı yok sayıyor.",
+                    [AppLanguage.German] = "LFS lief bereits, als Controller Assist gestartet wurde, und nutzt daher weiterhin Ihr physisches Pad und ignoriert die Assistenz.",
+                    [AppLanguage.Spanish] = "LFS ya estaba en ejecución cuando se inició Controller Assist, por lo que sigue usando tu mando físico e ignora la asistencia.",
+                },
+                ["lfsnotice.physical.message"] = new()
+                {
+                    [AppLanguage.English] = "Controller Assist was turned off, so the emulated pad is gone and LFS may no longer see any controller.",
+                    [AppLanguage.Polish] = "Controller Assist został wyłączony, więc emulowany pad zniknął i LFS może nie widzieć żadnego kontrolera.",
+                    [AppLanguage.Turkish] = "Controller Assist kapatıldı, bu yüzden emüle edilen kumanda kayboldu ve LFS artık hiçbir kontrolörü görmüyor olabilir.",
+                    [AppLanguage.German] = "Controller Assist wurde ausgeschaltet, das emulierte Pad ist weg und LFS sieht möglicherweise keinen Controller mehr.",
+                    [AppLanguage.Spanish] = "Controller Assist se desactivó, el mando emulado ya no existe y LFS puede que no vea ningún mando.",
+                },
+                ["lfsnotice.steps"] = new()
+                {
+                    [AppLanguage.English] = "If the assist does not work, open Options > Controls in LFS (refresh the controller list if needed) and check that this emulated pad is selected:",
+                    [AppLanguage.Polish] = "Jeżeli asysta nie działa, wejdź w LFS w Options > Controls (w razie potrzeby odśwież listę kontrolerów) i sprawdź, czy wybrany jest ten emulowany pad:",
+                    [AppLanguage.Turkish] = "Asistan çalışmıyorsa, LFS'te Options > Controls bölümünü açın (gerekirse kontrolör listesini yenileyin) ve bu emüle edilen kumandanın seçili olduğunu kontrol edin:",
+                    [AppLanguage.German] = "Wenn die Assistenz nicht funktioniert, öffnen Sie in LFS Options > Controls (aktualisieren Sie bei Bedarf die Controller-Liste) und prüfen Sie, ob dieses emulierte Pad ausgewählt ist:",
+                    [AppLanguage.Spanish] = "Si la asistencia no funciona, abre Options > Controls en LFS (actualiza la lista de mandos si hace falta) y comprueba que este mando emulado esté seleccionado:",
+                },
+                ["lfsnotice.dontshow"] = new()
+                {
+                    [AppLanguage.English] = "Don't show this again",
+                    [AppLanguage.Polish] = "Nie pokazuj ponownie",
+                    [AppLanguage.Turkish] = "Bunu bir daha gösterme",
+                    [AppLanguage.German] = "Nicht erneut anzeigen",
+                    [AppLanguage.Spanish] = "No volver a mostrar",
+                },
+                ["lfsnotice.padname.guess"] = new()
+                {
+                    [AppLanguage.English] = "(typical name, check the list in LFS)",
+                    [AppLanguage.Polish] = "(typowa nazwa, sprawdź listę w LFS)",
+                    [AppLanguage.Turkish] = "(tipik ad, LFS'teki listeyi kontrol edin)",
+                    [AppLanguage.German] = "(typischer Name, bitte Liste in LFS prüfen)",
+                    [AppLanguage.Spanish] = "(nombre habitual, comprueba la lista en LFS)",
+                },
+                ["lfsnotice.hidenote"] = new()
+                {
+                    [AppLanguage.English] = "Tip: turn on \"Hide physical pad from other apps\" so LFS only sees one pad.",
+                    [AppLanguage.Polish] = "Wskazówka: włącz \"Ukryj fizyczny pad przed innymi aplikacjami\", żeby LFS widział tylko jeden pad.",
+                    [AppLanguage.Turkish] = "İpucu: LFS'in yalnızca tek bir kumanda görmesi için \"Fiziksel kumandayı diğer uygulamalardan gizle\" seçeneğini açın.",
+                    [AppLanguage.German] = "Tipp: Aktivieren Sie \"Physisches Pad vor anderen Apps verbergen\", damit LFS nur ein Pad sieht.",
+                    [AppLanguage.Spanish] = "Consejo: activa \"Ocultar el mando físico de otras aplicaciones\" para que LFS solo vea un mando.",
+                },
+                ["controllerassist.hidhide.restored"] = new()
+                {
+                    [AppLanguage.English] = "Physical pad visibility restored.",
+                    [AppLanguage.Polish] = "Przywrócono widoczność fizycznego pada.",
+                    [AppLanguage.Turkish] = "Fiziksel kumandanın görünürlüğü geri yüklendi.",
+                    [AppLanguage.German] = "Sichtbarkeit des physischen Pads wiederhergestellt.",
+                    [AppLanguage.Spanish] = "Visibilidad del mando físico restaurada.",
+                },
+                ["controllerassist.notification.on"] = new()
+                {
+                    [AppLanguage.English] = "Controller Assist: On",
+                    [AppLanguage.Polish] = "Controller Assist: Wł.",
+                    [AppLanguage.Turkish] = "Controller Assist: Açık",
+                    [AppLanguage.German] = "Controller Assist: Ein",
+                    [AppLanguage.Spanish] = "Controller Assist: Activado",
+                },
+                ["controllerassist.notification.off"] = new()
+                {
+                    [AppLanguage.English] = "Controller Assist: Off",
+                    [AppLanguage.Polish] = "Controller Assist: Wył.",
+                    [AppLanguage.Turkish] = "Controller Assist: Kapalı",
+                    [AppLanguage.German] = "Controller Assist: Aus",
+                    [AppLanguage.Spanish] = "Controller Assist: Desactivado",
+                },
+                ["controllerassist.tuning.title"] = new()
+                {
+                    [AppLanguage.English] = "Steering Tuning",
+                    [AppLanguage.Polish] = "Strojenie asysty",
+                    [AppLanguage.Turkish] = "Direksiyon Ayarları",
+                    [AppLanguage.German] = "Lenkabstimmung",
+                    [AppLanguage.Spanish] = "Ajuste de dirección",
+                },
+                ["controllerassist.tuning.deadzone"] = new()
+                {
+                    [AppLanguage.English] = "Deadzone",
+                    [AppLanguage.Polish] = "Martwa strefa",
+                    [AppLanguage.Turkish] = "Ölü bölge",
+                    [AppLanguage.German] = "Totzone",
+                    [AppLanguage.Spanish] = "Zona muerta",
+                },
+                ["controllerassist.tuning.responsecurve"] = new()
+                {
+                    [AppLanguage.English] = "Response curve",
+                    [AppLanguage.Polish] = "Krzywa reakcji",
+                    [AppLanguage.Turkish] = "Tepki eğrisi",
+                    [AppLanguage.German] = "Ansprechkurve",
+                    [AppLanguage.Spanish] = "Curva de respuesta",
+                },
+                ["controllerassist.tuning.speedref"] = new()
+                {
+                    [AppLanguage.English] = "Speed sensitivity ref.",
+                    [AppLanguage.Polish] = "Ref. czułości prędkości",
+                    [AppLanguage.Turkish] = "Hız hassasiyeti referansı",
+                    [AppLanguage.German] = "Geschw.-Empfindlichkeit Ref.",
+                    [AppLanguage.Spanish] = "Ref. sensibilidad a velocidad",
+                },
+                ["controllerassist.tuning.minhighspeed"] = new()
+                {
+                    [AppLanguage.English] = "Min. high-speed steer",
+                    [AppLanguage.Polish] = "Min. skręt przy dużej prędkości",
+                    [AppLanguage.Turkish] = "Min. yüksek hız direksiyonu",
+                    [AppLanguage.German] = "Min. Hochgeschw.-Lenkung",
+                    [AppLanguage.Spanish] = "Mín. giro a alta velocidad",
+                },
+                ["controllerassist.tuning.slipactivation"] = new()
+                {
+                    [AppLanguage.English] = "Slip activation",
+                    [AppLanguage.Polish] = "Aktywacja poślizgu",
+                    [AppLanguage.Turkish] = "Kayma etkinleştirme",
+                    [AppLanguage.German] = "Schlupf-Aktivierung",
+                    [AppLanguage.Spanish] = "Activación de deslizamiento",
+                },
+                ["controllerassist.tuning.slipfull"] = new()
+                {
+                    [AppLanguage.English] = "Slip full",
+                    [AppLanguage.Polish] = "Pełny poślizg",
+                    [AppLanguage.Turkish] = "Tam kayma",
+                    [AppLanguage.German] = "Schlupf voll",
+                    [AppLanguage.Spanish] = "Deslizamiento máximo",
+                },
+                ["controllerassist.tuning.countersteergain"] = new()
+                {
+                    [AppLanguage.English] = "Countersteer gain",
+                    [AppLanguage.Polish] = "Wzmocnienie przeciwskrętu",
+                    [AppLanguage.Turkish] = "Karşı direksiyon kazancı",
+                    [AppLanguage.German] = "Gegenlenk-Verstärkung",
+                    [AppLanguage.Spanish] = "Ganancia de contravolante",
+                },
+                ["controllerassist.tuning.assiststrength"] = new()
+                {
+                    [AppLanguage.English] = "Assist strength",
+                    [AppLanguage.Polish] = "Siła wspomagania",
+                    [AppLanguage.Turkish] = "Yardım gücü",
+                    [AppLanguage.German] = "Assistenzstärke",
+                    [AppLanguage.Spanish] = "Intensidad de asistencia",
+                },
+                ["controllerassist.tuning.minactivationspeed"] = new()
+                {
+                    [AppLanguage.English] = "Min. activation speed",
+                    [AppLanguage.Polish] = "Min. prędkość aktywacji",
+                    [AppLanguage.Turkish] = "Min. etkinleştirme hızı",
+                    [AppLanguage.German] = "Min. Aktivierungsgeschw.",
+                    [AppLanguage.Spanish] = "Vel. mín. de activación",
+                },
+                ["controllerassist.tuning.maxsteerrate"] = new()
+                {
+                    [AppLanguage.English] = "Max steer rate",
+                    [AppLanguage.Polish] = "Maks. tempo skrętu",
+                    [AppLanguage.Turkish] = "Maks. direksiyon hızı",
+                    [AppLanguage.German] = "Max. Lenkrate",
+                    [AppLanguage.Spanish] = "Vel. máx. de giro",
+                },
+                ["controllerassist.tuning.smoothing"] = new()
+                {
+                    [AppLanguage.English] = "Smoothing",
+                    [AppLanguage.Polish] = "Wygładzanie",
+                    [AppLanguage.Turkish] = "Yumuşatma",
+                    [AppLanguage.German] = "Glättung",
+                    [AppLanguage.Spanish] = "Suavizado",
+                },
+                ["controllerassist.tuning.selfcenter"] = new()
+                {
+                    [AppLanguage.English] = "Self-center strength",
+                    [AppLanguage.Polish] = "Siła samocentrowania",
+                    [AppLanguage.Turkish] = "Kendi kendine ortalama gücü",
+                    [AppLanguage.German] = "Selbstzentrierungsstärke",
+                    [AppLanguage.Spanish] = "Intensidad de autocentrado",
+                },
+                ["controllerassist.rumble.title"] = new()
+                {
+                    [AppLanguage.English] = "Rumble Channels",
+                    [AppLanguage.Polish] = "Strojenie wibracji",
+                    [AppLanguage.Turkish] = "Titreşim Kanalları",
+                    [AppLanguage.German] = "Vibrationskanäle",
+                    [AppLanguage.Spanish] = "Canales de vibración",
+                },
+                ["controllerassist.rumble.strength"] = new()
+                {
+                    [AppLanguage.English] = "Overall strength",
+                    [AppLanguage.Polish] = "Siła ogólna",
+                    [AppLanguage.Turkish] = "Genel güç",
+                    [AppLanguage.German] = "Gesamtstärke",
+                    [AppLanguage.Spanish] = "Intensidad general",
+                },
+                ["controllerassist.rumble.loadweight"] = new()
+                {
+                    [AppLanguage.English] = "Load weight",
+                    [AppLanguage.Polish] = "Waga obciążenia",
+                    [AppLanguage.Turkish] = "Yük ağırlığı",
+                    [AppLanguage.German] = "Lastgewicht",
+                    [AppLanguage.Spanish] = "Peso de carga",
+                },
+                ["controllerassist.rumble.roadweight"] = new()
+                {
+                    [AppLanguage.English] = "Road weight",
+                    [AppLanguage.Polish] = "Waga nawierzchni",
+                    [AppLanguage.Turkish] = "Yol ağırlığı",
+                    [AppLanguage.German] = "Straßengewicht",
+                    [AppLanguage.Spanish] = "Peso de carretera",
+                },
+                ["controllerassist.rumble.impactweight"] = new()
+                {
+                    [AppLanguage.English] = "Impact weight",
+                    [AppLanguage.Polish] = "Waga uderzeń",
+                    [AppLanguage.Turkish] = "Darbe ağırlığı",
+                    [AppLanguage.German] = "Aufprallgewicht",
+                    [AppLanguage.Spanish] = "Peso de impacto",
+                },
+                ["controllerassist.rumble.surfaceweight"] = new()
+                {
+                    [AppLanguage.English] = "Surface change weight",
+                    [AppLanguage.Polish] = "Waga zmiany nawierzchni",
+                    [AppLanguage.Turkish] = "Zemin değişimi ağırlığı",
+                    [AppLanguage.German] = "Untergrundwechsel-Gewicht",
+                    [AppLanguage.Spanish] = "Peso de cambio de superficie",
+                },
+                ["controllerassist.rumble.shiftweight"] = new()
+                {
+                    [AppLanguage.English] = "Gear shift weight",
+                    [AppLanguage.Polish] = "Waga zmiany biegu",
+                    [AppLanguage.Turkish] = "Vites değişimi ağırlığı",
+                    [AppLanguage.German] = "Schaltgewicht",
+                    [AppLanguage.Spanish] = "Peso de cambio de marcha",
+                },
+                ["controllerassist.rumble.jerksensitivity"] = new()
+                {
+                    [AppLanguage.English] = "Jerk sensitivity",
+                    [AppLanguage.Polish] = "Czułość na szarpnięcia",
+                    [AppLanguage.Turkish] = "Sarsıntı hassasiyeti",
+                    [AppLanguage.German] = "Ruck-Empfindlichkeit",
+                    [AppLanguage.Spanish] = "Sensibilidad a sacudidas",
+                },
+                ["controllerassist.rumble.loadslipactivation"] = new()
+                {
+                    [AppLanguage.English] = "Load slip activation",
+                    [AppLanguage.Polish] = "Aktywacja poślizgu (obciążenie)",
+                    [AppLanguage.Turkish] = "Yük kayma etkinleştirme",
+                    [AppLanguage.German] = "Lastschlupf-Aktivierung",
+                    [AppLanguage.Spanish] = "Activación de deslizamiento (carga)",
+                },
+                ["controllerassist.rumble.loadslipfull"] = new()
+                {
+                    [AppLanguage.English] = "Load slip full",
+                    [AppLanguage.Polish] = "Pełny poślizg (obciążenie)",
+                    [AppLanguage.Turkish] = "Yük kayma tam",
+                    [AppLanguage.German] = "Lastschlupf voll",
+                    [AppLanguage.Spanish] = "Deslizamiento máx. (carga)",
+                },
+                ["controllerassist.rumble.roadgain"] = new()
+                {
+                    [AppLanguage.English] = "Road gain",
+                    [AppLanguage.Polish] = "Wzmocnienie nawierzchni",
+                    [AppLanguage.Turkish] = "Yol kazancı",
+                    [AppLanguage.German] = "Straßenverstärkung",
+                    [AppLanguage.Spanish] = "Ganancia de carretera",
+                },
+                ["controllerassist.rumble.impactgain"] = new()
+                {
+                    [AppLanguage.English] = "Impact gain",
+                    [AppLanguage.Polish] = "Wzmocnienie uderzeń",
+                    [AppLanguage.Turkish] = "Darbe kazancı",
+                    [AppLanguage.German] = "Aufprallverstärkung",
+                    [AppLanguage.Spanish] = "Ganancia de impacto",
+                },
+                ["controllerassist.rumble.responsecurve"] = new()
+                {
+                    [AppLanguage.English] = "Response curve",
+                    [AppLanguage.Polish] = "Krzywa reakcji",
+                    [AppLanguage.Turkish] = "Tepki eğrisi",
+                    [AppLanguage.German] = "Ansprechkurve",
+                    [AppLanguage.Spanish] = "Curva de respuesta",
+                },
+                ["controllerassist.rumble.directionalbias"] = new()
+                {
+                    [AppLanguage.English] = "Directional bias",
+                    [AppLanguage.Polish] = "Odchylenie kierunkowe",
+                    [AppLanguage.Turkish] = "Yön eğilimi",
+                    [AppLanguage.German] = "Richtungs-Bias",
+                    [AppLanguage.Spanish] = "Sesgo direccional",
+                },
+                ["controllerassist.badge"] = new()
+                {
+                    [AppLanguage.English] = "🎮 Supports Assist",
+                    [AppLanguage.Polish] = "🎮 Obsługuje Assist",
+                    [AppLanguage.Turkish] = "🎮 Assist Destekler",
+                    [AppLanguage.German] = "🎮 Unterstützt Assist",
+                    [AppLanguage.Spanish] = "🎮 Compatible con Assist",
+                },
+                ["controllerassist.setup.button"] = new()
+                {
+                    [AppLanguage.English] = "Controller Setup",
+                    [AppLanguage.Polish] = "Konfiguracja kontrolera",
+                    [AppLanguage.Turkish] = "Kontrolör Kurulumu",
+                    [AppLanguage.German] = "Controller-Einrichtung",
+                    [AppLanguage.Spanish] = "Configuración del mando",
+                },
+                ["inputcontroller.title"] = new()
+                {
+                    [AppLanguage.English] = "Input Device",
+                    [AppLanguage.Polish] = "Urządzenie wejściowe",
+                    [AppLanguage.Turkish] = "Giriş Cihazı",
+                    [AppLanguage.German] = "Eingabegerät",
+                    [AppLanguage.Spanish] = "Dispositivo de entrada",
+                },
+                ["inputcontroller.none"] = new()
+                {
+                    [AppLanguage.English] = "No devices detected",
+                    [AppLanguage.Polish] = "Nie wykryto urządzeń",
+                    [AppLanguage.Turkish] = "Cihaz algılanmadı",
+                    [AppLanguage.German] = "Keine Geräte erkannt",
+                    [AppLanguage.Spanish] = "No se detectaron dispositivos",
+                },
+                ["controllerassist.telemetry.speed"] = new()
+                {
+                    [AppLanguage.English] = "SPEED",
+                    [AppLanguage.Polish] = "PRĘDKOŚĆ",
+                    [AppLanguage.Turkish] = "HIZ",
+                    [AppLanguage.German] = "GESCHWINDIGKEIT",
+                    [AppLanguage.Spanish] = "VELOCIDAD",
+                },
+                ["controllerassist.telemetry.rearslip"] = new()
+                {
+                    [AppLanguage.English] = "REAR SLIP",
+                    [AppLanguage.Polish] = "POŚLIZG TYŁU",
+                    [AppLanguage.Turkish] = "ARKA KAYMA",
+                    [AppLanguage.German] = "HECK-SCHLUPF",
+                    [AppLanguage.Spanish] = "DESLIZ. TRASERO",
+                },
+                ["controllerassist.telemetry.rawsteer"] = new()
+                {
+                    [AppLanguage.English] = "RAW STEER",
+                    [AppLanguage.Polish] = "SUROWY SKRĘT",
+                    [AppLanguage.Turkish] = "HAM DİREKSİYON",
+                    [AppLanguage.German] = "ROHLENKUNG",
+                    [AppLanguage.Spanish] = "GIRO CRUDO",
+                },
+                ["controllerassist.telemetry.output"] = new()
+                {
+                    [AppLanguage.English] = "OUTPUT",
+                    [AppLanguage.Polish] = "WYJŚCIE",
+                    [AppLanguage.Turkish] = "ÇIKIŞ",
+                    [AppLanguage.German] = "AUSGABE",
+                    [AppLanguage.Spanish] = "SALIDA",
+                },
+                ["controllerassist.telemetry.contribution"] = new()
+                {
+                    [AppLanguage.English] = "ASSIST CONTRIBUTION",
+                    [AppLanguage.Polish] = "UDZIAŁ ASYSTY",
+                    [AppLanguage.Turkish] = "ASİST KATKISI",
+                    [AppLanguage.German] = "ASSIST-ANTEIL",
+                    [AppLanguage.Spanish] = "CONTRIB. ASISTENCIA",
+                },
+                ["controllerassist.telemetry.vibration"] = new()
+                {
+                    [AppLanguage.English] = "VIBRATION L / R",
+                    [AppLanguage.Polish] = "WIBRACJA L / P",
+                    [AppLanguage.Turkish] = "TİTREŞİM SOL / SAĞ",
+                    [AppLanguage.German] = "VIBRATION L / R",
+                    [AppLanguage.Spanish] = "VIBRACIÓN I / D",
+                },
+                ["controllerassist.nopad"] = new()
+                {
+                    [AppLanguage.English] = "Controller Assist: no supported (XInput) controller connected.",
+                    [AppLanguage.Polish] = "Controller Assist: brak podłączonego obsługiwanego kontrolera (XInput).",
+                    [AppLanguage.Turkish] = "Controller Assist: desteklenen (XInput) bir kontrolör bağlı değil.",
+                    [AppLanguage.German] = "Controller Assist: kein unterstützter (XInput-)Controller verbunden.",
+                    [AppLanguage.Spanish] = "Controller Assist: no hay ningún mando compatible (XInput) conectado.",
+                },
+                ["controllerassist.vigembus_missing"] = new()
+                {
+                    [AppLanguage.English] = "Virtual pad unavailable. Install the ViGEmBus driver ({0}). Details: {1}",
+                    [AppLanguage.Polish] = "Wirtualny pad niedostępny. Zainstaluj sterownik ViGEmBus ({0}). Szczegóły: {1}",
+                    [AppLanguage.Turkish] = "Sanal pad kullanılamıyor. ViGEmBus sürücüsünü kurun ({0}). Ayrıntılar: {1}",
+                    [AppLanguage.German] = "Virtueller Controller nicht verfügbar. ViGEmBus-Treiber installieren ({0}). Details: {1}",
+                    [AppLanguage.Spanish] = "Mando virtual no disponible. Instala el controlador ViGEmBus ({0}). Detalles: {1}",
+                },
+                ["ingamesettings.hint"] = new()
+                {
+                    [AppLanguage.English] = "Ctrl+D to toggle · Esc to close",
+                    [AppLanguage.Polish] = "Ctrl+D przełącza · Esc zamyka",
+                    [AppLanguage.Turkish] = "Ctrl+D ile aç/kapat · Esc ile kapat",
+                    [AppLanguage.German] = "Strg+D umschalten · Esc schließen",
+                    [AppLanguage.Spanish] = "Ctrl+D para alternar · Esc para cerrar",
+                },
                 ["status.outgauge.disconnected"] = new()
                 {
                     [AppLanguage.English] = "⬤  Disconnected OutGauge",
@@ -147,6 +1067,22 @@ namespace LFSDriftBuddy
                     [AppLanguage.German] = "⬤  OutGauge verbunden",
                     [AppLanguage.Spanish] = "⬤  OutGauge conectado",
                 },
+                ["status.title"] = new()
+                {
+                    [AppLanguage.English] = "Warnings & Events",
+                    [AppLanguage.Polish] = "Ostrzeżenia i zdarzenia",
+                    [AppLanguage.Turkish] = "Uyarılar ve Olaylar",
+                    [AppLanguage.German] = "Warnungen & Ereignisse",
+                    [AppLanguage.Spanish] = "Avisos y eventos",
+                },
+                ["status.clear"] = new()
+                {
+                    [AppLanguage.English] = "Clear",
+                    [AppLanguage.Polish] = "Wyczyść",
+                    [AppLanguage.Turkish] = "Temizle",
+                    [AppLanguage.German] = "Löschen",
+                    [AppLanguage.Spanish] = "Borrar",
+                },
                 ["status.hint"] = new()
                 {
                     [AppLanguage.English] = "Type /insim 29999 in LFS, and click CONNECT.",
@@ -157,11 +1093,11 @@ namespace LFSDriftBuddy
                 },
                 ["status.insim.connect_timeout"] = new()
                 {
-                    [AppLanguage.English] = "Failed to connect to {0}:{1} — timed out ({2}s).",
-                    [AppLanguage.Polish] = "Nie udało się połączyć z {0}:{1} — przekroczono limit czasu ({2}s).",
-                    [AppLanguage.Turkish] = "{0}:{1} adresine bağlanılamadı — zaman aşımı ({2}s).",
-                    [AppLanguage.German] = "Verbindung zu {0}:{1} fehlgeschlagen — Zeitüberschreitung ({2}s).",
-                    [AppLanguage.Spanish] = "No se pudo conectar a {0}:{1} — tiempo de espera agotado ({2}s).",
+                    [AppLanguage.English] = "Failed to connect to {0}:{1}, timed out ({2}s).",
+                    [AppLanguage.Polish] = "Nie udało się połączyć z {0}:{1}, przekroczono limit czasu ({2}s).",
+                    [AppLanguage.Turkish] = "{0}:{1} adresine bağlanılamadı, zaman aşımı ({2}s).",
+                    [AppLanguage.German] = "Verbindung zu {0}:{1} fehlgeschlagen, Zeitüberschreitung ({2}s).",
+                    [AppLanguage.Spanish] = "No se pudo conectar a {0}:{1}, tiempo de espera agotado ({2}s).",
                 },
                 ["status.insim.connect_error"] = new()
                 {
@@ -227,6 +1163,46 @@ namespace LFSDriftBuddy
                     [AppLanguage.German] = "UDP {0} konnte nicht geöffnet werden: {1}",
                     [AppLanguage.Spanish] = "No se pudo abrir UDP {0}: {1}",
                 },
+                ["status.outsim.disconnected"] = new()
+                {
+                    [AppLanguage.English] = "⬤  Disconnected OutSim2",
+                    [AppLanguage.Polish] = "⬤  Rozłączono OutSim2",
+                    [AppLanguage.Turkish] = "⬤  OutSim2 Bağlı Değil",
+                    [AppLanguage.German] = "⬤  OutSim2 getrennt",
+                    [AppLanguage.Spanish] = "⬤  OutSim2 desconectado",
+                },
+                ["status.outsim.listening"] = new()
+                {
+                    [AppLanguage.English] = "⬤  Listening on port {0}, no packets yet",
+                    [AppLanguage.Polish] = "⬤  Nasłuchuje na porcie {0}, brak pakietów",
+                    [AppLanguage.Turkish] = "⬤  {0} portunda dinleniyor, henüz paket yok",
+                    [AppLanguage.German] = "⬤  Hört auf Port {0}, noch keine Pakete",
+                    [AppLanguage.Spanish] = "⬤  Escuchando en el puerto {0}, sin paquetes aún",
+                },
+                ["status.outsim.receiving"] = new()
+                {
+                    [AppLanguage.English] = "⬤  Connected OutSim2 ({0} packets)",
+                    [AppLanguage.Polish] = "⬤  Połączono OutSim2 ({0} pakietów)",
+                    [AppLanguage.Turkish] = "⬤  OutSim2 bağlı ({0} paket)",
+                    [AppLanguage.German] = "⬤  OutSim2 verbunden ({0} Pakete)",
+                    [AppLanguage.Spanish] = "⬤  OutSim2 conectado ({0} paquetes)",
+                },
+                ["status.outsim.receive_error"] = new()
+                {
+                    [AppLanguage.English] = "OutSim2 error: {0}",
+                    [AppLanguage.Polish] = "Błąd OutSim2: {0}",
+                    [AppLanguage.Turkish] = "OutSim2 hatası: {0}",
+                    [AppLanguage.German] = "OutSim2-Fehler: {0}",
+                    [AppLanguage.Spanish] = "Error de OutSim2: {0}",
+                },
+                ["status.outsim.opts_mismatch"] = new()
+                {
+                    [AppLanguage.English] = "Received an OutSim2 packet ({0} B) that doesn't match the configured Opts.",
+                    [AppLanguage.Polish] = "Odebrano pakiet OutSim2 ({0} B), który nie pasuje do skonfigurowanych Opts.",
+                    [AppLanguage.Turkish] = "Yapılandırılan Opts ile eşleşmeyen bir OutSim2 paketi alındı ({0} B).",
+                    [AppLanguage.German] = "Ein OutSim2-Paket ({0} B) wurde empfangen, das nicht zu den konfigurierten Opts passt.",
+                    [AppLanguage.Spanish] = "Se recibió un paquete OutSim2 ({0} B) que no coincide con los Opts configurados.",
+                },
                 ["status.outgauge.receive_error"] = new()
                 {
                     [AppLanguage.English] = "OutGauge error: {0}",
@@ -237,11 +1213,11 @@ namespace LFSDriftBuddy
                 },
                 ["status.revlimiter.forced_restore"] = new()
                 {
-                    [AppLanguage.English] = "Rev limiter: forcing ignition back on ({0}) — engine got stuck off.",
-                    [AppLanguage.Polish] = "Rev limiter: wymuszam przywrócenie zapłonu ({0}) — silnik utknął zgaszony.",
-                    [AppLanguage.Turkish] = "Devir limiteri: kontak zorla açılıyor ({0}) — motor kapalı takıldı.",
-                    [AppLanguage.German] = "Drehzahlbegrenzer: erzwinge Zündung wieder ein ({0}) — Motor blieb aus.",
-                    [AppLanguage.Spanish] = "Limitador de revoluciones: forzando el encendido ({0}) — el motor se quedó apagado.",
+                    [AppLanguage.English] = "Rev limiter: forcing ignition back on ({0}), engine got stuck off.",
+                    [AppLanguage.Polish] = "Rev limiter: wymuszam przywrócenie zapłonu ({0}), silnik utknął zgaszony.",
+                    [AppLanguage.Turkish] = "Devir limiteri: kontak zorla açılıyor ({0}), motor kapalı takıldı.",
+                    [AppLanguage.German] = "Drehzahlbegrenzer: erzwinge Zündung wieder ein ({0}), Motor blieb aus.",
+                    [AppLanguage.Spanish] = "Limitador de revoluciones: forzando el encendido ({0}), el motor se quedó apagado.",
                 },
                 ["status.revlimiter.no_window"] = new()
                 {
@@ -285,11 +1261,43 @@ namespace LFSDriftBuddy
                 },
                 ["connection.outgauge.subtitle"] = new()
                 {
-                    [AppLanguage.English] = "Listens locally for LFS's OutGauge broadcast (no host needed) — match the port to OutGauge Port in LFS cfg.txt.",
-                    [AppLanguage.Polish] = "Nasłuchuje lokalnie transmisji OutGauge z LFS (host nie jest potrzebny) — dopasuj port do OutGauge Port w cfg.txt LFS.",
-                    [AppLanguage.Turkish] = "LFS'in OutGauge yayınını yerel olarak dinler (host gerekmez) — portu LFS cfg.txt dosyasındaki OutGauge Port ile eşleştirin.",
-                    [AppLanguage.German] = "Empfängt lokal die OutGauge-Übertragung von LFS (kein Host nötig) — den Port an OutGauge Port in der LFS cfg.txt anpassen.",
+                    [AppLanguage.English] = "Listens locally for LFS's OutGauge broadcast (no host needed); match the port to OutGauge Port in LFS cfg.txt.",
+                    [AppLanguage.Polish] = "Nasłuchuje lokalnie transmisji OutGauge z LFS (host nie jest potrzebny); dopasuj port do OutGauge Port w cfg.txt LFS.",
+                    [AppLanguage.Turkish] = "LFS'in OutGauge yayınını yerel olarak dinler (host gerekmez); portu LFS cfg.txt dosyasındaki OutGauge Port ile eşleştirin.",
+                    [AppLanguage.German] = "Empfängt lokal die OutGauge-Übertragung von LFS (kein Host nötig); den Port an OutGauge Port in der LFS cfg.txt anpassen.",
                     [AppLanguage.Spanish] = "Escucha localmente la transmisión OutGauge de LFS (no se necesita host); haz coincidir el puerto con OutGauge Port en cfg.txt de LFS.",
+                },
+                ["connection.outsim.title"] = new()
+                {
+                    [AppLanguage.English] = "OutSim2 Connection",
+                    [AppLanguage.Polish] = "Połączenie OutSim2",
+                    [AppLanguage.Turkish] = "OutSim2 Bağlantısı",
+                    [AppLanguage.German] = "OutSim2-Verbindung",
+                    [AppLanguage.Spanish] = "Conexión OutSim2",
+                },
+                ["connection.outsim.subtitle"] = new()
+                {
+                    [AppLanguage.English] = "Listens locally for LFS's extended OutSim telemetry; Opts (hex) must match OutSim Opts in cfg.txt exactly.",
+                    [AppLanguage.Polish] = "Nasłuchuje lokalnie rozszerzonej telemetrii OutSim z LFS; Opts (hex) musi dokładnie odpowiadać OutSim Opts w cfg.txt.",
+                    [AppLanguage.Turkish] = "LFS'in genişletilmiş OutSim telemetrisini yerel olarak dinler; Opts (hex) cfg.txt içindeki OutSim Opts ile birebir eşleşmeli.",
+                    [AppLanguage.German] = "Empfängt lokal die erweiterte OutSim-Telemetrie von LFS; Opts (hex) muss genau zu OutSim Opts in cfg.txt passen.",
+                    [AppLanguage.Spanish] = "Escucha localmente la telemetría OutSim extendida de LFS; Opts (hex) debe coincidir exactamente con OutSim Opts en cfg.txt.",
+                },
+                ["connection.outsim.opts"] = new()
+                {
+                    [AppLanguage.English] = "Opts (hex)",
+                    [AppLanguage.Polish] = "Opts (hex)",
+                    [AppLanguage.Turkish] = "Opts (hex)",
+                    [AppLanguage.German] = "Opts (hex)",
+                    [AppLanguage.Spanish] = "Opts (hex)",
+                },
+                ["connection.outsim.badopts"] = new()
+                {
+                    [AppLanguage.English] = "Invalid Opts value '{0}', must be hex (e.g. bf).",
+                    [AppLanguage.Polish] = "Nieprawidłowa wartość Opts '{0}', musi być hex (np. bf).",
+                    [AppLanguage.Turkish] = "Geçersiz Opts değeri '{0}', hex olmalı (örn. bf).",
+                    [AppLanguage.German] = "Ungültiger Opts-Wert '{0}', muss hexadezimal sein (z. B. bf).",
+                    [AppLanguage.Spanish] = "Valor de Opts no válido '{0}': debe ser hexadecimal (p. ej. bf).",
                 },
                 ["connection.status"] = new()
                 {
@@ -975,10 +1983,10 @@ namespace LFSDriftBuddy
                 },
                 ["hud.show.subtitle"] = new()
                 {
-                    [AppLanguage.English] = "Uses LFS's native IS_BTN buttons instead — works even without a transparent overlay window, but only supports 10 fixed colors.",
-                    [AppLanguage.Polish] = "Używa natywnych przycisków IS_BTN z LFS zamiast nakładki — działa nawet bez przezroczystego okna, ale obsługuje tylko 10 stałych kolorów.",
-                    [AppLanguage.Turkish] = "Bunun yerine LFS'in yerel IS_BTN düğmelerini kullanır — şeffaf katman olmadan da çalışır, ancak yalnızca 10 sabit rengi destekler.",
-                    [AppLanguage.German] = "Verwendet stattdessen die nativen IS_BTN-Schaltflächen von LFS — funktioniert auch ohne transparentes Overlay-Fenster, unterstützt aber nur 10 feste Farben.",
+                    [AppLanguage.English] = "Uses LFS's native IS_BTN buttons instead, works even without a transparent overlay window, but only supports 10 fixed colors.",
+                    [AppLanguage.Polish] = "Używa natywnych przycisków IS_BTN z LFS zamiast nakładki, działa nawet bez przezroczystego okna, ale obsługuje tylko 10 stałych kolorów.",
+                    [AppLanguage.Turkish] = "Bunun yerine LFS'in yerel IS_BTN düğmelerini kullanır, şeffaf katman olmadan da çalışır, ancak yalnızca 10 sabit rengi destekler.",
+                    [AppLanguage.German] = "Verwendet stattdessen die nativen IS_BTN-Schaltflächen von LFS, funktioniert auch ohne transparentes Overlay-Fenster, unterstützt aber nur 10 feste Farben.",
                     [AppLanguage.Spanish] = "Usa los botones nativos IS_BTN de LFS en su lugar: funciona incluso sin una ventana de superposición transparente, pero solo admite 10 colores fijos.",
                 },
                 ["hud.show-disabled"] = new()
@@ -1029,6 +2037,22 @@ namespace LFSDriftBuddy
                     [AppLanguage.German] = "Drehzahlbegrenzer",
                     [AppLanguage.Spanish] = "Limitador de RPM",
                 },
+                ["rev.locked"] = new()
+                {
+                    [AppLanguage.English] = "Requires the OutGauge connection to be enabled.",
+                    [AppLanguage.Polish] = "Wymaga włączonego połączenia OutGauge.",
+                    [AppLanguage.Turkish] = "OutGauge bağlantısının etkin olması gerekir.",
+                    [AppLanguage.German] = "Erfordert eine aktivierte OutGauge-Verbindung.",
+                    [AppLanguage.Spanish] = "Requiere que la conexión OutGauge esté activada.",
+                },
+                ["rev.connected"] = new()
+                {
+                    [AppLanguage.English] = "Active, receiving OutGauge data (port {0})",
+                    [AppLanguage.Polish] = "Aktywne, odbiera dane OutGauge (port {0})",
+                    [AppLanguage.Turkish] = "Etkin, OutGauge verisi alınıyor (port {0})",
+                    [AppLanguage.German] = "Aktiv, empfängt OutGauge-Daten (Port {0})",
+                    [AppLanguage.Spanish] = "Activo, recibiendo datos de OutGauge (puerto {0})",
+                },
 
                 ["rev.vehicle"] = new()
                 {
@@ -1064,11 +2088,11 @@ namespace LFSDriftBuddy
                 },
                 ["rev.calibrate.needs_outgauge"] = new()
                 {
-                    [AppLanguage.English] = "Can't calibrate — OutGauge is disconnected.",
-                    [AppLanguage.Polish] = "Nie można skalibrować — OutGauge jest rozłączony.",
-                    [AppLanguage.Turkish] = "Kalibre edilemiyor — OutGauge bağlı değil.",
-                    [AppLanguage.German] = "Kalibrierung nicht möglich — OutGauge ist getrennt.",
-                    [AppLanguage.Spanish] = "No se puede calibrar — OutGauge está desconectado.",
+                    [AppLanguage.English] = "Can't calibrate, OutGauge is disconnected.",
+                    [AppLanguage.Polish] = "Nie można skalibrować, OutGauge jest rozłączony.",
+                    [AppLanguage.Turkish] = "Kalibre edilemiyor, OutGauge bağlı değil.",
+                    [AppLanguage.German] = "Kalibrierung nicht möglich, OutGauge ist getrennt.",
+                    [AppLanguage.Spanish] = "No se puede calibrar, OutGauge está desconectado.",
                 },
                 ["rev.calibrate"] = new()
                 {
@@ -1168,6 +2192,38 @@ namespace LFSDriftBuddy
                     [AppLanguage.German] = "Grenze erhöhen",
                     [AppLanguage.Spanish] = "Aumentar límite",
                 },
+                ["rev.unsupported.label"] = new()
+                {
+                    [AppLanguage.English] = "Vehicle not supported",
+                    [AppLanguage.Polish] = "Pojazd nieobsługiwany",
+                    [AppLanguage.Turkish] = "Araç desteklenmiyor",
+                    [AppLanguage.German] = "Fahrzeug nicht unterstützt",
+                    [AppLanguage.Spanish] = "Vehículo no compatible",
+                },
+                ["rev.unsupported.auto"] = new()
+                {
+                    [AppLanguage.English] = "{0}: RPM above {1}, rev limiter disabled and vehicle marked as not supported.",
+                    [AppLanguage.Polish] = "{0}: obroty powyżej {1}, rev limiter wyłączony, a pojazd oznaczony jako nieobsługiwany.",
+                    [AppLanguage.Turkish] = "{0}: devir {1} üzerinde, rev limiter devre dışı bırakıldı ve araç desteklenmeyen olarak işaretlendi.",
+                    [AppLanguage.German] = "{0}: Drehzahl über {1}, Drehzahlbegrenzer deaktiviert und Fahrzeug als nicht unterstützt markiert.",
+                    [AppLanguage.Spanish] = "{0}: RPM por encima de {1}, limitador de revoluciones desactivado y vehículo marcado como no compatible.",
+                },
+                ["controllerassist.bindbtn"] = new()
+                {
+                    [AppLanguage.English] = "Bind hotkey",
+                    [AppLanguage.Polish] = "Przypisz skrót",
+                    [AppLanguage.Turkish] = "Kısayol ata",
+                    [AppLanguage.German] = "Hotkey zuweisen",
+                    [AppLanguage.Spanish] = "Asignar atajo",
+                },
+                ["controllerassist.bindname"] = new()
+                {
+                    [AppLanguage.English] = "CONTROLLER ASSIST ON/OFF",
+                    [AppLanguage.Polish] = "CONTROLLER ASSIST WŁ./WYŁ.",
+                    [AppLanguage.Turkish] = "CONTROLLER ASSIST AÇ/KAPAT",
+                    [AppLanguage.German] = "CONTROLLER ASSIST AN/AUS",
+                    [AppLanguage.Spanish] = "CONTROLLER ASSIST ACTIVAR/DESACTIVAR",
+                },
                 ["rev.bindings.unbound"] = new()
                 {
                     [AppLanguage.English] = "Not bound",
@@ -1255,14 +2311,6 @@ namespace LFSDriftBuddy
                     [AppLanguage.Turkish] = "Sinyalleri etkinleştir",
                     [AppLanguage.German] = "Blinker aktivieren",
                     [AppLanguage.Spanish] = "Activar intermitentes",
-                },
-                ["indicators.wheelsetup"] = new()
-                {
-                    [AppLanguage.English] = "🎮 Configure Steering Wheel",
-                    [AppLanguage.Polish] = "🎮 Skonfiguruj kierownicę",
-                    [AppLanguage.Turkish] = "🎮 Direksiyonu Yapılandır",
-                    [AppLanguage.German] = "🎮 Lenkrad konfigurieren",
-                    [AppLanguage.Spanish] = "🎮 Configurar volante",
                 },
                 ["indicators.group.status"] = new()
                 {
@@ -1747,27 +2795,27 @@ namespace LFSDriftBuddy
                 },
                 ["wheelconfig.calibrateinfo"] = new()
                 {
-                    [AppLanguage.English] = "Turn the wheel fully LEFT and RIGHT —\nthe program will detect the correct axis automatically.",
-                    [AppLanguage.Polish] = "Skręć kierownicą maksymalnie w LEWO i w PRAWO —\nprogram wykryje właściwą oś automatycznie.",
-                    [AppLanguage.Turkish] = "Direksiyonu tamamen SOLA ve SAĞA çevirin —\nprogram doğru ekseni otomatik olarak algılayacaktır.",
-                    [AppLanguage.German] = "Drehe das Lenkrad ganz nach LINKS und RECHTS —\ndas Programm erkennt die richtige Achse automatisch.",
-                    [AppLanguage.Spanish] = "Gira el volante completamente a la IZQUIERDA y a la DERECHA —\nel programa detectará el eje correcto automáticamente.",
+                    [AppLanguage.English] = "Turn the wheel fully LEFT and RIGHT.\nThe program will detect the correct axis automatically.",
+                    [AppLanguage.Polish] = "Skręć kierownicą maksymalnie w LEWO i w PRAWO.\nProgram wykryje właściwą oś automatycznie.",
+                    [AppLanguage.Turkish] = "Direksiyonu tamamen SOLA ve SAĞA çevirin.\nProgram doğru ekseni otomatik olarak algılayacaktır.",
+                    [AppLanguage.German] = "Drehe das Lenkrad ganz nach LINKS und RECHTS.\nDas Programm erkennt die richtige Achse automatisch.",
+                    [AppLanguage.Spanish] = "Gira el volante completamente a la IZQUIERDA y a la DERECHA.\nEl programa detectará el eje correcto automáticamente.",
                 },
                 ["wheelconfig.detection"] = new()
                 {
-                    [AppLanguage.English] = "Calibration: detecting movement... (3 s)",
-                    [AppLanguage.Polish] = "Kalibracja: wykrywanie ruchu... (3 s)",
-                    [AppLanguage.Turkish] = "Kalibrasyon: hareket algılanıyor... (3 sn)",
-                    [AppLanguage.German] = "Kalibrierung: Bewegung wird erkannt... (3 s)",
-                    [AppLanguage.Spanish] = "Calibración: detectando movimiento... (3 s)",
+                    [AppLanguage.English] = "Calibration: detecting movement... ({0} s)",
+                    [AppLanguage.Polish] = "Kalibracja: wykrywanie ruchu... ({0} s)",
+                    [AppLanguage.Turkish] = "Kalibrasyon: hareket algılanıyor... ({0} sn)",
+                    [AppLanguage.German] = "Kalibrierung: Bewegung wird erkannt... ({0} s)",
+                    [AppLanguage.Spanish] = "Calibración: detectando movimiento... ({0} s)",
                 },
                 ["wheelconfig.nomotion"] = new()
                 {
-                    [AppLanguage.English] = "No motion detected — select the axis manually above.",
-                    [AppLanguage.Polish] = "Nie wykryto ruchu — wybierz oś ręcznie powyżej.",
-                    [AppLanguage.Turkish] = "Hareket algılanmadı — ekseni yukarıdan manuel olarak seçin.",
-                    [AppLanguage.German] = "Keine Bewegung erkannt — wähle die Achse oben manuell aus.",
-                    [AppLanguage.Spanish] = "No se detectó movimiento — selecciona el eje manualmente arriba.",
+                    [AppLanguage.English] = "No motion detected. Select the axis manually above.",
+                    [AppLanguage.Polish] = "Nie wykryto ruchu. Wybierz oś ręcznie powyżej.",
+                    [AppLanguage.Turkish] = "Hareket algılanmadı. Ekseni yukarıdan manuel olarak seçin.",
+                    [AppLanguage.German] = "Keine Bewegung erkannt. Wähle die Achse oben manuell aus.",
+                    [AppLanguage.Spanish] = "No se detectó movimiento. Selecciona el eje manualmente arriba.",
                 },
                 ["wheelconfig.manualset"] = new()
                 {
@@ -1940,11 +2988,11 @@ namespace LFSDriftBuddy
                 },
                 ["rev.no_saved_for_car"] = new()
                 {
-                    [AppLanguage.English] = "{0}: no saved rev limiter settings — using default {1} RPM / {2} ms",
-                    [AppLanguage.Polish] = "{0}: brak zapisanych ustawień rev limitera — użyto domyślnych {1} RPM / {2} ms",
-                    [AppLanguage.Turkish] = "{0}: kayıtlı devir sınırlayıcı ayarı yok — varsayılan {1} RPM / {2} ms kullanılıyor",
-                    [AppLanguage.German] = "{0}: keine gespeicherten Drehzahlbegrenzer-Einstellungen — Standard {1} U/min / {2} ms wird verwendet",
-                    [AppLanguage.Spanish] = "{0}: no hay ajustes de limitador de RPM guardados — usando el valor predeterminado {1} RPM / {2} ms",
+                    [AppLanguage.English] = "{0}: no saved rev limiter settings, using default {1} RPM / {2} ms",
+                    [AppLanguage.Polish] = "{0}: brak zapisanych ustawień rev limitera, użyto domyślnych {1} RPM / {2} ms",
+                    [AppLanguage.Turkish] = "{0}: kayıtlı devir sınırlayıcı ayarı yok, varsayılan {1} RPM / {2} ms kullanılıyor",
+                    [AppLanguage.German] = "{0}: keine gespeicherten Drehzahlbegrenzer-Einstellungen, Standard {1} U/min / {2} ms wird verwendet",
+                    [AppLanguage.Spanish] = "{0}: no hay ajustes de limitador de RPM guardados, usando el valor predeterminado {1} RPM / {2} ms",
                 },
                 ["hud.showoverlay"] = new()
                 {
@@ -2020,11 +3068,11 @@ namespace LFSDriftBuddy
                 },
                 ["hud.colors.subtitle"] = new()
                 {
-                    [AppLanguage.English] = "Speedo+Tacho — RGB and transparency",
-                    [AppLanguage.Polish] = "Prędkościomierz+obrotomierz — RGB i przezroczystość",
-                    [AppLanguage.Turkish] = "Hız+Devir — RGB ve saydamlık",
-                    [AppLanguage.German] = "Tacho+Drehzahl — RGB und Transparenz",
-                    [AppLanguage.Spanish] = "Velocímetro+Tacómetro — RGB y transparencia",
+                    [AppLanguage.English] = "Speedo+Tacho: RGB and transparency",
+                    [AppLanguage.Polish] = "Prędkościomierz+obrotomierz: RGB i przezroczystość",
+                    [AppLanguage.Turkish] = "Hız+Devir: RGB ve saydamlık",
+                    [AppLanguage.German] = "Tacho+Drehzahl: RGB und Transparenz",
+                    [AppLanguage.Spanish] = "Velocímetro+Tacómetro: RGB y transparencia",
                 },
                 ["hud.color.redline"] = new()
                 {

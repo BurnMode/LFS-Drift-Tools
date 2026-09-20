@@ -1,6 +1,6 @@
 using System;
 
-namespace LFSDriftBuddy
+namespace LFSDriftTools
 {
         public sealed class DataFreshnessGate
     {

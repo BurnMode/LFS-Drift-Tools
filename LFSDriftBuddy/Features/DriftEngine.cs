@@ -3,7 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Text.Json;
 
-namespace LFSDriftBuddy
+namespace LFSDriftTools
 {
 
     public class DriverStats
@@ -24,8 +24,6 @@ namespace LFSDriftBuddy
     public class DriftEngine
     {
 
-        // Speed (km/h) above which a drift can start being detected at all. Configurable from
-        // the Drift Score panel — see SetMinDriftSpeedKmh.
         private double _minDriftSpeedKmh = 20.0;
         public double MinDriftSpeedKmh => _minDriftSpeedKmh;
         public void SetMinDriftSpeedKmh(double kmh)
@@ -64,7 +62,7 @@ namespace LFSDriftBuddy
         }
         private const double FAST_DRIVE_POINTS = 8.0;
 
-        private const double FAST_DRIVE_COMBO_STEP_PER_SEC = 0.01;
+        private const double FAST_DRIVE_COMBO_STEP_PER_SEC = 0.02;
 
                 private int GetFastDriveLevel(double speedKmh)
         {
@@ -550,7 +548,7 @@ namespace LFSDriftBuddy
 
                             if (bonusgap >= BONUS_TIMEOUT_SEC && gap <= (COMBO_TIMEOUT_SEC / 4))
                             {
-                                if (SpeedKmh >= 35 && DriftAngleDeg >= _angleLevelThresholds[0])
+                                if (SpeedKmh >= 35 && DriftAngleDeg >= _angleLevelThresholds[0] && !_isUpsideDown)
                                 {
 
                                     if (!_isHandBrakeON) { eBrakeCount = 0; }
@@ -631,6 +629,7 @@ namespace LFSDriftBuddy
                     foreach (var (threshold, comboFactor) in DeepAngleMilestones)
                     {
                         if (deepAngleCount != threshold) continue;
+                        if (_isUpsideDown) break;
                         long bonus = 50 * deepAngleCount;
                         TotalScore += bonus;
                         LapScore += bonus;
@@ -807,6 +806,8 @@ namespace LFSDriftBuddy
 
                 public void ApplyPostPoints(long delta, string awardLabel)
         {
+            if (delta > 0 && _isUpsideDown) return;
+
             CurrentRunPoints += delta;
             TotalScore += delta;
             LapScore += delta;
@@ -815,17 +816,21 @@ namespace LFSDriftBuddy
             SaveCurrentDriver();
         }
 
-        // Reward/penalty for a car-to-car contact during a drift (see MainForm's collision
-        // handling) — applies straight to the current run/total/lap score like ApplyPostPoints,
-        // but skips the combo bump since a collision isn't a drift-skill milestone either way.
         public void ApplyCollisionPoints(long delta, string awardLabel)
         {
+            if (delta > 0 && _isUpsideDown) return;
+
             CurrentRunPoints += delta;
             TotalScore += delta;
             LapScore += delta;
             LastAwardedText = awardLabel;
             SaveCurrentDriver();
         }
+
+        // Fed from OutSim2's Roll angle (MainForm), only meaningful while OutSim2 is actually
+        // connected; stays false otherwise, so this is a no-op without that connection.
+        private bool _isUpsideDown;
+        public void SetUpsideDown(bool isUpsideDown) => _isUpsideDown = isUpsideDown;
 
         private void AwardMilestoneBonus(string label)
         {
@@ -1084,9 +1089,6 @@ namespace LFSDriftBuddy
             _ => 1,
         };
 
-        // Speed (km/h) below which the car still counts as "not really moving" for burnout
-        // purposes — wheelspin above this is scored as regular driving/drift instead. Configurable
-        // from the Drift Score panel — see SetMaxBurnoutSpeedKmh.
         private double _maxBurnoutSpeedKmh = 20.0;
         public double MaxBurnoutSpeedKmh => _maxBurnoutSpeedKmh;
         public void SetMaxBurnoutSpeedKmh(double kmh)
@@ -1142,10 +1144,6 @@ namespace LFSDriftBuddy
         private DateTime _lastDashSpeedUpdateTime = DateTime.MinValue;
         private const double DASH_SPEED_MAX_AGE_SEC = 0.3;
 
-        // Burnout tiers are driven by wheel slip (OutGauge dash speed minus the car's real
-        // SpeedKmh) plus how long the burnout is held — slip scales naturally with each car's
-        // gearing, unlike raw RPM. Tune these weights against BurnoutGood/High/Extreme/Insane
-        // feel if needed.
         private const double BURNOUT_SLIP_WEIGHT = 0.38;
         private const double BURNOUT_DURATION_WEIGHT = 2.0;
 

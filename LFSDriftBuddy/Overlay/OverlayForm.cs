@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.Drawing.Drawing2D;
@@ -8,7 +8,7 @@ using System.IO;
 using System.Runtime.InteropServices;
 using System.Windows.Forms;
 
-namespace LFSDriftBuddy
+namespace LFSDriftTools
 {
     public class OverlayForm : LayeredForm
     {
@@ -184,8 +184,6 @@ namespace LFSDriftBuddy
         public bool SpeedoTachoShowMajorTicks { get; set; } = true;
         public bool SpeedoTachoPlainDigits { get; set; } = false;
         public bool SpeedoTachoInstantSpeed { get; set; } = false;
-        // OFF (default) = OutGauge dash/wheel speed (matches a real dash during wheelspin).
-        // ON = the old way: InSim's physics-accurate speed.
         public bool SpeedoTachoAirSpeed { get; set; } = false;
 
         public Color SpeedoTachoTextColor { get; set; } = Color.White;
@@ -205,15 +203,31 @@ namespace LFSDriftBuddy
         private int _currentGear = 0;
         private int _calibratedMaxRpm = 0;
 
-        // "True" speed is InSim's physics-accurate speed (car's actual velocity through
-        // space) — it stays near zero during a stationary burnout. "Dash" speed is OutGauge's
-        // Speed field, which (like a real car's speedometer, driven off wheel rotation) spikes
-        // during wheelspin even when the car isn't actually moving. SpeedoTachoAirSpeed
-        // picks which one feeds the gauge.
         public void UpdateSpeedGauge(double speedKmh) => _targetSpeedKmhTrue = Math.Max(0, speedKmh);
         public void UpdateSpeedGaugeDash(double speedKmh) => _targetSpeedKmhDash = Math.Max(0, speedKmh);
         public void UpdateGear(int gear) => _currentGear = gear;
         public void UpdateMaxRpm(int maxRpm) => _calibratedMaxRpm = Math.Max(0, maxRpm);
+
+        public bool ControllerAssistBarVisible { get; set; } = false;
+        private bool _controllerAssistActive = false;
+        private double _controllerAssistRawPercent = 0;
+        private double _controllerAssistOutputPercent = 0;
+
+        public void UpdateControllerAssist(bool active, double rawPercent, double outputPercent)
+        {
+            _controllerAssistActive = active;
+            _controllerAssistRawPercent = rawPercent;
+            _controllerAssistOutputPercent = outputPercent;
+        }
+
+        private string? _caNotificationText = null;
+        private DateTime _caNotificationUntil = DateTime.MinValue;
+
+        public void ShowControllerAssistNotification(string text, double durationSec = 3.0)
+        {
+            _caNotificationText = text;
+            _caNotificationUntil = DateTime.Now.AddSeconds(durationSec);
+        }
 
         private class BonusItem
         {
@@ -658,9 +672,58 @@ namespace LFSDriftBuddy
                     }
                 }
                 DrawSpeedoTacho(g);
+                DrawControllerAssistBar(g, centerX);
+                DrawControllerAssistNotification(g, centerX);
             }
 
             SetBitmap(_buffer);
+        }
+
+        private void DrawControllerAssistNotification(Graphics g, float centerX)
+        {
+            if (_caNotificationText == null) return;
+
+            double remaining = (_caNotificationUntil - DateTime.Now).TotalSeconds;
+            if (remaining <= 0)
+            {
+                _caNotificationText = null;
+                return;
+            }
+
+            double alpha = remaining < 0.4 ? Math.Clamp(remaining / 0.4, 0, 1) : 1.0;
+            var font = _activeFont20;
+            var size = g.MeasureString(_caNotificationText, font);
+            float x = centerX - size.Width / 2f;
+            float y = Height / 2f - size.Height / 2f;
+
+            DrawOutlinedText(g, _caNotificationText, font, x, y,
+                WithAlpha(Color.White, alpha), WithAlpha(Color.Black, alpha * 0.6), outline: true);
+        }
+
+        private void DrawControllerAssistBar(Graphics g, float centerX)
+        {
+            if (!ControllerAssistBarVisible || !_controllerAssistActive) return;
+
+            const float barW = 260f, barH = 10f, markerW = 4f, markerH = 18f;
+            float x = centerX - barW / 2f;
+            float y = Height - 44f;
+
+            var track = new RectangleF(x, y, barW, barH);
+            using (var path = DrawingHelpers.RoundedPath(Rectangle.Round(track), (int)(barH / 2)))
+            using (var trackBrush = new SolidBrush(Color.FromArgb(90, 255, 255, 255)))
+                g.FillPath(trackBrush, path);
+
+            float centerLineX = x + barW / 2f;
+            using (var pen = new Pen(Color.FromArgb(70, 255, 255, 255), 1f))
+                g.DrawLine(pen, centerLineX, y - 2f, centerLineX, y + barH + 2f);
+
+            float rawX = x + (float)((_controllerAssistRawPercent + 100.0) / 200.0) * barW;
+            using (var rawBrush = new SolidBrush(Color.FromArgb(140, 255, 255, 255)))
+                g.FillRectangle(rawBrush, rawX - markerW / 2f, y + barH / 2f - markerH / 2f, markerW, markerH);
+
+            float outputX = x + (float)((_controllerAssistOutputPercent + 100.0) / 200.0) * barW;
+            using (var outputBrush = new SolidBrush(Color.FromArgb(255, 10, 132, 255)))
+                g.FillRectangle(outputBrush, outputX - markerW / 2f, y + barH / 2f - markerH / 2f - 3f, markerW, markerH + 6f);
         }
 
         private const float ScoreCollapseAnchorY = 26f;
@@ -1355,8 +1418,6 @@ namespace LFSDriftBuddy
                 float redlineStartAngle = startAngle + redlineStartFrac * sweepAngle;
                 float redlineSweep = sweepAngle - redlineStartFrac * sweepAngle;
 
-                // Keep the outer edge pinned to the dial's true edge and let extra thickness eat
-                // inward only, instead of the stroke growing outward past the dial too.
                 float redlineWidth = Math.Max(1f, RedlineThickness);
                 float redlineRadius = radius - redlineWidth / 2f;
                 var redlineRect = new RectangleF(cx - redlineRadius, cy - redlineRadius, redlineRadius * 2, redlineRadius * 2);
@@ -1492,7 +1553,7 @@ namespace LFSDriftBuddy
                     WithAlpha(SpeedoTachoTextColor, (double)SpeedoTachoTextColor.A / 255.0 * 0.8), Color.FromArgb(180, 0, 0, 0), outline: false);
             }
 
-            
+
         }
 
         private double GetRevCutGlowIntensity()
@@ -1503,8 +1564,6 @@ namespace LFSDriftBuddy
             return _revCutBlend * pulse;
         }
 
-        // Soft red glow ring for the rev-limiter cut effect, hugging the gauge's own edge and
-        // fading outward — layered concentric strokes instead of one crisp pen line.
         private void DrawRevCutRingGlow(Graphics g, RectangleF dialRect, float baseInflate = -1f, float spread = 20f, int layers = 10)
         {
             double glowStrength = GetRevCutGlowIntensity();
@@ -1522,9 +1581,6 @@ namespace LFSDriftBuddy
             }
         }
 
-        // Soft red glow that traces the shape of the number itself (many faint offset copies of
-        // the same string), used for the rev-limiter cut effect on the total score — drawn
-        // underneath the crisp score text.
         private void DrawRevCutTextGlow(Graphics g, string text, Font font, float x, float y)
         {
             double glowStrength = GetRevCutGlowIntensity();

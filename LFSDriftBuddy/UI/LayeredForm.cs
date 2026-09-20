@@ -4,7 +4,7 @@ using System.Drawing.Imaging;
 using System.Runtime.InteropServices;
 using System.Windows.Forms;
 
-namespace LFSDriftBuddy
+namespace LFSDriftTools
 {
         public class LayeredForm : Form
     {
@@ -55,6 +55,7 @@ namespace LFSDriftBuddy
 
         protected LayeredForm()
         {
+            AutoScaleMode = AutoScaleMode.None;
             FormBorderStyle = FormBorderStyle.None;
             ShowInTaskbar = false;
             StartPosition = FormStartPosition.Manual;
@@ -69,6 +70,7 @@ namespace LFSDriftBuddy
                 return cp;
             }
         }
+
 
         public void SetClickThrough(bool enabled)
         {
