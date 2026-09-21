@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Windows.Forms;
 using LFSDriftTools.InSim;
@@ -51,7 +51,15 @@ namespace LFSDriftTools
             _insim.ShowButton(id, text, l: l, t: t, w: w, h: h, bStyle: bStyle);
         }
 
-        public void InvalidateCache() => _lastSent.Clear();
+        public void InvalidateCache()
+        {
+            _lastSent.Clear();
+            _rpmHudLimit = -1;
+        }
+
+        private int _rpmHudLimit = -1;
+        private bool _rpmHudVisible;
+        private AppLanguage _rpmHudLanguage;
 
         public string InSimColor1 = "^7";
         public string InSimColor2 = "^6";
@@ -200,13 +208,30 @@ namespace LFSDriftTools
             Send(BTN_AWARD, colorPrefix + text, l: 60, t: 22, w: 80, h: 6, bStyle: 5);
         }
 
+        public void ShowInGameRPMLimitter(int limit)
+        {
+            if (!_insim.IsConnected) return;
+
+            bool visible = _showRpmHudCheck.Checked && _revLimiter.Enabled;
+            AppLanguage language = Localization.CurrentLanguage;
+
+            if (limit == _rpmHudLimit && visible == _rpmHudVisible && language == _rpmHudLanguage)
+                return;
+
+            _rpmHudLimit = limit;
+            _rpmHudVisible = visible;
+            _rpmHudLanguage = language;
+
+            ShowInGameRPMLimitter(limit.ToString());
+        }
+
         public void ShowInGameRPMLimitter(string text)
         {
             if (!_insim.IsConnected) return;
 
             if (_showRpmHudCheck.Checked && _revLimiter.Enabled)
             {
-                Send(BTN_RPMLIMIT, "^6" + Localization.T("rev.limit") + text, l: 0, t: 196, w: 25, h: 5, bStyle: 65);
+                Send(BTN_RPMLIMIT, "^6" + string.Format(Localization.T("rev.limit.value"), text), l: 0, t: 196, w: 25, h: 5, bStyle: 65);
             }
             else
             {

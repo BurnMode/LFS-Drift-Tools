@@ -9,7 +9,7 @@ namespace LFSDriftTools
     {
         public static AppLanguage CurrentLanguage { get; private set; } = AppLanguage.English;
 
-        public static event Action LanguageChanged;
+        public static event Action? LanguageChanged;
 
         public static void SetLanguage(AppLanguage lang)
         {
@@ -37,7 +37,38 @@ namespace LFSDriftTools
             if (_strings.TryGetValue(key, out var t2) && t2.TryGetValue(AppLanguage.English, out var en))
                 return en;
 
+#if DEBUG
+            return "[" + key + "]";
+#else
             return key;
+#endif
+        }
+
+        public static List<string> Validate()
+        {
+            var problems = new List<string>();
+            var languages = (AppLanguage[])Enum.GetValues(typeof(AppLanguage));
+            var placeholder = new System.Text.RegularExpressions.Regex(@"\{\d+\}");
+            foreach (var pair in _strings)
+            {
+                var placeholders = new HashSet<string>();
+                bool first = true;
+                foreach (var lang in languages)
+                {
+                    if (!pair.Value.TryGetValue(lang, out var text) || string.IsNullOrEmpty(text))
+                    {
+                        problems.Add(pair.Key + ": " + lang);
+                        continue;
+                    }
+                    var found = new HashSet<string>();
+                    foreach (System.Text.RegularExpressions.Match m in placeholder.Matches(text))
+                        found.Add(m.Value);
+                    if (first) { placeholders = found; first = false; }
+                    else if (!placeholders.SetEquals(found))
+                        problems.Add(pair.Key + ": {n} " + lang);
+                }
+            }
+            return problems;
         }
 
         private static readonly Dictionary<string, Dictionary<AppLanguage, string>> _strings =
@@ -50,14 +81,6 @@ namespace LFSDriftTools
                     [AppLanguage.Turkish] = "Genel",
                     [AppLanguage.German] = "Allgemein",
                     [AppLanguage.Spanish] = "General",
-                },
-                ["header.colors"] = new()
-                {
-                    [AppLanguage.English] = "COLORS",
-                    [AppLanguage.Polish] = "KOLORY",
-                    [AppLanguage.Turkish] = "RENKLER",
-                    [AppLanguage.German] = "FARBEN",
-                    [AppLanguage.Spanish] = "COLORES",
                 },
                 ["header.theme"] = new()
                 {
@@ -130,14 +153,6 @@ namespace LFSDriftTools
                     [AppLanguage.Turkish] = "Bağlantı kesildi",
                     [AppLanguage.German] = "Getrennt",
                     [AppLanguage.Spanish] = "Desconectado",
-                },
-                ["ingamesettings.title"] = new()
-                {
-                    [AppLanguage.English] = "Quick Settings",
-                    [AppLanguage.Polish] = "Szybkie ustawienia",
-                    [AppLanguage.Turkish] = "Hızlı Ayarlar",
-                    [AppLanguage.German] = "Schnelleinstellungen",
-                    [AppLanguage.Spanish] = "Ajustes rápidos",
                 },
                 ["ingamesettings.enabled"] = new()
                 {
@@ -259,14 +274,6 @@ namespace LFSDriftTools
                     [AppLanguage.German] = "Wertungsfarben",
                     [AppLanguage.Spanish] = "Colores de puntuación",
                 },
-                ["general.title"] = new()
-                {
-                    [AppLanguage.English] = "General",
-                    [AppLanguage.Polish] = "Ogólne",
-                    [AppLanguage.Turkish] = "Genel",
-                    [AppLanguage.German] = "Allgemein",
-                    [AppLanguage.Spanish] = "General",
-                },
                 ["general.lfsfolder"] = new()
                 {
                     [AppLanguage.English] = "LFS game folder",
@@ -298,6 +305,46 @@ namespace LFSDriftTools
                     [AppLanguage.Turkish] = "LFS cfg yapılandır",
                     [AppLanguage.German] = "LFS cfg konfigurieren",
                     [AppLanguage.Spanish] = "Configurar LFS cfg",
+                },
+                ["status.cfgcheck.mismatch"] = new()
+                {
+                    [AppLanguage.English] = "cfg.txt does not match the app settings: {0}. Use \"Configure LFS cfg\" to fix it.",
+                    [AppLanguage.Polish] = "cfg.txt nie zgadza się z ustawieniami aplikacji: {0}. Użyj \"Skonfiguruj LFS cfg\", aby to naprawić.",
+                    [AppLanguage.Turkish] = "cfg.txt uygulama ayarlarıyla uyuşmuyor: {0}. Düzeltmek için \"LFS cfg yapılandır\" düğmesini kullanın.",
+                    [AppLanguage.German] = "cfg.txt stimmt nicht mit den App-Einstellungen überein: {0}. Mit \"LFS cfg konfigurieren\" beheben.",
+                    [AppLanguage.Spanish] = "cfg.txt no coincide con los ajustes de la aplicación: {0}. Usa \"Configurar LFS cfg\" para corregirlo.",
+                },
+                ["status.cfgcheck.item"] = new()
+                {
+                    [AppLanguage.English] = "{0}: cfg.txt = {1}, app = {2}",
+                    [AppLanguage.Polish] = "{0}: cfg.txt = {1}, aplikacja = {2}",
+                    [AppLanguage.Turkish] = "{0}: cfg.txt = {1}, uygulama = {2}",
+                    [AppLanguage.German] = "{0}: cfg.txt = {1}, App = {2}",
+                    [AppLanguage.Spanish] = "{0}: cfg.txt = {1}, aplicación = {2}",
+                },
+                ["status.cfgcheck.missing"] = new()
+                {
+                    [AppLanguage.English] = "not set",
+                    [AppLanguage.Polish] = "brak",
+                    [AppLanguage.Turkish] = "ayarlanmamış",
+                    [AppLanguage.German] = "nicht gesetzt",
+                    [AppLanguage.Spanish] = "sin definir",
+                },
+                ["status.cfgcheck.enabled"] = new()
+                {
+                    [AppLanguage.English] = "enabled (not 0)",
+                    [AppLanguage.Polish] = "włączone (różne od 0)",
+                    [AppLanguage.Turkish] = "etkin (0 değil)",
+                    [AppLanguage.German] = "aktiv (nicht 0)",
+                    [AppLanguage.Spanish] = "activado (distinto de 0)",
+                },
+                ["general.configure.lfsrunning"] = new()
+                {
+                    [AppLanguage.English] = "LFS is running. Close LFS and configure again, otherwise the changes may be overwritten.",
+                    [AppLanguage.Polish] = "LFS jest uruchomiony. Zamknij LFS i skonfiguruj ponownie, inaczej zmiany mogą zostać nadpisane.",
+                    [AppLanguage.Turkish] = "LFS çalışıyor. LFS'i kapatıp yeniden yapılandırın, aksi halde değişiklikler üzerine yazılabilir.",
+                    [AppLanguage.German] = "LFS läuft. LFS schließen und erneut konfigurieren, sonst werden die Änderungen eventuell überschrieben.",
+                    [AppLanguage.Spanish] = "LFS está en ejecución. Cierra LFS y vuelve a configurar, o los cambios podrían sobrescribirse.",
                 },
                 ["general.configure.success"] = new()
                 {
@@ -595,6 +642,14 @@ namespace LFSDriftTools
                     [AppLanguage.German] = "Installation abgebrochen.",
                     [AppLanguage.Spanish] = "Instalación cancelada.",
                 },
+                ["drivers.install_failed_start"] = new()
+                {
+                    [AppLanguage.English] = "Installation failed: the installer could not be started.",
+                    [AppLanguage.Polish] = "Instalacja nie powiodła się: nie udało się uruchomić instalatora.",
+                    [AppLanguage.Turkish] = "Kurulum başarısız oldu: yükleyici başlatılamadı.",
+                    [AppLanguage.German] = "Installation fehlgeschlagen: Das Installationsprogramm konnte nicht gestartet werden.",
+                    [AppLanguage.Spanish] = "La instalación falló: no se pudo iniciar el instalador.",
+                },
                 ["drivers.install_failed_exception_detail"] = new()
                 {
                     [AppLanguage.English] = "Installation failed: {0}",
@@ -602,6 +657,14 @@ namespace LFSDriftTools
                     [AppLanguage.Turkish] = "Kurulum başarısız oldu: {0}",
                     [AppLanguage.German] = "Installation fehlgeschlagen: {0}",
                     [AppLanguage.Spanish] = "La instalación falló: {0}",
+                },
+                ["drivers.installer_untrusted"] = new()
+                {
+                    [AppLanguage.English] = "The bundled installer failed the signature check and was not started.",
+                    [AppLanguage.Polish] = "Dołączony instalator nie przeszedł weryfikacji podpisu i nie został uruchomiony.",
+                    [AppLanguage.Turkish] = "Paketlenmiş kurulum dosyası imza denetimini geçemedi ve başlatılmadı.",
+                    [AppLanguage.German] = "Die mitgelieferte Installationsdatei hat die Signaturprüfung nicht bestanden und wurde nicht gestartet.",
+                    [AppLanguage.Spanish] = "El instalador incluido no superó la comprobación de firma y no se ejecutó.",
                 },
                 ["drivers.installer_missing"] = new()
                 {
@@ -1067,6 +1130,46 @@ namespace LFSDriftTools
                     [AppLanguage.German] = "⬤  OutGauge verbunden",
                     [AppLanguage.Spanish] = "⬤  OutGauge conectado",
                 },
+                ["status.outgauge.listening"] = new()
+                {
+                    [AppLanguage.English] = "⬤  Listening on port {0}, no packets",
+                    [AppLanguage.Polish] = "⬤  Nasłuchuje na porcie {0}, brak pakietów",
+                    [AppLanguage.Turkish] = "⬤  {0} portunda dinleniyor, paket yok",
+                    [AppLanguage.German] = "⬤  Hört auf Port {0}, keine Pakete",
+                    [AppLanguage.Spanish] = "⬤  Escuchando en el puerto {0}, sin paquetes",
+                },
+                ["status.outgauge.receiving"] = new()
+                {
+                    [AppLanguage.English] = "⬤  Receiving OutGauge ({0} packets)",
+                    [AppLanguage.Polish] = "⬤  Odbiera OutGauge ({0} pakietów)",
+                    [AppLanguage.Turkish] = "⬤  OutGauge alınıyor ({0} paket)",
+                    [AppLanguage.German] = "⬤  OutGauge wird empfangen ({0} Pakete)",
+                    [AppLanguage.Spanish] = "⬤  Recibiendo OutGauge ({0} paquetes)",
+                },
+                ["status.binding.moved"] = new()
+                {
+                    [AppLanguage.English] = "'{0}' was also assigned to '{1}', so it was unbound there.",
+                    [AppLanguage.Polish] = "'{0}' było też przypisane do '{1}', więc odpięto je tam.",
+                    [AppLanguage.Turkish] = "'{0}' aynı zamanda '{1}' için de atanmıştı, bu yüzden oradan kaldırıldı.",
+                    [AppLanguage.German] = "'{0}' war auch '{1}' zugewiesen und wurde dort entfernt.",
+                    [AppLanguage.Spanish] = "'{0}' también estaba asignado a '{1}', por lo que se quitó de allí.",
+                },
+                ["status.settings.load_error"] = new()
+                {
+                    [AppLanguage.English] = "Problem loading settings: {0}. Original files were copied to: {1}",
+                    [AppLanguage.Polish] = "Problem z wczytaniem ustawień: {0}. Oryginalne pliki skopiowano do: {1}",
+                    [AppLanguage.Turkish] = "Ayarlar yüklenirken sorun oluştu: {0}. Özgün dosyalar şuraya kopyalandı: {1}",
+                    [AppLanguage.German] = "Problem beim Laden der Einstellungen: {0}. Originaldateien wurden kopiert nach: {1}",
+                    [AppLanguage.Spanish] = "Problema al cargar la configuración: {0}. Los archivos originales se copiaron a: {1}",
+                },
+                ["status.settings.save_error"] = new()
+                {
+                    [AppLanguage.English] = "Couldn't save settings: {0}",
+                    [AppLanguage.Polish] = "Nie udało się zapisać ustawień: {0}",
+                    [AppLanguage.Turkish] = "Ayarlar kaydedilemedi: {0}",
+                    [AppLanguage.German] = "Einstellungen konnten nicht gespeichert werden: {0}",
+                    [AppLanguage.Spanish] = "No se pudo guardar la configuración: {0}",
+                },
                 ["status.title"] = new()
                 {
                     [AppLanguage.English] = "Warnings & Events",
@@ -1219,6 +1322,14 @@ namespace LFSDriftTools
                     [AppLanguage.German] = "Drehzahlbegrenzer: erzwinge Zündung wieder ein ({0}), Motor blieb aus.",
                     [AppLanguage.Spanish] = "Limitador de revoluciones: forzando el encendido ({0}), el motor se quedó apagado.",
                 },
+                ["status.revlimiter.key_failed"] = new()
+                {
+                    [AppLanguage.English] = "Couldn't send the ignition key to LFS (rev limiter)",
+                    [AppLanguage.Polish] = "Nie udało się wysłać klawisza zapłonu do LFS (rev limiter)",
+                    [AppLanguage.Turkish] = "Kontak tuşu LFS'e gönderilemedi (devir limiteri)",
+                    [AppLanguage.German] = "Zündungstaste konnte nicht an LFS gesendet werden (Drehzahlbegrenzer)",
+                    [AppLanguage.Spanish] = "No se pudo enviar la tecla de encendido a LFS (limitador de revoluciones)",
+                },
                 ["status.revlimiter.no_window"] = new()
                 {
                     [AppLanguage.English] = "LFS window not found (rev limiter)",
@@ -1259,14 +1370,6 @@ namespace LFSDriftTools
                     [AppLanguage.German] = "OutGauge-Abhören",
                     [AppLanguage.Spanish] = "Escucha de OutGauge",
                 },
-                ["connection.outgauge.subtitle"] = new()
-                {
-                    [AppLanguage.English] = "Listens locally for LFS's OutGauge broadcast (no host needed); match the port to OutGauge Port in LFS cfg.txt.",
-                    [AppLanguage.Polish] = "Nasłuchuje lokalnie transmisji OutGauge z LFS (host nie jest potrzebny); dopasuj port do OutGauge Port w cfg.txt LFS.",
-                    [AppLanguage.Turkish] = "LFS'in OutGauge yayınını yerel olarak dinler (host gerekmez); portu LFS cfg.txt dosyasındaki OutGauge Port ile eşleştirin.",
-                    [AppLanguage.German] = "Empfängt lokal die OutGauge-Übertragung von LFS (kein Host nötig); den Port an OutGauge Port in der LFS cfg.txt anpassen.",
-                    [AppLanguage.Spanish] = "Escucha localmente la transmisión OutGauge de LFS (no se necesita host); haz coincidir el puerto con OutGauge Port en cfg.txt de LFS.",
-                },
                 ["connection.outsim.title"] = new()
                 {
                     [AppLanguage.English] = "OutSim2 Connection",
@@ -1274,14 +1377,6 @@ namespace LFSDriftTools
                     [AppLanguage.Turkish] = "OutSim2 Bağlantısı",
                     [AppLanguage.German] = "OutSim2-Verbindung",
                     [AppLanguage.Spanish] = "Conexión OutSim2",
-                },
-                ["connection.outsim.subtitle"] = new()
-                {
-                    [AppLanguage.English] = "Listens locally for LFS's extended OutSim telemetry; Opts (hex) must match OutSim Opts in cfg.txt exactly.",
-                    [AppLanguage.Polish] = "Nasłuchuje lokalnie rozszerzonej telemetrii OutSim z LFS; Opts (hex) musi dokładnie odpowiadać OutSim Opts w cfg.txt.",
-                    [AppLanguage.Turkish] = "LFS'in genişletilmiş OutSim telemetrisini yerel olarak dinler; Opts (hex) cfg.txt içindeki OutSim Opts ile birebir eşleşmeli.",
-                    [AppLanguage.German] = "Empfängt lokal die erweiterte OutSim-Telemetrie von LFS; Opts (hex) muss genau zu OutSim Opts in cfg.txt passen.",
-                    [AppLanguage.Spanish] = "Escucha localmente la telemetría OutSim extendida de LFS; Opts (hex) debe coincidir exactamente con OutSim Opts en cfg.txt.",
                 },
                 ["connection.outsim.opts"] = new()
                 {
@@ -1338,14 +1433,6 @@ namespace LFSDriftTools
                     [AppLanguage.Turkish] = "Hız Göstergesi",
                     [AppLanguage.German] = "Tachometer",
                     [AppLanguage.Spanish] = "Velocímetro",
-                },
-                ["speedometer.speed"] = new()
-                {
-                    [AppLanguage.English] = "SPEED",
-                    [AppLanguage.Polish] = "PRĘDKOŚĆ",
-                    [AppLanguage.Turkish] = "HIZ",
-                    [AppLanguage.German] = "GESCHWINDIGKEIT",
-                    [AppLanguage.Spanish] = "VELOCIDAD",
                 },
                 ["speedometer.unit"] = new()
                 {
@@ -1558,10 +1645,10 @@ namespace LFSDriftTools
                 ["speedometer.elements.airspeed"] = new()
                 {
                     [AppLanguage.English] = "Air Speed",
-                    [AppLanguage.Polish] = "Air Speed",
-                    [AppLanguage.Turkish] = "Air Speed",
-                    [AppLanguage.German] = "Air Speed",
-                    [AppLanguage.Spanish] = "Air Speed",
+                    [AppLanguage.Polish] = "Prędkość powietrza",
+                    [AppLanguage.Turkish] = "Hava hızı",
+                    [AppLanguage.German] = "Luftgeschwindigkeit",
+                    [AppLanguage.Spanish] = "Velocidad del aire",
                 },
                 ["speedometer.elements.redlinethickness"] = new()
                 {
@@ -1989,14 +2076,6 @@ namespace LFSDriftTools
                     [AppLanguage.German] = "Verwendet stattdessen die nativen IS_BTN-Schaltflächen von LFS, funktioniert auch ohne transparentes Overlay-Fenster, unterstützt aber nur 10 feste Farben.",
                     [AppLanguage.Spanish] = "Usa los botones nativos IS_BTN de LFS en su lugar: funciona incluso sin una ventana de superposición transparente, pero solo admite 10 colores fijos.",
                 },
-                ["hud.show-disabled"] = new()
-                {
-                    [AppLanguage.English] = "Currently unavailable",
-                    [AppLanguage.Polish] = "Obecnie niedostępne",
-                    [AppLanguage.Turkish] = "Şu anda kullanılamıyor",
-                    [AppLanguage.German] = "Derzeit nicht verfügbar",
-                    [AppLanguage.Spanish] = "Actualmente no disponible",
-                },
                 ["hud.REVLimitter"] = new()
                 {
                     [AppLanguage.English] = "Show ingame REV Limiter HUD",
@@ -2121,11 +2200,19 @@ namespace LFSDriftTools
 
                 ["rev.limit"] = new()
                 {
-                    [AppLanguage.English] = "RPM limit: ",
-                    [AppLanguage.Polish] = "Limit RPM: ",
-                    [AppLanguage.Turkish] = "RPM limiti: ",
-                    [AppLanguage.German] = "Drehzahlgrenze: ",
-                    [AppLanguage.Spanish] = "Límite de RPM: ",
+                    [AppLanguage.English] = "RPM limit:",
+                    [AppLanguage.Polish] = "Limit RPM:",
+                    [AppLanguage.Turkish] = "RPM limiti:",
+                    [AppLanguage.German] = "Drehzahlgrenze:",
+                    [AppLanguage.Spanish] = "Límite de RPM:",
+                },
+                ["rev.limit.value"] = new()
+                {
+                    [AppLanguage.English] = "RPM limit: {0}",
+                    [AppLanguage.Polish] = "Limit RPM: {0}",
+                    [AppLanguage.Turkish] = "RPM limiti: {0}",
+                    [AppLanguage.German] = "Drehzahlgrenze: {0}",
+                    [AppLanguage.Spanish] = "Límite de RPM: {0}",
                 },
                 ["rev.cutms"] = new()
                 {
@@ -2142,14 +2229,6 @@ namespace LFSDriftTools
                     [AppLanguage.Turkish] = "Kalibrasyon...",
                     [AppLanguage.German] = "Kalibrierung...",
                     [AppLanguage.Spanish] = "Calibrando...",
-                },
-                ["rev.calibration_award"] = new()
-                {
-                    [AppLanguage.English] = "REV LIMITER CALIBRATION",
-                    [AppLanguage.Polish] = "KALIBRACJA OGRANICZNIKA OBROTÓW",
-                    [AppLanguage.Turkish] = "DEVİR SINIRLAYICI KALİBRASYONU",
-                    [AppLanguage.German] = "DREHZAHLBEGRENZER-KALIBRIERUNG",
-                    [AppLanguage.Spanish] = "CALIBRACIÓN DEL LIMITADOR DE RPM",
                 },
 
                 ["rev.bindings.title"] = new()
@@ -2843,11 +2922,11 @@ namespace LFSDriftTools
                 },
                 ["wheelconfig.axis"] = new()
                 {
-                    [AppLanguage.English] = "Steering axis set to: ",
-                    [AppLanguage.Polish] = "Oś skrętu ustawiona na: ",
-                    [AppLanguage.Turkish] = "Direksiyon ekseni şu şekilde ayarlandı: ",
-                    [AppLanguage.German] = "Lenkachse eingestellt auf: ",
-                    [AppLanguage.Spanish] = "Eje de dirección establecido en: ",
+                    [AppLanguage.English] = "Steering axis set to: {0}",
+                    [AppLanguage.Polish] = "Oś skrętu ustawiona na: {0}",
+                    [AppLanguage.Turkish] = "Direksiyon ekseni şu şekilde ayarlandı: {0}",
+                    [AppLanguage.German] = "Lenkachse eingestellt auf: {0}",
+                    [AppLanguage.Spanish] = "Eje de dirección establecido en: {0}",
                 },
                 ["wheelconfig.disconnectpad"] = new()
                 {
@@ -2867,11 +2946,11 @@ namespace LFSDriftTools
                 },
                 ["wheelconfig.disconnecterror"] = new()
                 {
-                    [AppLanguage.English] = "Error connecting the wheel: ",
-                    [AppLanguage.Polish] = "Błąd podłączania kierownicy: ",
-                    [AppLanguage.Turkish] = "Direksiyon bağlanırken hata oluştu: ",
-                    [AppLanguage.German] = "Fehler beim Verbinden des Lenkrads: ",
-                    [AppLanguage.Spanish] = "Error al conectar el volante: ",
+                    [AppLanguage.English] = "Error connecting the wheel: {0}",
+                    [AppLanguage.Polish] = "Błąd podłączania kierownicy: {0}",
+                    [AppLanguage.Turkish] = "Direksiyon bağlanırken hata oluştu: {0}",
+                    [AppLanguage.German] = "Fehler beim Verbinden des Lenkrads: {0}",
+                    [AppLanguage.Spanish] = "Error al conectar el volante: {0}",
                 },
                 ["wheelconfig.noxinput"] = new()
                 {

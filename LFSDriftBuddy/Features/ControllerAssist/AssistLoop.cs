@@ -15,6 +15,10 @@ namespace LFSDriftTools
         private Thread? _thread;
         private volatile bool _running;
         private int _generation;
+        private string? _lastErrorMessage;
+        private DateTime _lastErrorLoggedUtc = DateTime.MinValue;
+        private const double ErrorLogRepeatSec = 5.0;
+        private bool _timerResolutionRaised;
 
         public bool IsRunning => _running;
         public bool PadConnected => _pad != null && _pad.IsConnected;
@@ -51,8 +55,11 @@ namespace LFSDriftTools
             if (!_virtualPad.Connect())
                 return false;
 
+            _engine.Reset();
             _pad = pad;
             _running = true;
+            if (!_timerResolutionRaised)
+                _timerResolutionRaised = TimerResolution.Acquire();
             int generation = ++_generation;
             _thread = new Thread(() => Run(generation)) { IsBackground = true, Name = "AssistLoop" };
             _thread.Start();
@@ -67,6 +74,11 @@ namespace LFSDriftTools
             _generation++;
             _thread?.Join(2000);
             _thread = null;
+            if (_timerResolutionRaised)
+            {
+                TimerResolution.Release();
+                _timerResolutionRaised = false;
+            }
             _pad = null;
             _virtualPad.Disconnect();
         }
@@ -77,9 +89,10 @@ namespace LFSDriftTools
             {
                 try
                 {
-                    if (_pad != null && _pad.IsConnected)
+                    var pad = _pad;
+                    if (pad != null && pad.IsConnected)
                     {
-                        var padState = _pad.GetState().Gamepad;
+                        var padState = pad.GetState().Gamepad;
                         double rawSteerPercent = padState.LeftThumbX / 32767.0 * 100.0;
                         CarState car = _estimator.Sample();
 
@@ -89,9 +102,10 @@ namespace LFSDriftTools
                         _virtualPad.SubmitFrame(outputAxis, padState);
 
                         double rumbleScale = Math.Max(0, Math.Min(1, _engine.Rumble.RumbleStrength));
-                        ushort leftMotor = (ushort)(_engine.LastSnapshot.RumbleLeft01 * rumbleScale * 65535.0);
-                        ushort rightMotor = (ushort)(_engine.LastSnapshot.RumbleRight01 * rumbleScale * 65535.0);
-                        _pad.SetVibration(new XInputApi.Vibration
+                        var snapshot = _engine.LastSnapshot;
+                        ushort leftMotor = (ushort)(snapshot.RumbleLeft01 * rumbleScale * 65535.0);
+                        ushort rightMotor = (ushort)(snapshot.RumbleRight01 * rumbleScale * 65535.0);
+                        pad.SetVibration(new XInputApi.Vibration
                         {
                             LeftMotorSpeed = leftMotor,
                             RightMotorSpeed = rightMotor,
@@ -100,11 +114,22 @@ namespace LFSDriftTools
                 }
                 catch (Exception ex)
                 {
-                    Log?.Invoke($"AssistLoop: {ex.Message}");
+                    LogThrottled($"AssistLoop: {ex.Message}");
                 }
 
                 Thread.Sleep(4);
             }
+        }
+
+        private void LogThrottled(string message)
+        {
+            DateTime now = DateTime.UtcNow;
+            if (message == _lastErrorMessage && (now - _lastErrorLoggedUtc).TotalSeconds < ErrorLogRepeatSec)
+                return;
+
+            _lastErrorMessage = message;
+            _lastErrorLoggedUtc = now;
+            Log?.Invoke(message);
         }
 
         public void Dispose() => Stop();

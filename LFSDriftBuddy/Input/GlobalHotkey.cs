@@ -1,43 +1,31 @@
 ﻿using System;
 using System.Collections.Generic;
-using System.Diagnostics;
 using System.Linq;
-using System.Runtime.InteropServices;
 using System.Windows.Forms;
+using LFSDriftTools;
 
 public class GlobalHotkey : IDisposable
 {
-    private const int WH_KEYBOARD_LL = 13;
-    private const int WM_KEYDOWN = 0x0100;
-    private const int WM_KEYUP = 0x0101;
-    private const int WM_SYSKEYDOWN = 0x0104;
-    private const int WM_SYSKEYUP = 0x0105;
-
     private class KeyState
     {
         public bool KeyDown;
         public volatile bool Pending;
-        public Action Callback;
+        public Action? Callback;
     }
 
     private readonly Dictionary<Keys, KeyState> _bindings = new();
 
     private readonly System.Windows.Forms.Timer checkTimer = new System.Windows.Forms.Timer();
 
-    private LowLevelKeyboardProc proc;
-    private IntPtr hook;
-
     public GlobalHotkey(params (Keys key, Action callback)[] bindings)
     {
         foreach (var b in bindings)
             _bindings[b.key] = new KeyState { Callback = b.callback };
 
-        proc = HookCallback;
-        hook = SetHook(proc);
+        KeyboardHookHub.Subscribe(OnKey);
 
-        checkTimer.Interval = 20;
+        checkTimer.Interval = 10;
         checkTimer.Tick += CheckTimer_Tick;
-        checkTimer.Start();
     }
 
     public void SetBinding(Keys key, Action callback)
@@ -50,7 +38,7 @@ public class GlobalHotkey : IDisposable
         _bindings.Remove(key);
     }
 
-    private void CheckTimer_Tick(object sender, EventArgs e)
+    private void CheckTimer_Tick(object? sender, EventArgs e)
     {
         foreach (var state in _bindings.Values.ToArray())
         {
@@ -59,61 +47,36 @@ public class GlobalHotkey : IDisposable
             state.Pending = false;
             state.Callback?.Invoke();
         }
+
+        if (!_bindings.Values.Any(s => s.Pending))
+            checkTimer.Stop();
     }
 
-    private IntPtr HookCallback(int nCode, IntPtr wParam, IntPtr lParam)
+    private void OnKey(Keys key, bool down, bool isSystem)
     {
-        if (nCode >= 0)
-        {
-            Keys key = (Keys)Marshal.ReadInt32(lParam);
+        if (!_bindings.TryGetValue(key, out var state)) return;
 
-            if (_bindings.TryGetValue(key, out var state))
+        if (down)
+        {
+            if (!state.KeyDown)
             {
-                if (wParam == (IntPtr)WM_KEYDOWN || wParam == (IntPtr)WM_SYSKEYDOWN)
-                {
-                    if (!state.KeyDown)
-                    {
-                        state.KeyDown = true;
-                        state.Pending = true;
-                    }
-                }
-                else if (wParam == (IntPtr)WM_KEYUP || wParam == (IntPtr)WM_SYSKEYUP)
-                    state.KeyDown = false;
+                state.KeyDown = true;
+                state.Pending = true;
+
+                if (!checkTimer.Enabled)
+                    checkTimer.Start();
             }
         }
-
-        return CallNextHookEx(hook, nCode, wParam, lParam);
+        else
+        {
+            state.KeyDown = false;
+        }
     }
 
     public void Dispose()
     {
         checkTimer.Stop();
-        UnhookWindowsHookEx(hook);
-    }
-
-    private delegate IntPtr LowLevelKeyboardProc(int nCode, IntPtr wParam, IntPtr lParam);
-
-    [DllImport("user32.dll")]
-    static extern IntPtr SetWindowsHookEx(int idHook, LowLevelKeyboardProc lpfn, IntPtr hMod, uint dwThreadId);
-
-    [DllImport("user32.dll")]
-    static extern bool UnhookWindowsHookEx(IntPtr hhk);
-
-    [DllImport("user32.dll")]
-    static extern IntPtr CallNextHookEx(IntPtr hhk, int nCode, IntPtr wParam, IntPtr lParam);
-
-    [DllImport("kernel32.dll")]
-    static extern IntPtr GetModuleHandle(string? lpModuleName);
-
-    private static IntPtr SetHook(LowLevelKeyboardProc proc)
-    {
-        using Process curProcess = Process.GetCurrentProcess();
-        using ProcessModule? curModule = curProcess.MainModule;
-
-        return SetWindowsHookEx(
-            WH_KEYBOARD_LL,
-            proc,
-            GetModuleHandle(curModule?.ModuleName),
-            0);
+        checkTimer.Dispose();
+        KeyboardHookHub.Unsubscribe(OnKey);
     }
 }

@@ -1,6 +1,7 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Text.Json;
 
 namespace LFSDriftTools
@@ -35,14 +36,29 @@ namespace LFSDriftTools
         public const double COMBO_TIMEOUT_SEC = 2.5;
         private const double BONUS_TIMEOUT_SEC = 2.5;
         private const double POINTS_PER_SECOND = 400.0;
+        private const double MaxResumeGapSec = 1.0;
 
         private double[] _angleLevelThresholds = { 25.0, 40.0, 50.0, 60.0, 70.0 };
         public IReadOnlyList<double> AngleLevelThresholds => _angleLevelThresholds;
         public void SetAngleLevelThresholds(double[] values)
         {
             if (values == null || values.Length != 5) return;
-            _angleLevelThresholds = (double[])values.Clone();
+            _angleLevelThresholds = SanitizeThresholds(values, MAX_DRIFT_ANGLE_DEG - 1.0);
         }
+        private static double[] SanitizeThresholds(double[] values, double maxFirst)
+        {
+            var copy = (double[])values.Clone();
+            for (int i = 0; i < copy.Length; i++)
+            {
+                if (double.IsNaN(copy[i]) || double.IsInfinity(copy[i]) || copy[i] < 0)
+                    copy[i] = 0;
+            }
+
+            Array.Sort(copy);
+            copy[0] = Math.Min(copy[0], maxFirst);
+            return copy;
+        }
+
         private double MIN_DRIFT_ANGLE_DEG => _angleLevelThresholds[0];
 
         private double[] _speedLevelThresholds = { 100.0, 150.0, 200.0, 250.0, 300.0 };
@@ -50,7 +66,7 @@ namespace LFSDriftTools
         public void SetSpeedLevelThresholds(double[] values)
         {
             if (values == null || values.Length != 5) return;
-            _speedLevelThresholds = (double[])values.Clone();
+            _speedLevelThresholds = SanitizeThresholds(values, double.MaxValue);
         }
         private double FAST_DRIVE_THRESHOLD => _speedLevelThresholds[0];
 
@@ -58,7 +74,8 @@ namespace LFSDriftTools
         public double BackwardDriftAngleThreshold => _backwardDriftAngleThreshold;
         public void SetBackwardDriftAngleThreshold(double value)
         {
-            _backwardDriftAngleThreshold = value;
+            if (double.IsNaN(value)) return;
+            _backwardDriftAngleThreshold = Math.Clamp(value, 0, 180);
         }
         private const double FAST_DRIVE_POINTS = 8.0;
 
@@ -98,11 +115,35 @@ namespace LFSDriftTools
             AppDomain.CurrentDomain.BaseDirectory, "Saves");
         private Dictionary<string, DriverData> _driverData = new();
 
+        private static readonly HashSet<string> ReservedFileNames = new()
+        {
+            "CON", "PRN", "AUX", "NUL",
+            "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8", "COM9",
+            "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9",
+        };
+
+        private const int MaxCachedDrivers = 32;
+
+        private static bool IsEmptyDriverData(DriverData data) =>
+            data.Stats.TotalScore == 0 && data.Stats.BestRunScore == 0 &&
+            data.Stats.BestDriftDurationMs == 0 && data.Stats.BestDeepDriftDurationMs == 0 &&
+            data.LapRecords.Count == 0 && data.LastLapRecords.Count == 0;
+
         private static string DriverFilePath(string driver)
         {
             if (string.IsNullOrWhiteSpace(driver)) driver = "default_driver";
             foreach (char c in Path.GetInvalidFileNameChars())
                 driver = driver.Replace(c, '_');
+
+            driver = driver.TrimEnd('.', ' ');
+            if (driver.Length == 0) driver = "default_driver";
+            if (driver.Length > 100) driver = driver.Substring(0, 100);
+
+            int dot = driver.IndexOf('.');
+            string stem = dot > 0 ? driver.Substring(0, dot) : driver;
+            if (ReservedFileNames.Contains(stem.ToUpperInvariant()))
+                driver = "_" + driver;
+
             return Path.Combine(SavesDir, driver + ".json");
         }
 
@@ -113,7 +154,7 @@ namespace LFSDriftTools
         public bool HasActiveLapContext { get; private set; } = false;
 
         private DateTime _driftStartTime;
-        private DateTime _lastUpdateTime = DateTime.UtcNow;
+        private DateTime _lastUpdateTime = DateTime.MinValue;
         private DateTime _lastBonusTime = DateTime.MinValue;
         private DateTime _lastDriftTime = DateTime.MinValue;
         private DateTime _lastSpeedingTime = DateTime.MinValue;
@@ -149,7 +190,11 @@ namespace LFSDriftTools
             if (string.IsNullOrWhiteSpace(driverName))
                 driverName = "default_driver";
 
+            if (_driverInitialized && _pendingSave && CurrentDriver != driverName)
+                SaveCurrentDriver(force: true);
+
             CurrentDriver = driverName;
+            _driverInitialized = true;
 
             var stats = GetOrCreateDriverData(CurrentDriver).Stats;
             TotalScore = stats.TotalScore;
@@ -167,6 +212,13 @@ namespace LFSDriftTools
                 return d;
 
             d = LoadDriverFile(driver) ?? new DriverData();
+
+            if (_driverData.Count >= MaxCachedDrivers)
+            {
+                foreach (var key in _driverData.Keys.Where(k => k != CurrentDriver && k != driver).ToList())
+                    _driverData.Remove(key);
+            }
+
             _driverData[driver] = d;
             return d;
         }
@@ -183,6 +235,14 @@ namespace LFSDriftTools
             catch (Exception ex)
             {
                 Error?.Invoke(string.Format(Localization.T("status.driver_load_error"), driver, ex.Message));
+                if (ex is JsonException)
+                {
+                    try
+                    {
+                        File.Move(path, path + ".corrupt_" + DateTime.Now.ToString("yyyyMMdd_HHmmss"));
+                    }
+                    catch { }
+                }
                 return null;
             }
         }
@@ -264,6 +324,10 @@ namespace LFSDriftTools
             HasActiveLapContext = true;
         }
 
+        private double _fastPtsRemainder;
+        private double _driftPtsRemainder;
+        private double _burnoutPtsRemainder;
+
         int driftTimeMultipler = 0;
         double driftTotalTime= 0;
         int deepAngleCount = 0;
@@ -316,46 +380,72 @@ namespace LFSDriftTools
 
         private void CancelActiveRun()
         {
+            ResetRunState();
+        }
+
+        private void ResetRunState()
+        {
             IsDrifting = false;
             IsSpeeding = false;
             IsBurnout = false;
             ComboMultiplier = 1;
             CurrentRunPoints = 0;
+            LastAwardedText = "";
             _previouslyDrifting = false;
+            _wasDriftingPrev = false;
+            _previouslyDriftSideRight = true;
 
             _lastDriftTime = DateTime.MinValue;
             _lastSpeedingTime = DateTime.MinValue;
             _lastBurnoutTime = DateTime.MinValue;
+            _lastBonusTime = DateTime.MinValue;
+
+            _driftStartTime = DateTime.MinValue;
+            _driftSessionStart = DateTime.MinValue;
+            _deepDriftSessionStart = null;
+            _driftEntryStartTime = DateTime.MinValue;
+            _driftEntryEvaluated = false;
+            driftTimeMultipler = 0;
+            driftTotalTime = 0;
+            deepAngleCount = 0;
+            eBrakeCount = 0;
+            eDriftActive = false;
 
             _burnoutConditionStart = DateTime.MinValue;
             _lastBurnoutHeadingDeg = null;
             _burnoutSpinAccumDeg = 0;
             _burnoutActiveDuringSpin = false;
-
+            _lastSpinActivityTime = DateTime.MinValue;
             _burnoutSpinComboCount = 0;
             _lastBurnoutSpinBonusTime = DateTime.MinValue;
-            _donutComboCount = 0;
-            _lastDonutBonusTime = DateTime.MinValue;
             _stationaryBurnoutStart = DateTime.MinValue;
             _stationaryBurnoutTierAwarded = 0;
+            _burnoutActiveStartTime = DateTime.MinValue;
+
+            _donutComboCount = 0;
+            _lastDonutBonusTime = DateTime.MinValue;
             _driftSpinAccumDeg = 0;
             _driftSpinLastHeadingDeg = null;
             _driftSpinStartSet = false;
             _driftSpinStartWasBurnout = false;
+            _driftSpinSideChanged = false;
+            _lastDriftSpinActivityTime = DateTime.MinValue;
             _donutPrevIsBurnout = null;
-            _wasDriftingPrev = false;
+
             _lastTransitionBonusTime = DateTime.MinValue;
-            _burnoutActiveStartTime = DateTime.MinValue;
             _pendingBurnoutToDrift = false;
             _pendingDriftToBurnout = false;
-            _driftSpinSideChanged = false;
+
             _powerSpinAccumDeg = 0;
             _powerSpinLastHeadingDeg = null;
             _powerSpinPending = false;
             _powerSpinComboCount = 0;
             _lastPowerSpinBonusTime = DateTime.MinValue;
-        }
 
+            _fastPtsRemainder = 0;
+            _driftPtsRemainder = 0;
+            _burnoutPtsRemainder = 0;
+        }
         private static readonly (int Threshold, double ComboFactor)[] LongDriftMilestones =
         {
             (5, 0.15), (10, 0.25), (15, 0.35), (20, 0.45)
@@ -370,8 +460,10 @@ namespace LFSDriftTools
         {
             var now = DateTime.UtcNow;
 
-            _dtSec = (now - _lastUpdateTime).TotalSeconds;
-            if (_dtSec > 0.5)
+            _dtSec = _lastUpdateTime == DateTime.MinValue ? 0 : (now - _lastUpdateTime).TotalSeconds;
+            if (_dtSec > MaxResumeGapSec)
+                _dtSec = 0;
+            else if (_dtSec > 0.5)
                 _dtSec = 0.5;
 
             _lastUpdateTime = now;
@@ -445,7 +537,14 @@ namespace LFSDriftTools
 
             if (!speeding && !drifting)
             {
+                bool speedingEnded = IsSpeeding && !_previouslyDrifting;
                 IsSpeeding = false;
+
+                if (speedingEnded)
+                {
+                    DriftEnded?.Invoke(CurrentRunPoints);
+                    RegisterRunEnd(CurrentRunPoints);
+                }
 
                 double gap = (now - _lastDriftTime).TotalSeconds;
                 double gap2 = (now - _lastSpeedingTime).TotalSeconds;
@@ -475,9 +574,11 @@ namespace LFSDriftTools
                 double comboGainPerSec = speedLevel * FAST_DRIVE_COMBO_STEP_PER_SEC;
                 ComboMultiplier = Math.Round(Math.Min(ComboMultiplier + comboGainPerSec * _dtSec, 10.0), 2);
 
-                long fastPts = (long)(FAST_DRIVE_POINTS * _dtSec * ComboMultiplier);
+                double fastRaw = FAST_DRIVE_POINTS * _dtSec * ComboMultiplier + _fastPtsRemainder;
+                long fastPts = (long)fastRaw;
+                _fastPtsRemainder = fastRaw - fastPts;
 
-                CurrentRunPoints += (long)fastPts;
+                CurrentRunPoints += fastPts;
                 TotalScore += fastPts;
                 IsSpeeding = true;
                 LapScore += fastPts;
@@ -495,12 +596,6 @@ namespace LFSDriftTools
                     GetDriftValueINDL(DriftAngleDeg, DriftSideRight),
                     labelKind
                 );
-                if (!drifting)
-                {
-
-                    DriftEnded?.Invoke(CurrentRunPoints);
-                    RegisterRunEnd(CurrentRunPoints);
-                }
             }
 
             double bonusgapCLR = (now - _lastBonusTime).TotalSeconds;
@@ -574,6 +669,8 @@ namespace LFSDriftTools
 
                     }
 
+                    _previouslyDriftSideRight = DriftSideRight;
+
                     DriftStarted?.Invoke();
                 }
 
@@ -607,7 +704,7 @@ namespace LFSDriftTools
                     driftTimeMultipler++;
 
                     ComboMultiplier = Math.Round(Math.Min(ComboMultiplier + (0.036 * angleScore), 10.0), 2);
-                    _driftStartTime = now;
+                    _driftStartTime = driftTime >= 1000 ? now : _driftStartTime.AddMilliseconds(500);
 
                     foreach (var (threshold, comboFactor) in LongDriftMilestones)
                     {
@@ -648,9 +745,13 @@ namespace LFSDriftTools
                                 * speedScore
                                 * _dtSec;
 
-                CurrentRunPoints += (long)framePts;
-                TotalScore += (long)framePts;
-                LapScore += (long)framePts;
+                double driftRaw = framePts + _driftPtsRemainder;
+                long driftPts = (long)driftRaw;
+                _driftPtsRemainder = driftRaw - driftPts;
+
+                CurrentRunPoints += driftPts;
+                TotalScore += driftPts;
+                LapScore += driftPts;
                 SaveCurrentDriver();
 
                 var labelKind = GetLabelKind(DriftAngleDeg, SpeedKmh, eDriftActive);
@@ -696,7 +797,14 @@ namespace LFSDriftTools
             try
             {
                 string json = JsonSerializer.Serialize(data, new JsonSerializerOptions { WriteIndented = true });
-                File.WriteAllText(DriverFilePath(driver), json);
+                string path = DriverFilePath(driver);
+                string temp = path + ".tmp";
+                File.WriteAllText(temp, json);
+
+                if (File.Exists(path))
+                    File.Replace(temp, path, path + ".bak");
+                else
+                    File.Move(temp, path);
             }
             catch (Exception ex)
             {
@@ -762,19 +870,29 @@ namespace LFSDriftTools
         }
 
         private DateTime _lastStatsSaveUtc = DateTime.MinValue;
+        private bool _pendingSave;
+        private bool _driverInitialized;
         private static readonly TimeSpan StatsSaveInterval = TimeSpan.FromSeconds(2);
 
         private void SaveDriverDataRaw(bool force = false)
         {
             if (!force && (DateTime.UtcNow - _lastStatsSaveUtc) < StatsSaveInterval)
+            {
+                _pendingSave = true;
                 return;
+            }
 
             _lastStatsSaveUtc = DateTime.UtcNow;
+            _pendingSave = false;
 
             try
             {
                 Directory.CreateDirectory(SavesDir);
-                SaveDriverFile(CurrentDriver, GetOrCreateDriverData(CurrentDriver));
+                var driverData = GetOrCreateDriverData(CurrentDriver);
+                if (IsEmptyDriverData(driverData) && !File.Exists(DriverFilePath(CurrentDriver)))
+                    return;
+
+                SaveDriverFile(CurrentDriver, driverData);
             }
             catch
             {
@@ -925,7 +1043,7 @@ namespace LFSDriftTools
 
             return 0.00001 +
                    ((angle - _angleLevelThresholds[0]) /
-                   (MAX_DRIFT_ANGLE_DEG - _angleLevelThresholds[0])) * 2.99;
+                   Math.Max(1.0, MAX_DRIFT_ANGLE_DEG - _angleLevelThresholds[0])) * 2.99;
         }
 
         private static double SpeedScore(double kmh)
@@ -1305,7 +1423,9 @@ namespace LFSDriftTools
             double rpmFactor = Math.Clamp(_lastRpm / (BURNOUT_MIN_RPM ), 1.0, 5.0);
             ComboMultiplier = Math.Round(Math.Min(ComboMultiplier + (0.01 * rpmFactor * _dtSec), 10.0), 2);
 
-            long framePts = (long)Math.Round(BURNOUT_POINTS_PER_SECOND * ComboMultiplier * _dtSec * (_lastGear / 2.0));
+            double burnoutRaw = BURNOUT_POINTS_PER_SECOND * ComboMultiplier * _dtSec * (_lastGear / 2.0) + _burnoutPtsRemainder;
+            long framePts = (long)burnoutRaw;
+            _burnoutPtsRemainder = burnoutRaw - framePts;
 
             CurrentRunPoints += framePts;
             TotalScore += framePts;
@@ -1480,48 +1600,11 @@ namespace LFSDriftTools
 
         public void ResetTotal()
         {
+            ResetRunState();
+
             TotalScore = 0;
             LapScore = 0;
-            ComboMultiplier = 1;
-            CurrentRunPoints = 0;
-            IsDrifting = false;
-            IsSpeeding = false;
-            IsBurnout = false;
             _lapHadPenalty = false;
-            _burnoutConditionStart = DateTime.MinValue;
-            _lastBurnoutTime = DateTime.MinValue;
-            _lastBurnoutHeadingDeg = null;
-            _burnoutSpinAccumDeg = 0;
-            _burnoutActiveDuringSpin = false;
-            _lastSpinActivityTime = DateTime.MinValue;
-            _driftEntryStartTime = DateTime.MinValue;
-            _driftEntryEvaluated = false;
-            _previouslyDrifting = false;
-            _lastDriftTime = DateTime.MinValue;
-            _lastSpeedingTime = DateTime.MinValue;
-
-            _burnoutSpinComboCount = 0;
-            _lastBurnoutSpinBonusTime = DateTime.MinValue;
-            _donutComboCount = 0;
-            _lastDonutBonusTime = DateTime.MinValue;
-            _stationaryBurnoutStart = DateTime.MinValue;
-            _stationaryBurnoutTierAwarded = 0;
-            _driftSpinAccumDeg = 0;
-            _driftSpinLastHeadingDeg = null;
-            _driftSpinStartSet = false;
-            _driftSpinStartWasBurnout = false;
-            _donutPrevIsBurnout = null;
-            _wasDriftingPrev = false;
-            _lastTransitionBonusTime = DateTime.MinValue;
-            _burnoutActiveStartTime = DateTime.MinValue;
-            _pendingBurnoutToDrift = false;
-            _pendingDriftToBurnout = false;
-            _driftSpinSideChanged = false;
-            _powerSpinAccumDeg = 0;
-            _powerSpinLastHeadingDeg = null;
-            _powerSpinPending = false;
-            _powerSpinComboCount = 0;
-            _lastPowerSpinBonusTime = DateTime.MinValue;
 
             BestRunScore = 0;
             BestDriftDurationMs = 0;

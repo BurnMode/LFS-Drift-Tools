@@ -18,23 +18,22 @@ namespace LFSDriftTools
 
         private readonly System.Windows.Forms.Timer _renderTimer;
         private readonly System.Windows.Forms.Timer _trackTimer;
-        private Bitmap _buffer;
 
         private readonly PrivateFontCollection _fontCollection = new();
 
-        private Font _idleFont32;
-        private Font _activeFont22;
-        private Font _activeFont24;
-        private Font _activeFont32;
-        private Font _activeFont42;
-        private Font _activeFont20;
-        private Font _activeFont15;
-        private Font _activeFont11;
+        private Font _idleFont32 = null!;
+        private Font _activeFont22 = null!;
+        private Font _activeFont24 = null!;
+        private Font _activeFont32 = null!;
+        private Font _activeFont42 = null!;
+        private Font _activeFont20 = null!;
+        private Font _activeFont15 = null!;
+        private Font _activeFont11 = null!;
 
-        private Font _tachoTickFont;
-        private Font _tachoGearFont;
-        private Font _tachoSpeedFont;
-        private Font _tachoUnitFont;
+        private Font _tachoTickFont = null!;
+        private Font _tachoGearFont = null!;
+        private Font _tachoSpeedFont = null!;
+        private Font _tachoUnitFont = null!;
 
         private readonly SolidBrush _scratchBrush = new(Color.Black);
         private readonly Pen _scratchPen = new(Color.Black, 1f);
@@ -191,7 +190,7 @@ namespace LFSDriftTools
         public Color SpeedoTachoTickColor { get; set; } = Color.FromArgb(255, 215, 215, 218);
         public Color SpeedoTachoBackgroundColor { get; set; } = Color.FromArgb(50, 15, 15, 20);
 
-        public Image SpeedoBackgroundImage { get; set; } = null;
+        public Image? SpeedoBackgroundImage { get; set; } = null;
         public float SpeedoBackgroundPanX { get; set; } = 0f;
         public float SpeedoBackgroundPanY { get; set; } = 0f;
         public float SpeedoBackgroundZoom { get; set; } = 1.0f;
@@ -231,7 +230,7 @@ namespace LFSDriftTools
 
         private class BonusItem
         {
-            public string Text;
+            public string Text = "";
             public DateTime Start;
             public double DurationSec;
             public bool BoostOpacity;
@@ -459,8 +458,8 @@ namespace LFSDriftTools
             string title = Localization.T("hud.lastlapscore");
             string valueText = _lapResultScore.ToString("N0");
 
-            var titleSize = g.MeasureString(title, titleFont);
-            var valueSize = g.MeasureString(valueText, valueFont);
+            var titleSize = MeasureText(g, title, titleFont);
+            var valueSize = MeasureText(g, valueText, valueFont);
 
             float padV = 0;
             float centerX = Width / 2f + (float)offsetX;
@@ -482,7 +481,7 @@ namespace LFSDriftTools
             else
             {
                 string startText = Localization.T("hud.lapstart");
-                valueSize = g.MeasureString(startText, valueFont);
+                valueSize = MeasureText(g, startText, valueFont);
                 valueX = centerX - valueSize.Width / 2f;
                 DrawShimmerText(g, startText, valueFont, valueX, valueY, alpha, elapsed, Color.Yellow, Color.Gray);
             }
@@ -494,25 +493,39 @@ namespace LFSDriftTools
 
             float emPx = font.Size * g.DpiY / 72f;
 
-            using var path = new GraphicsPath();
-            path.AddString(text, font.FontFamily, (int)font.Style, emPx, new PointF(x, y), StringFormat.GenericTypographic);
+            if (_shimmerPath == null || _shimmerText != text || !ReferenceEquals(_shimmerFont, font) || _shimmerX != x || _shimmerY != y)
+            {
+                _shimmerPath?.Dispose();
+                _shimmerShadowPath?.Dispose();
 
-            var bounds = path.GetBounds();
+                _shimmerPath = new GraphicsPath();
+                _shimmerPath.AddString(text, font.FontFamily, (int)font.Style, emPx, new PointF(x, y), StringFormat.GenericTypographic);
+                _shimmerBounds = _shimmerPath.GetBounds();
+
+                _shimmerShadowPath = (GraphicsPath)_shimmerPath.Clone();
+                using (var shadowMatrix = new Matrix())
+                {
+                    shadowMatrix.Translate(1.5f, 1.5f);
+                    _shimmerShadowPath.Transform(shadowMatrix);
+                }
+
+                _shimmerText = text;
+                _shimmerFont = font;
+                _shimmerX = x;
+                _shimmerY = y;
+            }
+
+            var path = _shimmerPath;
+            var bounds = _shimmerBounds;
             if (bounds.Width <= 0 || bounds.Height <= 0) return;
 
-            using (var shadowMatrix = new Matrix())
-            {
-                shadowMatrix.Translate(1.5f, 1.5f);
-                using var shadowPath = (GraphicsPath)path.Clone();
-                shadowPath.Transform(shadowMatrix);
-                _scratchBrush.Color = WithAlpha(colorBack, alpha);
-                g.FillPath(_scratchBrush, shadowPath);
-            }
+            _scratchBrush.Color = WithAlpha(colorBack, alpha);
+            g.FillPath(_scratchBrush, _shimmerShadowPath!);
 
             _scratchBrush.Color = WithAlpha(color, alpha * 0.7f);
             g.FillPath(_scratchBrush, path);
 
-            using var oldClip = g.Clip;
+            var shimmerClipState = g.Save();
             g.SetClip(path, CombineMode.Replace);
 
             const double sweepCycleSec = 0.7;
@@ -538,7 +551,7 @@ namespace LFSDriftTools
                 g.FillRectangle(sweepBrush, sweepCenter - sweepWidth, bounds.Y - 4, sweepWidth * 2, bounds.Height + 8);
             }
 
-            g.Clip = oldClip;
+            g.Restore(shimmerClipState);
         }
 
         private void TrackTarget()
@@ -636,20 +649,48 @@ namespace LFSDriftTools
             double lapBoxEased = 1 - Math.Pow(1 - lapBoxT, 3);
             _lapBoxBlend = _lapBoxBlendFrom + (_lapBoxBlendTo - _lapBoxBlendFrom) * lapBoxEased;
 
-            Render();
-        }
-
-        private void Render()
-        {
-            if (Width <= 0 || Height <= 0) return;
-
-            if (_buffer == null || _buffer.Width != Width || _buffer.Height != Height)
+            if (!Visible)
             {
-                _buffer?.Dispose();
-                _buffer = new Bitmap(Width, Height, PixelFormat.Format32bppArgb);
+                SetRenderInterval(HiddenRenderIntervalMs);
+                return;
             }
 
-            using (var g = Graphics.FromImage(_buffer))
+            bool changed = Render();
+            UpdateRenderCadence(changed);
+        }
+
+        private const int ActiveRenderIntervalMs = 16;
+        private const int IdleRenderIntervalMs = 50;
+        private const int HiddenRenderIntervalMs = 100;
+        private const int IdleFrameThreshold = 30;
+        private int _unchangedFrames;
+
+        private void SetRenderInterval(int intervalMs)
+        {
+            if (_renderTimer.Interval != intervalMs)
+                _renderTimer.Interval = intervalMs;
+        }
+
+        private void UpdateRenderCadence(bool frameChanged)
+        {
+            if (frameChanged)
+            {
+                _unchangedFrames = 0;
+                SetRenderInterval(ActiveRenderIntervalMs);
+                return;
+            }
+
+            if (++_unchangedFrames >= IdleFrameThreshold)
+                SetRenderInterval(IdleRenderIntervalMs);
+        }
+
+        private bool Render()
+        {
+            if (Width <= 0 || Height <= 0) return false;
+
+            var surface = AcquireSurface();
+
+            using (var g = Graphics.FromImage(surface))
             {
                 g.Clear(Color.Transparent);
                 g.SmoothingMode = SmoothingMode.AntiAlias;
@@ -671,12 +712,15 @@ namespace LFSDriftTools
                         DrawLapResultPopup(g);
                     }
                 }
+                if (_scoreVisibleBlend <= 0.01)
+                    ReleaseScoreFadeBuffer();
+
                 DrawSpeedoTacho(g);
                 DrawControllerAssistBar(g, centerX);
                 DrawControllerAssistNotification(g, centerX);
             }
 
-            SetBitmap(_buffer);
+            return PresentSurface();
         }
 
         private void DrawControllerAssistNotification(Graphics g, float centerX)
@@ -692,7 +736,7 @@ namespace LFSDriftTools
 
             double alpha = remaining < 0.4 ? Math.Clamp(remaining / 0.4, 0, 1) : 1.0;
             var font = _activeFont20;
-            var size = g.MeasureString(_caNotificationText, font);
+            var size = MeasureText(g, _caNotificationText, font);
             float x = centerX - size.Width / 2f;
             float y = Height / 2f - size.Height / 2f;
 
@@ -700,6 +744,47 @@ namespace LFSDriftTools
                 WithAlpha(Color.White, alpha), WithAlpha(Color.Black, alpha * 0.6), outline: true);
         }
 
+        private readonly SolidBrush _caTrackBrush = new SolidBrush(Color.FromArgb(90, 255, 255, 255));
+        private readonly Pen _caCenterPen = new Pen(Color.FromArgb(70, 255, 255, 255), 1f);
+        private readonly SolidBrush _caRawBrush = new SolidBrush(Color.FromArgb(140, 255, 255, 255));
+        private readonly SolidBrush _caOutputBrush = new SolidBrush(Color.FromArgb(255, 10, 132, 255));
+
+        private readonly Dictionary<(int Kind, float X, float Y, float W, float H, float R), GraphicsPath> _pathCache = new();
+
+        private GraphicsPath GetCachedPath(int kind, RectangleF rect, float radius)
+        {
+            var key = (kind, rect.X, rect.Y, rect.Width, rect.Height, radius);
+            if (_pathCache.TryGetValue(key, out var cached)) return cached;
+
+            if (_pathCache.Count >= 128)
+            {
+                foreach (var path in _pathCache.Values) path.Dispose();
+                _pathCache.Clear();
+            }
+
+            GraphicsPath created = kind switch
+            {
+                0 => RoundedRect(rect, radius),
+                1 => RoundedLeftRect(rect, radius),
+                2 => RoundedRightRect(rect, radius),
+                _ => DrawingHelpers.RoundedPath(Rectangle.Round(rect), (int)radius),
+            };
+            _pathCache[key] = created;
+            return created;
+        }
+
+        private ImageAttributes? _fadeAttrs;
+        private ImageAttributes? _bgAttrs;
+        private float _bgAttrsOpacity = -1f;
+        private GraphicsPath? _dialClipPath;
+        private RectangleF _dialClipRect;
+
+        private GraphicsPath? _shimmerPath;
+        private GraphicsPath? _shimmerShadowPath;
+        private RectangleF _shimmerBounds;
+        private string? _shimmerText;
+        private Font? _shimmerFont;
+        private float _shimmerX, _shimmerY;
         private void DrawControllerAssistBar(Graphics g, float centerX)
         {
             if (!ControllerAssistBarVisible || !_controllerAssistActive) return;
@@ -709,21 +794,16 @@ namespace LFSDriftTools
             float y = Height - 44f;
 
             var track = new RectangleF(x, y, barW, barH);
-            using (var path = DrawingHelpers.RoundedPath(Rectangle.Round(track), (int)(barH / 2)))
-            using (var trackBrush = new SolidBrush(Color.FromArgb(90, 255, 255, 255)))
-                g.FillPath(trackBrush, path);
+            g.FillPath(_caTrackBrush, GetCachedPath(3, track, (int)(barH / 2)));
 
             float centerLineX = x + barW / 2f;
-            using (var pen = new Pen(Color.FromArgb(70, 255, 255, 255), 1f))
-                g.DrawLine(pen, centerLineX, y - 2f, centerLineX, y + barH + 2f);
+            g.DrawLine(_caCenterPen, centerLineX, y - 2f, centerLineX, y + barH + 2f);
 
             float rawX = x + (float)((_controllerAssistRawPercent + 100.0) / 200.0) * barW;
-            using (var rawBrush = new SolidBrush(Color.FromArgb(140, 255, 255, 255)))
-                g.FillRectangle(rawBrush, rawX - markerW / 2f, y + barH / 2f - markerH / 2f, markerW, markerH);
+            g.FillRectangle(_caRawBrush, rawX - markerW / 2f, y + barH / 2f - markerH / 2f, markerW, markerH);
 
             float outputX = x + (float)((_controllerAssistOutputPercent + 100.0) / 200.0) * barW;
-            using (var outputBrush = new SolidBrush(Color.FromArgb(255, 10, 132, 255)))
-                g.FillRectangle(outputBrush, outputX - markerW / 2f, y + barH / 2f - markerH / 2f - 3f, markerW, markerH + 6f);
+            g.FillRectangle(_caOutputBrush, outputX - markerW / 2f, y + barH / 2f - markerH / 2f - 3f, markerW, markerH + 6f);
         }
 
         private const float ScoreCollapseAnchorY = 26f;
@@ -749,14 +829,19 @@ namespace LFSDriftTools
 
             if (_scoreVisibleBlend >= 0.995 || Width <= 0 || Height <= 0)
             {
+                ReleaseScoreFadeBuffer();
                 DrawScoreContent(g, centerX, scale);
                 return;
             }
 
-            if (_scoreFadeBuffer == null || _scoreFadeBuffer.Width != Width || _scoreFadeBuffer.Height != Height)
+            int bufW = Math.Min(Width, ScoreFadeMaxWidth);
+            int bufH = Math.Min(Height, ScoreFadeMaxHeight);
+            int originX = (int)Math.Round(centerX - bufW / 2f);
+
+            if (_scoreFadeBuffer == null || _scoreFadeBuffer.Width != bufW || _scoreFadeBuffer.Height != bufH)
             {
                 _scoreFadeBuffer?.Dispose();
-                _scoreFadeBuffer = new Bitmap(Width, Height, PixelFormat.Format32bppArgb);
+                _scoreFadeBuffer = new Bitmap(bufW, bufH, PixelFormat.Format32bppArgb);
             }
 
             using (var fg = Graphics.FromImage(_scoreFadeBuffer))
@@ -765,14 +850,26 @@ namespace LFSDriftTools
                 fg.SmoothingMode = SmoothingMode.AntiAlias;
                 fg.TextRenderingHint = System.Drawing.Text.TextRenderingHint.AntiAlias;
                 fg.CompositingQuality = CompositingQuality.HighQuality;
+                fg.TranslateTransform(-originX, 0);
 
                 DrawScoreContent(fg, centerX, scale);
             }
 
-            using var attrs = new ImageAttributes();
+            _fadeAttrs ??= new ImageAttributes();
             var matrix = new ColorMatrix { Matrix33 = (float)_scoreVisibleBlend };
-            attrs.SetColorMatrix(matrix, ColorMatrixFlag.Default, ColorAdjustType.Bitmap);
-            g.DrawImage(_scoreFadeBuffer, new Rectangle(0, 0, Width, Height), 0, 0, Width, Height, GraphicsUnit.Pixel, attrs);
+            _fadeAttrs.SetColorMatrix(matrix, ColorMatrixFlag.Default, ColorAdjustType.Bitmap);
+            g.DrawImage(_scoreFadeBuffer, new Rectangle(originX, 0, bufW, bufH), 0, 0, bufW, bufH, GraphicsUnit.Pixel, _fadeAttrs);
+        }
+
+        private const int ScoreFadeMaxWidth = 1200;
+        private const int ScoreFadeMaxHeight = 500;
+
+        private void ReleaseScoreFadeBuffer()
+        {
+            if (_scoreFadeBuffer == null) return;
+
+            _scoreFadeBuffer.Dispose();
+            _scoreFadeBuffer = null;
         }
 
         private static double EaseOutBack(double t)
@@ -808,7 +905,7 @@ namespace LFSDriftTools
                 ? _notificationText!
                 : ((long)Math.Round(_displayedScore)).ToString("N0");
             var font = _idleFont32;
-            var size = g.MeasureString(text, font);
+            var size = MeasureText(g, text, font);
             idlebarY = size.Height;
             if (alpha <= 0.01) return;
             float x = centerX - size.Width / 2f + slideX;
@@ -828,11 +925,11 @@ namespace LFSDriftTools
 
             string scoreText = ((long)Math.Round(_displayedScore)).ToString("N0");
             var scoreFont = _activeFont32;
-            var scoreSize = g.MeasureString(scoreText, scoreFont);
+            var scoreSize = MeasureText(g, scoreText, scoreFont);
 
             var comboFont = _activeFont24;
             string comboText = $"x{_combo:0.0}";
-            var comboSize = g.MeasureString(comboText, comboFont);
+            var comboSize = MeasureText(g, comboText, comboFont);
 
             float comboH = comboSize.Height;
 
@@ -851,8 +948,8 @@ namespace LFSDriftTools
             string labelText = _driftLabelText ?? "";
             string runText = ((long)Math.Round(_displayedRun)).ToString("N0");
 
-            var labelSize = g.MeasureString(labelText, labelFont);
-            var runSize = g.MeasureString(runText, runFont);
+            var labelSize = MeasureText(g, labelText, labelFont);
+            var runSize = MeasureText(g, runText, runFont);
 
             float padH = 7, padV = 4;
             float targetLabelBoxW = labelSize.Width + padH * 2;
@@ -883,8 +980,8 @@ namespace LFSDriftTools
             double comboFraction = ComboTimeoutSec > 0 ? _comboRemainingSec / ComboTimeoutSec : 1.0;
             comboFraction = Math.Max(0, Math.Min(1, comboFraction));
 
-            using (var labelPath = RoundedLeftRect(new RectangleF(barX, barY, labelBoxW + 1, barH + 1), 6))
-            using (var oldClip = g.Clip)
+            var labelPath = GetCachedPath(1, new RectangleF(barX, barY, labelBoxW + 1, barH + 1), 6);
+            var labelClipState = g.Save();
             {
                 g.SetClip(labelPath, CombineMode.Replace);
 
@@ -898,11 +995,11 @@ namespace LFSDriftTools
                     g.FillRectangle(_scratchBrush, barX + labelBoxW - consumed, barY, consumed, barH);
                 }
 
-                g.Clip = oldClip;
+                g.Restore(labelClipState);
             }
 
-            using (var runPath = RoundedRightRect(new RectangleF(barX + labelBoxW, barY, runBoxW, barH), 6))
             {
+                var runPath = GetCachedPath(2, new RectangleF(barX + labelBoxW, barY, runBoxW, barH), 6);
                 _scratchBrush.Color = WithAlpha(Darken(_accentColor, 0.15), alpha - alphacut);
                 g.FillPath(_scratchBrush, runPath);
             }
@@ -939,7 +1036,7 @@ namespace LFSDriftTools
             {
                 string angleText = ((long)Math.Round(_displayedAngle)).ToString("N0") + "°";
                 var angleFont = _activeFont24;
-                var angleSize = g.MeasureString(angleText, angleFont);
+                var angleSize = MeasureText(g, angleText, angleFont);
                 float angleW = angleSize.Width;
                 float angleH = angleSize.Height;
 
@@ -973,7 +1070,7 @@ namespace LFSDriftTools
 
                 string current = c.Current.ToString();
                 const float LetterSpacing = -12f;
-                float w = g.MeasureString(current, font).Width + LetterSpacing;
+                float w = MeasureText(g, current, font).Width + LetterSpacing;
 
                 if (!c.Animating)
                 {
@@ -1078,7 +1175,7 @@ namespace LFSDriftTools
             for (int i = 0; i < _bonusItems.Count; i++)
             {
                 var item = _bonusItems[i];
-                var sz = g.MeasureString(item.Text, font);
+                var sz = MeasureText(g, item.Text, font);
                 float targetW = sz.Width + padH * 2;
                 float targetH = sz.Height + padV * 2 - 1;
 
@@ -1158,8 +1255,8 @@ namespace LFSDriftTools
                     float boxX = _bonusItems[i].DispX + (float)slideOffsets[i];
                     double itemAlphaCut = _bonusItems[i].BoostOpacity ? 0.1 : alphacut;
 
-                    using (var path = RoundedRect(new RectangleF(boxX, boxY, w, h), 6))
                     {
+                        var path = GetCachedPath(0, new RectangleF(boxX, boxY, w, h), 6);
                         _scratchBrush.Color = WithAlpha(_accentColor, alpha - itemAlphaCut);
                         g.FillPath(_scratchBrush, path);
                     }
@@ -1189,14 +1286,14 @@ namespace LFSDriftTools
             string bestValue = _bestLapScore.ToString("N0");
             string contextLabel = _lapContextLabel;
 
-            var lapLabelSize = g.MeasureString(lapLabel, titleFont);
-            var lapValueSize = g.MeasureString(lapValue, valueFont);
-            var lastLapLabelSize = g.MeasureString(lastLapLabel, titleFont);
-            var lastLapValueSize = g.MeasureString(lastLapValue, valueFont);
-            var bestLabelSize = g.MeasureString(bestLabel, titleFont);
-            var bestValueSize = g.MeasureString(bestValue, valueFont);
+            var lapLabelSize = MeasureText(g, lapLabel, titleFont);
+            var lapValueSize = MeasureText(g, lapValue, valueFont);
+            var lastLapLabelSize = MeasureText(g, lastLapLabel, titleFont);
+            var lastLapValueSize = MeasureText(g, lastLapValue, valueFont);
+            var bestLabelSize = MeasureText(g, bestLabel, titleFont);
+            var bestValueSize = MeasureText(g, bestValue, valueFont);
             var contextSize = string.IsNullOrEmpty(contextLabel)
-                ? SizeF.Empty : g.MeasureString(contextLabel, contextFont);
+                ? SizeF.Empty : MeasureText(g, contextLabel, contextFont);
 
             float boxW = Math.Max(
                 Math.Max(Math.Max(lapLabelSize.Width, lapValueSize.Width),
@@ -1215,8 +1312,8 @@ namespace LFSDriftTools
             float boxX = 24 + slideX;
             float boxY = (Height - boxH) / 2f;
 
-            using (var path = RoundedRect(new RectangleF(boxX, boxY, boxW, boxH), 10))
             {
+                var path = GetCachedPath(0, new RectangleF(boxX, boxY, boxW, boxH), 10);
                 _scratchBrush.Color = WithAlpha(Color.FromArgb(255, 18, 18, 22), alpha * 0.59);
                 g.FillPath(_scratchBrush, path);
             }
@@ -1382,18 +1479,28 @@ namespace LFSDriftTools
             float drawX = dialRect.X + diameter / 2f - drawW / 2f + SpeedoBackgroundPanX * diameter;
             float drawY = dialRect.Y + diameter / 2f - drawH / 2f + SpeedoBackgroundPanY * diameter;
 
-            using var path = new GraphicsPath();
-            path.AddEllipse(dialRect);
-            using var oldClip = g.Clip;
-            g.SetClip(path, CombineMode.Intersect);
+            if (_dialClipPath == null || _dialClipRect != dialRect)
+            {
+                _dialClipPath?.Dispose();
+                _dialClipPath = new GraphicsPath();
+                _dialClipPath.AddEllipse(dialRect);
+                _dialClipRect = dialRect;
+            }
 
-            using var attrs = new ImageAttributes();
-            var matrix = new ColorMatrix { Matrix33 = Math.Clamp(SpeedoBackgroundOpacity, 0f, 1f) };
-            attrs.SetColorMatrix(matrix, ColorMatrixFlag.Default, ColorAdjustType.Bitmap);
+            float opacity = Math.Clamp(SpeedoBackgroundOpacity, 0f, 1f);
+            if (_bgAttrs == null || _bgAttrsOpacity != opacity)
+            {
+                _bgAttrs ??= new ImageAttributes();
+                var matrix = new ColorMatrix { Matrix33 = opacity };
+                _bgAttrs.SetColorMatrix(matrix, ColorMatrixFlag.Default, ColorAdjustType.Bitmap);
+                _bgAttrsOpacity = opacity;
+            }
+
+            var clipState = g.Save();
+            g.SetClip(_dialClipPath, CombineMode.Intersect);
             g.DrawImage(img, new Rectangle((int)drawX, (int)drawY, (int)drawW, (int)drawH),
-                0, 0, img.Width, img.Height, GraphicsUnit.Pixel, attrs);
-
-            g.Clip = oldClip;
+                0, 0, img.Width, img.Height, GraphicsUnit.Pixel, _bgAttrs);
+            g.Restore(clipState);
         }
 
         private void DrawSpeedoTachoContent(Graphics g)
@@ -1462,7 +1569,7 @@ namespace LFSDriftTools
                 if (SpeedoTachoShowRpmDigits)
                 {
                     string label = i.ToString();
-                    var labelSize = g.MeasureString(label, tickFont);
+                    var labelSize = MeasureText(g, label, tickFont);
                     float labelR = innerR - 15;
                     float lx = cx + (float)Math.Cos(angleRad) * labelR - labelSize.Width / 2f;
                     float ly = cy + (float)Math.Sin(angleRad) * labelR - labelSize.Height / 2f;
@@ -1525,7 +1632,7 @@ namespace LFSDriftTools
 
             Font gearFont = _tachoGearFont;
             string gearText = GearToDisplayText(_currentGear);
-            var gearSize = g.MeasureString(gearText, gearFont);
+            var gearSize = MeasureText(g, gearText, gearFont);
             DrawOutlinedText(g, gearText, gearFont, (cx - 2) - gearSize.Width / 2f, cy - gearSize.Height / 2f,
                 SpeedoTachoTextColor, Color.FromArgb(200, 0, 0, 0), outline: false);
 
@@ -1537,7 +1644,7 @@ namespace LFSDriftTools
             string speedText = SpeedoTachoPlainDigits
                 ? ((int)Math.Round(displaySpeed)).ToString()
                 : ((int)Math.Round(displaySpeed)).ToString("D3");
-            var speedSize = g.MeasureString(speedText, speedFont);
+            var speedSize = MeasureText(g, speedText, speedFont);
             float speedX = cx - speedSize.Width / 2f;
             float speedY = cy + gearRadius + 10;
 
@@ -1547,7 +1654,7 @@ namespace LFSDriftTools
             if (SpeedoTachoShowUnit)
             {
                 string unitText = SpeedoTachoUseMph ? "MPH" : Localization.T("speedometer.unit").ToUpperInvariant();
-                var unitSize = g.MeasureString(unitText, unitFont);
+                var unitSize = MeasureText(g, unitText, unitFont);
                 DrawOutlinedText(g, unitText, unitFont,
                     cx + speedSize.Width / 2.5f - unitSize.Width, speedY,
                     WithAlpha(SpeedoTachoTextColor, (double)SpeedoTachoTextColor.A / 255.0 * 0.8), Color.FromArgb(180, 0, 0, 0), outline: false);
@@ -1581,16 +1688,33 @@ namespace LFSDriftTools
             }
         }
 
+        private readonly Dictionary<(string, Font), SizeF> _measureCache = new();
+
+        private SizeF MeasureText(Graphics g, string text, Font font)
+        {
+            if (string.IsNullOrEmpty(text)) return SizeF.Empty;
+
+            var key = (text, font);
+            if (_measureCache.TryGetValue(key, out var size)) return size;
+
+            if (_measureCache.Count >= 256) _measureCache.Clear();
+
+            size = g.MeasureString(text, font);
+            _measureCache[key] = size;
+            return size;
+        }
+
         private void DrawRevCutTextGlow(Graphics g, string text, Font font, float x, float y)
         {
             double glowStrength = GetRevCutGlowIntensity();
             if (glowStrength <= 0.01 || string.IsNullOrEmpty(text)) return;
 
             const int radius = 5;
-            _scratchBrush.Color = WithAlpha(Color.FromArgb(255, 40, 40), glowStrength * 0.05);
-            for (int ox = -radius; ox <= radius; ox++)
+            const int step = 2;
+            _scratchBrush.Color = WithAlpha(Color.FromArgb(255, 40, 40), glowStrength * 0.05 * step * step);
+            for (int ox = -radius + 1; ox <= radius; ox += step)
             {
-                for (int oy = -radius; oy <= radius; oy++)
+                for (int oy = -radius + 1; oy <= radius; oy += step)
                 {
                     if (ox == 0 && oy == 0) continue;
                     if (Math.Sqrt(ox * ox + oy * oy) > radius) continue;
@@ -1699,8 +1823,19 @@ namespace LFSDriftTools
                 _scratchPen?.Dispose();
                 _renderTimer?.Dispose();
                 _trackTimer?.Dispose();
-                _buffer?.Dispose();
                 _scoreFadeBuffer?.Dispose();
+
+                _caTrackBrush.Dispose();
+                _caCenterPen.Dispose();
+                _caRawBrush.Dispose();
+                _caOutputBrush.Dispose();
+                foreach (var cachedPath in _pathCache.Values) cachedPath.Dispose();
+                _pathCache.Clear();
+                _fadeAttrs?.Dispose();
+                _bgAttrs?.Dispose();
+                _dialClipPath?.Dispose();
+                _shimmerPath?.Dispose();
+                _shimmerShadowPath?.Dispose();
             }
             base.Dispose(disposing);
         }

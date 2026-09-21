@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Net;
 using System.Net.Sockets;
 using System.Threading;
@@ -41,6 +41,9 @@ namespace LFSDriftTools
         public OutGaugeData LastData { get; private set; } = new OutGaugeData();
         public bool IsRunning { get; private set; } = false;
 
+        public long PacketsReceived { get; private set; }
+        public DateTime LastPacketUtc { get; private set; } = DateTime.MinValue;
+
         public event Action<OutGaugeData>? DataReceived;
         public event Action<string>? Error;
 
@@ -53,10 +56,14 @@ namespace LFSDriftTools
             try
             {
                 _cts = new CancellationTokenSource();
-                _udp = new UdpClient(UdpPort);
+                _udp = new UdpClient(new IPEndPoint(IPAddress.Loopback, UdpPort));
                 _udp.Client.ReceiveTimeout = 2000;
                 IsRunning = true;
-                Task.Run(() => ReceiveLoop(_cts.Token));
+                PacketsReceived = 0;
+                LastPacketUtc = DateTime.MinValue;
+                var udp = _udp;
+                var token = _cts.Token;
+                Task.Run(() => ReceiveLoop(udp, token));
             }
             catch (Exception ex)
             {
@@ -75,32 +82,53 @@ namespace LFSDriftTools
             LastData = new OutGaugeData();
         }
 
-        private void ReceiveLoop(CancellationToken ct)
+        private DateTime _lastReceiveErrorAtUtc = DateTime.MinValue;
+
+        private void RaiseReceiveError(string message)
+        {
+            if ((DateTime.UtcNow - _lastReceiveErrorAtUtc).TotalSeconds < 5) return;
+            _lastReceiveErrorAtUtc = DateTime.UtcNow;
+
+            try { Error?.Invoke(message); }
+            catch { }
+        }
+        private void ReceiveLoop(UdpClient udp, CancellationToken ct)
         {
             var ep = new IPEndPoint(IPAddress.Any, 0);
             while (!ct.IsCancellationRequested)
             {
                 try
                 {
-                    byte[] data = _udp!.Receive(ref ep);
+                    byte[] data = udp.Receive(ref ep);
                     if (data.Length < 64) continue;
 
                     var og = ParseOutGauge(data);
+                    if (!IsFinite(og)) continue;
+
+                    PacketsReceived++;
+                    LastPacketUtc = DateTime.UtcNow;
                     LastData = og;
                     DataReceived?.Invoke(og);
                 }
                 catch (SocketException)
                 {
-                    if (!ct.IsCancellationRequested)
-                        continue;
+                    if (ct.IsCancellationRequested) break;
+                }
+                catch (ObjectDisposedException)
+                {
+                    break;
                 }
                 catch (Exception ex)
                 {
                     if (!ct.IsCancellationRequested)
-                        Error?.Invoke(string.Format(Localization.T("status.outgauge.receive_error"), ex.Message));
+                        RaiseReceiveError(string.Format(Localization.T("status.outgauge.receive_error"), ex.Message));
                 }
             }
         }
+
+        private static bool IsFinite(OutGaugeData og) =>
+            float.IsFinite(og.RPM) && float.IsFinite(og.Speed) && float.IsFinite(og.Throttle)
+            && float.IsFinite(og.EngTemp) && float.IsFinite(og.Fuel);
 
         private static OutGaugeData ParseOutGauge(byte[] d)
         {

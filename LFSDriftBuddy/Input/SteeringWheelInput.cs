@@ -1,4 +1,4 @@
-using LFSDriftTools;
+﻿using LFSDriftTools;
 using SharpDX.DirectInput;
 using System;
 using System.Collections.Generic;
@@ -9,28 +9,29 @@ using XInputApi = SharpDX.XInput;
 public class SteeringWheelInput : IDisposable
 {
     private readonly DirectInput _directInput;
-    private Joystick _wheel;
+    private Joystick? _wheel;
     private readonly System.Windows.Forms.Timer _pollTimer;
     private bool[] _previousButtons = Array.Empty<bool>();
     private readonly Dictionary<int, Action> _buttonBindings;
     private bool _autoConnectAttempted = false;
     private DateTime _reconnectRetryAt = DateTime.MaxValue;
     private const int ReconnectDelayMs = 1500;
+    private const int ReconnectRetryMs = 3000;
     public bool IsConnected => _wheel != null;
     public string DeviceName { get; private set; } = "";
     public Guid DeviceGuid { get; private set; } = Guid.Empty;
-    public event Action<string> Log;
+    public event Action<string>? Log;
 
-    public event Action<int> AnyButtonPressed;
+    public event Action<int>? AnyButtonPressed;
     public double SteeringPercent { get; private set; } = 0;
-    public event Action<double> SteeringChanged;
+    public event Action<double>? SteeringChanged;
 
-    public event Action<List<(Guid Guid, string Name)>> WheelNotFound;
+    public event Action<List<(Guid Guid, string Name)>>? WheelNotFound;
 
-    public event Action<Dictionary<JoystickOffset, int>> RawAxesChanged;
+    public event Action<Dictionary<JoystickOffset, int>>? RawAxesChanged;
 
     public bool IsXInputDevice => _useXInput;
-    public event Action<XInputApi.Gamepad> XInputStateChanged;
+    public event Action<XInputApi.Gamepad>? XInputStateChanged;
     public int XInputUserIndex => _useXInput ? _xinputUserIndex : -1;
 
     private const int AxisRange = 10000;
@@ -71,7 +72,7 @@ public class SteeringWheelInput : IDisposable
     {
         _buttonBindings.Remove(buttonIndex);
     }
-    private XInputApi.Controller _xinputPad;
+    private XInputApi.Controller? _xinputPad;
     private int _xinputUserIndex = -1;
     private bool _useXInput = false;
     private readonly IntPtr _ownerHandle;
@@ -168,7 +169,21 @@ public class SteeringWheelInput : IDisposable
             return;
         }
 
-        var state = _xinputPad.GetState();
+        XInputApi.State state;
+        try
+        {
+            state = _xinputPad.GetState();
+        }
+        catch (SharpDX.SharpDXException)
+        {
+            Log?.Invoke(Localization.T("wheelconfig.disconnectpad"));
+
+            _useXInput = false;
+            _xinputPad = null;
+            _reconnectRetryAt = DateTime.UtcNow.AddMilliseconds(ReconnectDelayMs);
+            return;
+        }
+
         XInputStateChanged?.Invoke(state.Gamepad);
 
         double newSteering = Math.Round(GetXInputAxisPercent(state.Gamepad, SteeringAxis), 1);
@@ -221,8 +236,7 @@ public class SteeringWheelInput : IDisposable
     public void SetSteeringAxis(JoystickOffset axis)
     {
         SteeringAxis = axis;
-        string text = Localization.T("wheelconfig.axis");
-        Log?.Invoke($"{text}{axis}");
+        Log?.Invoke(string.Format(Localization.T("wheelconfig.axis"), axis));
     }
 
     public static bool IsXInputPad(string productName) =>
@@ -293,18 +307,51 @@ public class SteeringWheelInput : IDisposable
             DeviceGuid = instanceGuid;
             _previousButtons = new bool[_wheel.Capabilities.ButtonCount];
 
-            Log?.Invoke($"{Localization.T("status.connected")} {DeviceName} ({Localization.T("wheelconfig.axis")}{SteeringAxis})");
+            Log?.Invoke($"{Localization.T("status.connected")} {DeviceName} ({string.Format(Localization.T("wheelconfig.axis"), SteeringAxis)})");
         }
         catch (SharpDX.SharpDXException ex)
         {
-            string text = Localization.T("wheelconfig.disconnecterror");
-            Log?.Invoke($"{text}{ex.Message}");
+            Log?.Invoke(string.Format(Localization.T("wheelconfig.disconnecterror"), ex.Message));
             _wheel = null;
         }
     }
 
+    private void TryReconnect()
+    {
+        if (DeviceGuid == Guid.Empty)
+        {
+            TryAutoConnect();
+            return;
+        }
+
+        if (IsXInputPad(DeviceName)) return;
+
+        var info = _directInput
+            .GetDevices(DeviceClass.GameControl, DeviceEnumerationFlags.AttachedOnly)
+            .FirstOrDefault(d => d.InstanceGuid == DeviceGuid);
+
+        if (info == null)
+        {
+            _reconnectRetryAt = DateTime.UtcNow.AddMilliseconds(ReconnectRetryMs);
+            return;
+        }
+
+        Connect(DeviceGuid, SteeringAxis, info.ProductName);
+
+        if (_wheel == null && !_useXInput)
+            _reconnectRetryAt = DateTime.UtcNow.AddMilliseconds(ReconnectRetryMs);
+    }
+
+    private const int ConnectedPollMs = 20;
+    private const int DisconnectedPollMs = 250;
+
     private void Poll()
     {
+        bool connected = _useXInput ? _xinputPad != null : _wheel != null;
+        int desiredInterval = connected ? ConnectedPollMs : DisconnectedPollMs;
+        if (_pollTimer.Interval != desiredInterval)
+            _pollTimer.Interval = desiredInterval;
+
         if (_useXInput)
         {
             PollXInput();
@@ -321,7 +368,7 @@ public class SteeringWheelInput : IDisposable
             else if (DateTime.UtcNow >= _reconnectRetryAt)
             {
                 _reconnectRetryAt = DateTime.MaxValue;
-                TryAutoConnect();
+                TryReconnect();
             }
             return;
         }
@@ -375,7 +422,7 @@ public class SteeringWheelInput : IDisposable
 
             _wheel = null;
             _reconnectRetryAt = DateTime.UtcNow.AddMilliseconds(ReconnectDelayMs);
-            Log?.Invoke(Localization.T("status.disconnectwheel"));
+            Log?.Invoke(Localization.T("wheelconfig.disconnectwheel"));
         }
     }
 

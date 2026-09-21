@@ -60,6 +60,9 @@ namespace LFSDriftTools
             if (!File.Exists(path))
                 return new DriverInstallResult { Success = false, Message = Localization.T("drivers.installer_missing") };
 
+            if (!InstallerSignatureTrust.IsTrusted(path))
+                return new DriverInstallResult { Success = false, Message = Localization.T("drivers.installer_untrusted") };
+
             try
             {
                 var psi = new ProcessStartInfo
@@ -72,7 +75,7 @@ namespace LFSDriftTools
 
                 using var proc = Process.Start(psi);
                 if (proc == null)
-                    return new DriverInstallResult { Success = false, Message = Localization.T("drivers.install_failed_exception") };
+                    return new DriverInstallResult { Success = false, Message = Localization.T("drivers.install_failed_start") };
 
                 await proc.WaitForExitAsync();
 

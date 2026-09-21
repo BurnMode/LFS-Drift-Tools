@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Numerics;
 
 namespace LFSDriftTools
@@ -7,6 +7,8 @@ namespace LFSDriftTools
     {
         public bool DataFresh;
         public float DataAgeSeconds;
+        public DateTime SampleReceivedUtc;
+        public uint SampleTimeMs;
         public bool Moving;
 
         public float SpeedKmh;
@@ -27,6 +29,8 @@ namespace LFSDriftTools
         {
             DataFresh = false;
             DataAgeSeconds = 0;
+            SampleReceivedUtc = DateTime.MinValue;
+            SampleTimeMs = 0;
             Moving = false;
             SpeedKmh = 0;
             YawRateRadS = 0;
@@ -92,6 +96,9 @@ namespace LFSDriftTools
             state.DataFresh = age < StaleAfterSeconds;
             if (!state.DataFresh)
                 return state;
+
+            state.SampleReceivedUtc = last.ReceivedAtUtc;
+            state.SampleTimeMs = last.TimeMs;
 
             float dt = (float)Math.Min(age, MaxExtrapolationSeconds);
 

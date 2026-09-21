@@ -1,4 +1,5 @@
-using System;
+﻿using System;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Threading;
@@ -37,9 +38,6 @@ namespace LFSDriftTools
         }
 
         [DllImport("user32.dll", SetLastError = true)]
-        private static extern IntPtr FindWindow(string? lpClassName, string lpWindowName);
-
-        [DllImport("user32.dll", SetLastError = true)]
         private static extern bool PostMessage(IntPtr hWnd, uint Msg, IntPtr wParam, IntPtr lParam);
 
         private const uint WM_KEYDOWN = 0x0100;
@@ -75,8 +73,8 @@ namespace LFSDriftTools
                 LampStateChanged?.Invoke(isOn);
         }
 
-        private static LowLevelKeyboardHook _keyboardHook;
-        private static IndicatorManager _instance;
+        private static LowLevelKeyboardHook? _keyboardHook;
+        private static IndicatorManager? _instance;
 
         public IndicatorManager()
         {
@@ -88,11 +86,25 @@ namespace LFSDriftTools
             }
         }
 
+        [DllImport("user32.dll")]
+        private static extern IntPtr GetForegroundWindow();
+
+        private static bool IsLfsForeground()
+        {
+            IntPtr lfs = LfsWindow.Find();
+            return lfs != IntPtr.Zero && GetForegroundWindow() == lfs;
+        }
+
         private static void KeyboardHook_OnKeyDown(Keys key)
         {
             if (_instance == null) return;
 
             int keyCode = (int)key;
+
+            bool isIndicatorKey = keyCode == _instance.LeftKeyCode
+                               || keyCode == _instance.RightKeyCode
+                               || keyCode == _instance.HazardKeyCode;
+            if (!isIndicatorKey || !IsLfsForeground()) return;
 
             if (keyCode == _instance.LeftKeyCode)
                 _instance.ToggleLeft();
@@ -141,7 +153,7 @@ namespace LFSDriftTools
 
         public void SendKeyToLFS()
         {
-            IntPtr hwnd = FindLfsWindow();
+            IntPtr hwnd = LfsWindow.Find();
             if (hwnd == IntPtr.Zero) return;
 
             int keyCode = GetKeyCodeForState();
@@ -160,17 +172,6 @@ namespace LFSDriftTools
                 IndicatorState.Hazard => VK_9,
                 _ => VK_0
             };
-        }
-
-        private static IntPtr FindLfsWindow()
-        {
-            string[] titles = { "LFS", "Live for Speed", "LFS S3", "LFS S2", "LFS Demo" };
-            foreach (var t in titles)
-            {
-                IntPtr h = FindWindow(null, t);
-                if (h != IntPtr.Zero) return h;
-            }
-            return IntPtr.Zero;
         }
 
                 public void Update()
@@ -195,6 +196,9 @@ namespace LFSDriftTools
 
         public void Dispose()
         {
+            if (ReferenceEquals(_instance, this))
+                _instance = null;
+
             _keyboardHook?.Dispose();
             _keyboardHook = null;
         }
@@ -202,72 +206,33 @@ namespace LFSDriftTools
 
         public class LowLevelKeyboardHook : IDisposable
     {
-        private const int WH_KEYBOARD_LL = 13;
-        private const int WM_KEYDOWN = 0x0100;
-        private const int WM_KEYUP = 0x0101;
-
-        private delegate IntPtr LowLevelKeyboardProc(int nCode, IntPtr wParam, IntPtr lParam);
-
-        private IntPtr _hookHandle = IntPtr.Zero;
-        private LowLevelKeyboardProc _hookProc;
-
         public event Action<Keys>? OnKeyDown;
 
-        [DllImport("user32.dll", SetLastError = true)]
-        private static extern IntPtr SetWindowsHookEx(int idHook, LowLevelKeyboardProc lpfn, IntPtr hMod, uint dwThreadId);
-
-        [DllImport("user32.dll", SetLastError = true)]
-        private static extern bool UnhookWindowsHookEx(IntPtr hhk);
-
-        [DllImport("user32.dll")]
-        private static extern IntPtr CallNextHookEx(IntPtr hhk, int nCode, IntPtr wParam, IntPtr lParam);
-
-        [DllImport("kernel32.dll", CharSet = CharSet.Auto, SetLastError = true)]
-        private static extern IntPtr GetModuleHandle(string? lpModuleName);
-
-        [StructLayout(LayoutKind.Sequential)]
-        private struct KBDLLHOOKSTRUCT
-        {
-            public uint vkCode;
-            public uint scanCode;
-            public uint flags;
-            public uint time;
-            public IntPtr dwExtraInfo;
-        }
+        private readonly HashSet<Keys> _heldKeys = new();
 
         public LowLevelKeyboardHook()
         {
-            _hookProc = HookCallback;
-            _hookHandle = SetupHook();
+            KeyboardHookHub.Subscribe(OnKey);
         }
 
-        private IntPtr SetupHook()
+        private void OnKey(Keys key, bool down, bool isSystem)
         {
-            using Process curProcess = Process.GetCurrentProcess();
-            using ProcessModule? curModule = curProcess.MainModule;
+            if (isSystem) return;
 
-            return SetWindowsHookEx(WH_KEYBOARD_LL, _hookProc,
-                GetModuleHandle(curModule?.ModuleName), 0);
-        }
-
-        private IntPtr HookCallback(int nCode, IntPtr wParam, IntPtr lParam)
-        {
-            if (nCode >= 0 && wParam == (IntPtr)WM_KEYDOWN)
+            if (!down)
             {
-                var kbdStruct = Marshal.PtrToStructure<KBDLLHOOKSTRUCT>(lParam);
-                OnKeyDown?.Invoke((Keys)kbdStruct.vkCode);
+                _heldKeys.Remove(key);
+                return;
             }
 
-            return CallNextHookEx(_hookHandle, nCode, wParam, lParam);
+            if (!_heldKeys.Add(key)) return;
+
+            OnKeyDown?.Invoke(key);
         }
 
         public void Dispose()
         {
-            if (_hookHandle != IntPtr.Zero)
-            {
-                UnhookWindowsHookEx(_hookHandle);
-                _hookHandle = IntPtr.Zero;
-            }
+            KeyboardHookHub.Unsubscribe(OnKey);
         }
     }
 }

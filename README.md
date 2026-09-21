@@ -1,6 +1,6 @@
 # LFS Drift Tools
 
-**Version v0.774.0920.alpha**
+**Version v0.786.0921.alpha**
 
 **LFS Drift Tools** is a companion application for [Live for Speed](https://www.lfs.net/). It connects to LFS through InSim, OutGauge and OutSim2 and adds drift scoring, collision detection, an in-game HUD, a transparent overlay, a rev limiter, turn signals and a steering assist for gamepads.
 
@@ -27,7 +27,7 @@
   - Steering bar overlay in the game window.
   - A bindable hotkey next to the main switch. It toggles Steering Assist only, so the virtual pad stays connected and you don't have to reselect the device in LFS. Vibration keeps working.
   - LFS reads controllers only at startup. If LFS was already running, the app shows a notice with the exact name of the virtual pad to select in Options > Controls, after refreshing the controller list.
-  - ViGEmBus and HidHide installers are bundled and can be started from the app.
+  - ViGEmBus and HidHide installers are bundled and can be started from the app. The app verifies the installer's digital signature (publisher Nefarius Software Solutions) before it asks Windows for administrator rights, and refuses to run a file that fails the check.
 
 - **Turn signals and hazards**
   Steering-based automatic cancel, hazard lights and light toggle, with keyboard and wheel/gamepad bindings. Left/right signal and high beam telltales come from OutGauge.
@@ -46,6 +46,8 @@
 
 - **Settings**
   Bindings, calibration, colors and options are saved locally and restored on startup. Options that are turned off automatically because of missing data (no pad, no OutSim2, no OutGauge) return to your last choice when the data is back.
+  Files are written atomically with a `.bak` copy. A file that cannot be read is moved aside as `*.corrupt_<date>` and defaults are used, and one broken group of settings does not stop the others from loading. Rev limiter values outside the allowed range are replaced with safe defaults on load.
+  Assigning a key or button that is already used by another function moves it to the new function and tells you in the status text.
 
 ## Requirements
 
@@ -71,7 +73,7 @@ The app uses three connections. Each one enables its own features.
 
 ### Automatic
 
-Set the LFS game folder in the app and click **Configure LFS cfg**. The app changes only the lines below in `cfg.txt`, leaves the rest of the file untouched and saves the previous file as `cfg.txt.bak`. Restart LFS afterwards.
+Set the LFS game folder in the app and click **Configure LFS cfg**. The app changes only the lines below in `cfg.txt` and keeps every other byte of the file as it was, including non-ASCII characters. The first time it saves the original file as `cfg.txt.bak` (an existing backup is never overwritten), and the new file is written atomically. Close LFS before you run it, otherwise the game may overwrite the change. Restart LFS afterwards.
 
 ```
 InSim 29999
@@ -88,14 +90,16 @@ OutSim ID 0
 OutSim Opts bf
 ```
 
-The ports and OutSim Opts follow the values set in the app.
+The ports and OutSim Opts follow the values set in the app. OutSim Opts must be a hexadecimal number (for example `bf`), otherwise nothing is written.
+
+OutGauge and OutSim2 packets are accepted only on `127.0.0.1`, so LFS and the app must run on the same computer. On startup, and after you change the LFS folder, the app compares the InSim, OutGauge and OutSim lines in `cfg.txt` with its own settings and shows a warning in the status text when they differ.
 
 ### Manual
 
 - InSim: type `/insim <port>` in LFS, or start LFS with `LFS /insim=<port>`. Enter the same host and port in the app and click **Connect**.
 - OutGauge and OutSim2: edit `cfg.txt` as shown above.
 
-`cfg.txt` is read only when LFS starts, so restart LFS after every change. The OutSim Opts value in the app must match `OutSim Opts` in `cfg.txt` exactly.
+`cfg.txt` is read only when LFS starts, so restart LFS after every change. The OutSim Opts value in the app must match `OutSim Opts` in `cfg.txt` exactly. OutSim2 packets whose size does not match the Opts are rejected, and the status text shows a warning about the mismatch.
 
 ### Checking the connections
 
@@ -113,7 +117,11 @@ The ports and OutSim Opts follow the values set in the app.
 
 ## Troubleshooting
 
-Unhandled exceptions are written to `crash.log` next to the executable. A crash with no entry there is usually a native error. Check Windows Event Viewer, Windows Logs > Application.
+Unhandled exceptions are written to `crash.log` next to the executable (up to 1 MB, then the file is moved to `crash.log.old`). A crash with no entry there is usually a native error. Check Windows Event Viewer, Windows Logs > Application.
+
+If the app reports that a settings or driver file could not be read, the damaged file is kept next to the original as `*.corrupt_<date>`. The previous good version is usually available as `*.bak`.
+
+If the OutGauge or OutSim2 status stays empty although LFS is running, check that `cfg.txt` uses `127.0.0.1` for both IP lines and the same ports as the app, and that no other program uses those ports.
 
 ## Disclaimer
 

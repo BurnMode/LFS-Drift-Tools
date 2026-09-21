@@ -1,20 +1,21 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Net.Sockets;
 using System.Text;
 using System.Threading;
+using System.Threading.Tasks;
 
 namespace LFSDriftTools.InSim
 {
     public class CarDataEventArgs : EventArgs
     {
-        public CompCar Car { get; set; }
+        public CompCar Car { get; set; } = new();
     }
 
     public class StatusEventArgs : EventArgs
     {
-        public string Message { get; set; }
+        public string Message { get; set; } = "";
         public bool IsError { get; set; }
     }
 
@@ -32,7 +33,7 @@ namespace LFSDriftTools.InSim
 
     public class PlayerNameEventArgs : PlidEventArgs
     {
-                public string PName { get; set; }
+                public string PName { get; set; } = "";
     }
 
     public class CheckpointCrossedEventArgs : PlidEventArgs
@@ -45,7 +46,7 @@ namespace LFSDriftTools.InSim
     {
                 public byte ObjectIndex { get; set; }
 
-                public string ObjectName { get; set; }
+                public string ObjectName { get; set; } = "";
     }
 
     public class DerbyCarContact
@@ -62,49 +63,58 @@ namespace LFSDriftTools.InSim
     public class CarContactEventArgs : EventArgs
     {
         public double ClosingSpeedKmh { get; set; }
-        public DerbyCarContact A { get; set; }
-        public DerbyCarContact B { get; set; }
+        public DerbyCarContact A { get; set; } = new();
+        public DerbyCarContact B { get; set; } = new();
     }
 
         public class InSimConnection : IDisposable
     {
 
-        public event EventHandler<CarDataEventArgs> CarDataReceived;
-        public event EventHandler<StatusEventArgs> StatusChanged;
-        public event EventHandler Connected;
-        public event EventHandler Disconnected;
+        public event EventHandler<CarDataEventArgs>? CarDataReceived;
+        public event EventHandler<StatusEventArgs>? StatusChanged;
+        public event EventHandler? Connected;
+        public event EventHandler? Disconnected;
 
         public event EventHandler<string>? ConnectFailed;
-        public event EventHandler<LapCompletedEventArgs> LapCompleted;
-        public event EventHandler<string> TrackChanged;
-        public event EventHandler<string> LayoutChanged;
-        public event EventHandler<PlidEventArgs> CarReset;
-        public event EventHandler RaceRestarted;
-        public event EventHandler<PlidEventArgs> PitLaneEntered;
-        public event EventHandler<PlidEventArgs> PitLaneExited;
-        public event EventHandler<PlidEventArgs> PlayerPitted;
-        public event EventHandler<CheckpointCrossedEventArgs> CheckpointCrossed;
-        public event EventHandler<PlidEventArgs> RestrictedAreaEntered;
-        public event EventHandler<ObjectHitEventArgs> ObjectHit;
-        public event EventHandler<byte[]> RawObjectHitDebug;
-        public event EventHandler<CarContactEventArgs> CarContact;
-        public event EventHandler<PlayerNameEventArgs> PlayerNamed;
+        public event EventHandler<LapCompletedEventArgs>? LapCompleted;
+        public event EventHandler<string>? TrackChanged;
+        public event EventHandler<string>? LayoutChanged;
+        public event EventHandler<PlidEventArgs>? CarReset;
+        public event EventHandler? RaceRestarted;
+        public event EventHandler<PlidEventArgs>? PitLaneEntered;
+        public event EventHandler<PlidEventArgs>? PitLaneExited;
+        public event EventHandler<PlidEventArgs>? PlayerPitted;
+        public event EventHandler<CheckpointCrossedEventArgs>? CheckpointCrossed;
+        public event EventHandler<PlidEventArgs>? RestrictedAreaEntered;
+        public event EventHandler<ObjectHitEventArgs>? ObjectHit;
+        public event EventHandler<byte[]>? RawObjectHitDebug;
+        public event EventHandler<CarContactEventArgs>? CarContact;
+        public event EventHandler<PlayerNameEventArgs>? PlayerNamed;
 
-        private TcpClient _client;
-        private NetworkStream _stream;
-        private Thread _receiveThread;
-        private byte[] _buffer = new byte[8192];
-        private int _bufferLen = 0;
+        private TcpClient? _client;
+        private NetworkStream? _stream;
+        private Thread? _receiveThread;
+        private int _connectionGeneration;
         private volatile bool _running = false;
         private volatile bool _disconnectedNotified = false;
         private StateFlags _gameState = 0;
         public StateFlags GameState => _gameState;
         public byte ViewPLID { get; private set; } = 0;
+        public byte LocalPlayerPLID { get; private set; } = 0;
         public string CurrentTrack { get; private set; } = "";
 
         private readonly Dictionary<byte, string> _playerNames = new();
         private readonly Dictionary<byte, byte> _ucidToPlid = new();
-        public string? GetPlayerName(byte plid) => _playerNames.TryGetValue(plid, out var n) ? n : null;
+        private readonly object _playersLock = new();
+        private readonly object _sendLock = new();
+
+        public string? GetPlayerName(byte plid)
+        {
+            lock (_playersLock)
+            {
+                return _playerNames.TryGetValue(plid, out var n) ? n : null;
+            }
+        }
         public string CurrentLayout { get; private set; } = "";
 
         private static readonly Dictionary<byte, string> AxoObjectNames = new()
@@ -196,6 +206,7 @@ namespace LFSDriftTools.InSim
                 _client = new TcpClient();
 
                 var connectTask = _client.ConnectAsync(host, port);
+                connectTask.ContinueWith(t => _ = t.Exception, TaskContinuationOptions.OnlyOnFaulted);
                 if (!connectTask.Wait(ConnectTimeoutMs))
                 {
                     Cleanup();
@@ -205,11 +216,13 @@ namespace LFSDriftTools.InSim
                     return;
                 }
 
-                _stream = _client.GetStream();
+                var stream = _client.GetStream();
+                _stream = stream;
+                int generation = ++_connectionGeneration;
                 _running = true;
                 _disconnectedNotified = false;
 
-                _receiveThread = new Thread(ReceiveLoop)
+                _receiveThread = new Thread(() => ReceiveLoop(generation, stream))
                 {
                     IsBackground = true,
                     Name = "InSim-Receive"
@@ -247,6 +260,7 @@ namespace LFSDriftTools.InSim
             if (_running)
             {
                 _running = false;
+                _connectionGeneration++;
                 Cleanup();
                 if (!_disconnectedNotified)
                 {
@@ -261,7 +275,10 @@ namespace LFSDriftTools.InSim
         {
             try
             {
-                _stream?.Write(data, 0, data.Length);
+                lock (_sendLock)
+                {
+                    _stream?.Write(data, 0, data.Length);
+                }
             }
             catch (Exception ex)
             {
@@ -303,64 +320,75 @@ namespace LFSDriftTools.InSim
 
                 public void RequestPlayerList() => Send(Packets.BuildTiny(9, TinyType.TINY_NPL));
 
-        private void ReceiveLoop()
+        private void ReceiveLoop(int generation, NetworkStream stream)
         {
             byte[] tmp = new byte[4096];
+            byte[] buffer = new byte[8192];
+            int bufferLen = 0;
 
             try
             {
-                while (_running)
+                while (_running && generation == _connectionGeneration)
                 {
-                    int read = _stream.Read(tmp, 0, tmp.Length);
+                    int read = stream.Read(tmp, 0, tmp.Length);
                     if (read == 0) break;
 
-                    if (_bufferLen + read > _buffer.Length)
+                    if (bufferLen + read > buffer.Length)
                     {
-                        byte[] newBuf = new byte[_buffer.Length * 2];
-                        Array.Copy(_buffer, newBuf, _bufferLen);
-                        _buffer = newBuf;
+                        byte[] newBuf = new byte[buffer.Length * 2];
+                        Array.Copy(buffer, newBuf, bufferLen);
+                        buffer = newBuf;
                     }
-                    Array.Copy(tmp, 0, _buffer, _bufferLen, read);
-                    _bufferLen += read;
+                    Array.Copy(tmp, 0, buffer, bufferLen, read);
+                    bufferLen += read;
 
-                    ProcessBuffer();
+                    ProcessBuffer(buffer, ref bufferLen);
                 }
             }
             catch (Exception ex)
             {
-                if (_running)
+                if (_running && generation == _connectionGeneration)
                     RaiseStatus(string.Format(Localization.T("status.insim.receive_error"), ex.Message), isError: true);
             }
             finally
             {
-                _running = false;
-                Cleanup();
-                if (!_disconnectedNotified)
+                if (generation == _connectionGeneration)
                 {
-                    _disconnectedNotified = true;
-                    Disconnected?.Invoke(this, EventArgs.Empty);
+                    _running = false;
+                    Cleanup();
+                    if (!_disconnectedNotified)
+                    {
+                        _disconnectedNotified = true;
+                        Disconnected?.Invoke(this, EventArgs.Empty);
+                    }
                 }
             }
         }
 
-        private void ProcessBuffer()
+        private void ProcessBuffer(byte[] buffer, ref int bufferLen)
         {
-            while (_bufferLen >= 4)
-            {
+            int offset = 0;
 
-                int packetSize = _buffer[0] * 4;
+            while (bufferLen - offset >= 4)
+            {
+                int packetSize = buffer[offset] * 4;
                 if (packetSize < 4) packetSize = 4;
 
-                if (_bufferLen < packetSize) break;
+                if (bufferLen - offset < packetSize) break;
 
                 byte[] packet = new byte[packetSize];
-                Array.Copy(_buffer, packet, packetSize);
-
-                int remaining = _bufferLen - packetSize;
-                Array.Copy(_buffer, packetSize, _buffer, 0, remaining);
-                _bufferLen = remaining;
+                Array.Copy(buffer, offset, packet, 0, packetSize);
+                offset += packetSize;
 
                 HandlePacket(packet);
+            }
+
+            if (offset > 0)
+            {
+                int remaining = bufferLen - offset;
+                if (remaining > 0)
+                    Array.Copy(buffer, offset, buffer, 0, remaining);
+                bufferLen = remaining;
             }
         }
 
@@ -498,11 +526,21 @@ namespace LFSDriftTools.InSim
 
             byte plid = p[3];
             byte ucid = p[4];
+            byte ptype = p[5];
             string pname = StripLfsColorCodes(ReadNullPaddedLatin1(p, 8, 24));
             if (string.IsNullOrWhiteSpace(pname)) return;
 
-            _ucidToPlid[ucid] = plid;
-            _playerNames[plid] = pname;
+            bool isRemoteOrAi = (ptype & 6) != 0;
+            if (!isRemoteOrAi)
+                LocalPlayerPLID = plid;
+            else if (LocalPlayerPLID == plid)
+                LocalPlayerPLID = 0;
+
+            lock (_playersLock)
+            {
+                _ucidToPlid[ucid] = plid;
+                _playerNames[plid] = pname;
+            }
             PlayerNamed?.Invoke(this, new PlayerNameEventArgs { PLID = plid, PName = pname });
         }
 
@@ -512,12 +550,19 @@ namespace LFSDriftTools.InSim
             if (p.Length < 28) return;
 
             byte ucid = p[3];
-            if (!_ucidToPlid.TryGetValue(ucid, out byte plid)) return;
+            byte plid;
+            lock (_playersLock)
+            {
+                if (!_ucidToPlid.TryGetValue(ucid, out plid)) return;
+            }
 
             string pname = StripLfsColorCodes(ReadNullPaddedLatin1(p, 4, 24));
             if (string.IsNullOrWhiteSpace(pname)) return;
 
-            _playerNames[plid] = pname;
+            lock (_playersLock)
+            {
+                _playerNames[plid] = pname;
+            }
             PlayerNamed?.Invoke(this, new PlayerNameEventArgs { PLID = plid, PName = pname });
         }
 
@@ -593,6 +638,7 @@ namespace LFSDriftTools.InSim
         private void HandleRst(byte[] p)
         {
             RaiseStatus("DEBUG RST (race restarted)");
+            LocalPlayerPLID = 0;
             RaceRestarted?.Invoke(this, EventArgs.Empty);
         }
 
@@ -717,6 +763,7 @@ namespace LFSDriftTools.InSim
             try { _client?.Close(); } catch { }
             _stream = null;
             _client = null;
+            LocalPlayerPLID = 0;
         }
 
         private void RaiseStatus(string message, bool isError = false)

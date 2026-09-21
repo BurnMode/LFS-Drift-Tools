@@ -1,4 +1,5 @@
-using System;
+﻿using System;
+using System.IO;
 using System.Net;
 using System.Net.Sockets;
 using System.Numerics;
@@ -118,7 +119,7 @@ namespace LFSDriftTools
             try
             {
                 _cts = new CancellationTokenSource();
-                _udp = new UdpClient(UdpPort);
+                _udp = new UdpClient(new IPEndPoint(IPAddress.Loopback, UdpPort));
                 _udp.Client.ReceiveTimeout = 2000;
                 IsRunning = true;
                 PacketsReceived = 0;
@@ -144,6 +145,16 @@ namespace LFSDriftTools
             LastSample = null;
         }
 
+        private DateTime _lastReceiveErrorAtUtc = DateTime.MinValue;
+
+        private void RaiseReceiveError(string message)
+        {
+            if ((DateTime.UtcNow - _lastReceiveErrorAtUtc).TotalSeconds < 5) return;
+            _lastReceiveErrorAtUtc = DateTime.UtcNow;
+
+            try { Error?.Invoke(message); }
+            catch { }
+        }
         private void ReceiveLoop(UdpClient udp, CancellationToken ct)
         {
             var ep = new IPEndPoint(IPAddress.Any, 0);
@@ -166,7 +177,8 @@ namespace LFSDriftTools
                         if ((DateTime.UtcNow - _lastRejectWarnAtUtc).TotalSeconds > 5)
                         {
                             _lastRejectWarnAtUtc = DateTime.UtcNow;
-                            Warning?.Invoke(string.Format(Localization.T("status.outsim.opts_mismatch"), data.Length));
+                            try { Warning?.Invoke(string.Format(Localization.T("status.outsim.opts_mismatch"), data.Length)); }
+                            catch { }
                         }
                     }
                 }
@@ -181,7 +193,7 @@ namespace LFSDriftTools
                 catch (Exception ex)
                 {
                     if (!ct.IsCancellationRequested)
-                        Error?.Invoke(string.Format(Localization.T("status.outsim.receive_error"), ex.Message));
+                        RaiseReceiveError(string.Format(Localization.T("status.outsim.receive_error"), ex.Message));
                 }
             }
         }
@@ -276,10 +288,13 @@ namespace LFSDriftTools
                     s.HasExtra1 = true;
                 }
 
+                if (offset != data.Length)
+                    return false;
+
                 sample = s;
                 return true;
             }
-            catch (Exception ex) when (ex is IndexOutOfRangeException or ArgumentOutOfRangeException or ArgumentException)
+            catch (Exception ex) when (ex is IndexOutOfRangeException or ArgumentOutOfRangeException or ArgumentException or InvalidDataException)
             {
                 return false;
             }
@@ -288,6 +303,9 @@ namespace LFSDriftTools
         private static float ReadFloat(byte[] d, ref int offset)
         {
             float v = BitConverter.ToSingle(d, offset);
+            if (!float.IsFinite(v))
+                throw new InvalidDataException();
+
             offset += 4;
             return v;
         }

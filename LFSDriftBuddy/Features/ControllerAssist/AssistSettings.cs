@@ -41,13 +41,13 @@ namespace LFSDriftTools
                     SlipFullDeg = 15.0,
                     AssistStrength = 0.35,
                     MaxSteerRatePerSec = 20.0,
-                    SmoothingMs = 75,
+                    SmoothingMs = 65,
                 },
                 AssistPreset.Medium => new AssistSettings
                 {
                     Preset = AssistPreset.Medium,
                     DeadzonePercent = 3.0,
-                    ResponseCurve = 1.5,
+                    ResponseCurve = 1.3,
                     SpeedSensitivityRefKmh = 100,
                     MinHighSpeedSteerFraction = 0.35,
                     CountersteerGain = 2.4,
@@ -56,8 +56,8 @@ namespace LFSDriftTools
                     SlipActivationDeg = 1.0,
                     SlipFullDeg = 15.0,
                     AssistStrength = 0.50,
-                    MaxSteerRatePerSec = 30.0,
-                    SmoothingMs = 70,
+                    MaxSteerRatePerSec = 35.0,
+                    SmoothingMs = 50,
                 },
                 AssistPreset.Strong => new AssistSettings
                 {
@@ -73,7 +73,7 @@ namespace LFSDriftTools
                     SlipFullDeg = 10.0,
                     AssistStrength = 0.75,
                     MaxSteerRatePerSec = 35.0,
-                    SmoothingMs = 65,
+                    SmoothingMs = 55,
                 },
                 _ => new AssistSettings { Preset = AssistPreset.Custom },
             };

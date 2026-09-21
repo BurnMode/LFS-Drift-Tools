@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Runtime.InteropServices;
 using System.Threading;
 using System.Threading.Tasks;
@@ -9,9 +9,6 @@ namespace LFSDriftTools
 
     public class RevLimiter : IDisposable
     {
-
-        [DllImport("user32.dll", SetLastError = true)]
-        private static extern IntPtr FindWindow(string? lpClassName, string lpWindowName);
 
         [DllImport("user32.dll", SetLastError = true)]
         private static extern bool PostMessage(IntPtr hWnd, uint Msg, IntPtr wParam, IntPtr lParam);
@@ -39,15 +36,22 @@ namespace LFSDriftTools
         public event Action? CutStarted;
         public event Action? CutEnded;
         public event Action<string>? Error;
+#if DEBUG
+        public event Action<string>? DebugTiming;
+        private long _debugLastCutStartTicks;
+#endif
 
         private DateTime _lastCut = DateTime.MinValue;
         private readonly object _lock = new();
+        private readonly object _restoreLock = new();
         private System.Threading.Timer? _watchdogTimer;
+        private bool _timerResolutionRaised;
 
         public void Start()
         {
             if (IsRunning) return;
             IsRunning = true;
+            _timerResolutionRaised = TimerResolution.Acquire();
             _watchdogTimer = new System.Threading.Timer(
                 _ => WatchdogCheck(),
                 null,
@@ -66,21 +70,64 @@ namespace LFSDriftTools
             ForceRestoreIgnitionIfNeeded("Stop()");
 
             IsCutting = false;
+
+            if (_timerResolutionRaised)
+            {
+                TimerResolution.Release();
+                _timerResolutionRaised = false;
+            }
         }
 
         private void WatchdogCheck()
         {
-            if (!_ignitionState)
+            try
             {
-                double sinceCut = (DateTime.UtcNow - _lastCut).TotalMilliseconds;
-                if (sinceCut > CutMs + WatchdogMarginMs)
+                if (!_ignitionState)
                 {
-                    ForceRestoreIgnitionIfNeeded("watchdog");
+                    double sinceCut = (DateTime.UtcNow - _lastCut).TotalMilliseconds;
+                    if (sinceCut > CutMs + WatchdogMarginMs)
+                    {
+                        ForceRestoreIgnitionIfNeeded("watchdog");
+                    }
                 }
+            }
+            catch (Exception)
+            {
             }
         }
 
         private void ForceRestoreIgnitionIfNeeded(string reason)
+        {
+            if (!Monitor.TryEnter(_restoreLock)) return;
+
+            try
+            {
+                bool needsRestore;
+                lock (_lock)
+                {
+                    needsRestore = !_ignitionState;
+                }
+
+                if (!needsRestore) return;
+
+                Error?.Invoke(string.Format(Localization.T("status.revlimiter.forced_restore"), reason));
+
+                if (RestoreIgnitionLocked(attempts: 3))
+                {
+                    lock (_lock)
+                    {
+                        WatchdogRecoveries++;
+                    }
+                    CutEnded?.Invoke();
+                }
+            }
+            finally
+            {
+                Monitor.Exit(_restoreLock);
+            }
+        }
+
+        private bool RestoreIgnitionLocked(int attempts)
         {
             bool needsRestore;
             lock (_lock)
@@ -88,12 +135,10 @@ namespace LFSDriftTools
                 needsRestore = !_ignitionState;
             }
 
-            if (!needsRestore) return;
-
-            Error?.Invoke(string.Format(Localization.T("status.revlimiter.forced_restore"), reason));
+            if (!needsRestore) return true;
 
             bool restored = false;
-            for (int attempt = 0; attempt < 3; attempt++)
+            for (int attempt = 0; attempt < attempts; attempt++)
             {
                 if (TryPressIgnitionKey())
                 {
@@ -110,15 +155,12 @@ namespace LFSDriftTools
                 {
                     _ignitionState = true;
                     IsCutting = false;
-                    WatchdogRecoveries++;
                 }
                 _lastCut = DateTime.UtcNow;
             }
 
-            if (restored)
-                CutEnded?.Invoke();
+            return restored;
         }
-
         public void ProcessOutGaugeData(OutGaugeData data)
         {
             if (Enabled && data.Valid && !IsCutting)
@@ -145,11 +187,35 @@ namespace LFSDriftTools
             Task.Run(() => DoCut());
         }
 
-        private async Task DoCut()
+        private static void PreciseWait(int ms)
+        {
+            long start = System.Diagnostics.Stopwatch.GetTimestamp();
+            long ticks = ms * System.Diagnostics.Stopwatch.Frequency / 1000;
+            long coarseMargin = 2 * System.Diagnostics.Stopwatch.Frequency / 1000;
+
+            while (true)
+            {
+                long remaining = ticks - (System.Diagnostics.Stopwatch.GetTimestamp() - start);
+                if (remaining <= 0) return;
+
+                if (remaining > coarseMargin)
+                    Thread.Sleep(1);
+                else
+                    Thread.SpinWait(50);
+            }
+        }
+
+        private void DoCut()
         {
             CutStarted?.Invoke();
 
             bool weTurnedItOff = false;
+#if DEBUG
+            long debugStart = System.Diagnostics.Stopwatch.GetTimestamp();
+            double debugKeyMs = 0;
+            double debugDelayMs = 0;
+            double debugOffMs = 0;
+#endif
 
             try
             {
@@ -163,60 +229,71 @@ namespace LFSDriftTools
                     }
                 }
 
-                if (weTurnedItOff)
-                    TryPressIgnitionKey();
+                if (weTurnedItOff && !TryPressIgnitionKey())
+                {
+                    lock (_lock)
+                    {
+                        _ignitionState = true;
+                    }
+                    return;
+                }
 
-                await Task.Delay(CutMs);
+#if DEBUG
+                debugKeyMs = DebugMs(debugStart, System.Diagnostics.Stopwatch.GetTimestamp());
+                long delayStart = System.Diagnostics.Stopwatch.GetTimestamp();
+#endif
+                PreciseWait(CutMs);
+#if DEBUG
+                long delayEnd = System.Diagnostics.Stopwatch.GetTimestamp();
+                debugDelayMs = DebugMs(delayStart, delayEnd);
+                debugOffMs = DebugMs(debugStart, delayEnd);
+#endif
             }
             finally
             {
-                bool needsRestore;
-                lock (_lock)
+                bool restored;
+                lock (_restoreLock)
                 {
-                    needsRestore = !_ignitionState;
-                }
-
-                bool restored = !needsRestore || TryPressIgnitionKey();
-
-                lock (_lock)
-                {
-                    if (restored)
-                    {
-                        _ignitionState = true;
-                        IsCutting = false;
-                    }
-                    _lastCut = DateTime.UtcNow;
+                    restored = RestoreIgnitionLocked(attempts: 1);
                 }
 
                 if (restored)
                     CutEnded?.Invoke();
+
+#if DEBUG
+                double totalMs = DebugMs(debugStart, System.Diagnostics.Stopwatch.GetTimestamp());
+                double gapMs = _debugLastCutStartTicks == 0 ? 0 : DebugMs(_debugLastCutStartTicks, debugStart);
+                _debugLastCutStartTicks = debugStart;
+                DebugTiming?.Invoke($"DEBUG CUT off {debugOffMs:F1} ms (key {debugKeyMs:F1}, delay {debugDelayMs:F1} of {CutMs}), with restore {totalMs:F1} ms, gap {gapMs:F0} ms, restored {restored}");
+#endif
             }
         }
 
+#if DEBUG
+        private static double DebugMs(long from, long to) => (to - from) * 1000.0 / System.Diagnostics.Stopwatch.Frequency;
+#endif
+
         private bool TryPressIgnitionKey()
         {
-            IntPtr hwnd = FindLfsWindow();
+            IntPtr hwnd = LfsWindow.Find();
             if (hwnd == IntPtr.Zero)
             {
                 Error?.Invoke(Localization.T("status.revlimiter.no_window"));
                 return false;
             }
 
-            PostMessage(hwnd, WM_KEYDOWN, (IntPtr)VK_I, (IntPtr)0x00170001);
-            Thread.Sleep(40);
-            PostMessage(hwnd, WM_KEYUP, (IntPtr)VK_I, (IntPtr)0xC0170001);
-            return true;
-        }
-
-        private static IntPtr FindLfsWindow()
-        {
-            string[] titles = { "LFS", "Live for Speed", "LFS S3", "LFS S2", "LFS Demo" };
-            foreach (var t in titles)
+            if (!PostMessage(hwnd, WM_KEYDOWN, (IntPtr)VK_I, (IntPtr)0x00170001))
             {
-                IntPtr h = FindWindow(null, t);
-                if (h != IntPtr.Zero) return h;
+                Error?.Invoke(Localization.T("status.revlimiter.key_failed"));
+                return false;
             }
-            return IntPtr.Zero;
+
+            Thread.Sleep(40);
+
+            if (!PostMessage(hwnd, WM_KEYUP, (IntPtr)VK_I, (IntPtr)0xC0170001))
+                PostMessage(hwnd, WM_KEYUP, (IntPtr)VK_I, (IntPtr)0xC0170001);
+
+            return true;
         }
 
         public void Dispose()

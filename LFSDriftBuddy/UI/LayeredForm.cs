@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Drawing;
 using System.Drawing.Imaging;
 using System.Runtime.InteropServices;
@@ -114,6 +114,180 @@ namespace LFSDriftTools
                 if (hBitmap != IntPtr.Zero) { SelectObject(memDc, oldBitmap); DeleteObject(hBitmap); }
                 DeleteDC(memDc);
             }
+        }
+
+        [DllImport("gdi32.dll", ExactSpelling = true, SetLastError = true)]
+        private static extern IntPtr CreateDIBSection(IntPtr hdc, ref BITMAPINFO pbmi, uint usage, out IntPtr ppvBits, IntPtr hSection, uint offset);
+
+        [DllImport("ntdll.dll")]
+        private static extern UIntPtr RtlCompareMemory(IntPtr source1, IntPtr source2, UIntPtr length);
+
+        [DllImport("kernel32.dll", EntryPoint = "RtlMoveMemory")]
+        private static extern void CopyMemory(IntPtr destination, IntPtr source, UIntPtr length);
+
+        [DllImport("kernel32.dll", EntryPoint = "RtlZeroMemory")]
+        private static extern void ZeroMemory(IntPtr destination, UIntPtr length);
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct BITMAPINFO
+        {
+            public int biSize;
+            public int biWidth;
+            public int biHeight;
+            public short biPlanes;
+            public short biBitCount;
+            public int biCompression;
+            public int biSizeImage;
+            public int biXPelsPerMeter;
+            public int biYPelsPerMeter;
+            public int biClrUsed;
+            public int biClrImportant;
+        }
+
+        private IntPtr _surfaceDc = IntPtr.Zero;
+        private IntPtr _surfaceHBitmap = IntPtr.Zero;
+        private IntPtr _surfaceOldBitmap = IntPtr.Zero;
+        private IntPtr _surfaceBits = IntPtr.Zero;
+        private IntPtr _lastFrameBits = IntPtr.Zero;
+        private Bitmap? _surface;
+        private int _surfaceWidth;
+        private int _surfaceHeight;
+        private bool _forcePresent = true;
+
+        protected Bitmap AcquireSurface()
+        {
+            int w = Math.Max(1, Width);
+            int h = Math.Max(1, Height);
+
+            if (_surface == null || _surfaceWidth != w || _surfaceHeight != h)
+                CreateSurface(w, h);
+
+            return _surface!;
+        }
+
+        protected bool PresentSurface()
+        {
+            if (_surface == null) return false;
+
+            if (_surfaceBits == IntPtr.Zero)
+            {
+                SetBitmap(_surface);
+                return true;
+            }
+
+            var byteCount = new UIntPtr((uint)(_surfaceWidth * _surfaceHeight * 4));
+
+            if (!_forcePresent && RtlCompareMemory(_surfaceBits, _lastFrameBits, byteCount) == byteCount)
+                return false;
+
+            CopyMemory(_lastFrameBits, _surfaceBits, byteCount);
+            _forcePresent = false;
+
+            var size = new SIZE(_surfaceWidth, _surfaceHeight);
+            var pointSource = new POINT(0, 0);
+            var topPos = new POINT(Left, Top);
+
+            var blend = new BLENDFUNCTION
+            {
+                BlendOp = AC_SRC_OVER,
+                BlendFlags = 0,
+                SourceConstantAlpha = 255,
+                AlphaFormat = AC_SRC_ALPHA
+            };
+
+            UpdateLayeredWindow(Handle, IntPtr.Zero, ref topPos, ref size, _surfaceDc, ref pointSource, 0, ref blend, ULW_ALPHA);
+            return true;
+        }
+
+        private void CreateSurface(int w, int h)
+        {
+            FreeSurface();
+
+            var info = new BITMAPINFO
+            {
+                biSize = Marshal.SizeOf<BITMAPINFO>(),
+                biWidth = w,
+                biHeight = -h,
+                biPlanes = 1,
+                biBitCount = 32,
+                biCompression = 0
+            };
+
+            IntPtr screenDc = GetDC(IntPtr.Zero);
+            try
+            {
+                _surfaceHBitmap = CreateDIBSection(screenDc, ref info, 0, out _surfaceBits, IntPtr.Zero, 0);
+                if (_surfaceHBitmap != IntPtr.Zero && _surfaceBits != IntPtr.Zero)
+                    _surfaceDc = CreateCompatibleDC(screenDc);
+            }
+            finally
+            {
+                ReleaseDC(IntPtr.Zero, screenDc);
+            }
+
+            if (_surfaceHBitmap == IntPtr.Zero || _surfaceBits == IntPtr.Zero || _surfaceDc == IntPtr.Zero)
+            {
+                FreeSurface();
+                _surface = new Bitmap(w, h, PixelFormat.Format32bppArgb);
+                _surfaceWidth = w;
+                _surfaceHeight = h;
+                return;
+            }
+
+            _surfaceOldBitmap = SelectObject(_surfaceDc, _surfaceHBitmap);
+            _surface = new Bitmap(w, h, w * 4, PixelFormat.Format32bppPArgb, _surfaceBits);
+
+            var byteCount = new UIntPtr((uint)(w * h * 4));
+            _lastFrameBits = Marshal.AllocHGlobal(w * h * 4);
+            ZeroMemory(_lastFrameBits, byteCount);
+
+            _surfaceWidth = w;
+            _surfaceHeight = h;
+            _forcePresent = true;
+        }
+
+        private void FreeSurface()
+        {
+            _surface?.Dispose();
+            _surface = null;
+
+            if (_surfaceDc != IntPtr.Zero)
+            {
+                if (_surfaceOldBitmap != IntPtr.Zero)
+                    SelectObject(_surfaceDc, _surfaceOldBitmap);
+                DeleteDC(_surfaceDc);
+            }
+            if (_surfaceHBitmap != IntPtr.Zero)
+                DeleteObject(_surfaceHBitmap);
+            if (_lastFrameBits != IntPtr.Zero)
+                Marshal.FreeHGlobal(_lastFrameBits);
+
+            _surfaceDc = IntPtr.Zero;
+            _surfaceHBitmap = IntPtr.Zero;
+            _surfaceOldBitmap = IntPtr.Zero;
+            _surfaceBits = IntPtr.Zero;
+            _lastFrameBits = IntPtr.Zero;
+            _surfaceWidth = 0;
+            _surfaceHeight = 0;
+        }
+
+        protected override void OnVisibleChanged(EventArgs e)
+        {
+            base.OnVisibleChanged(e);
+            if (Visible) _forcePresent = true;
+        }
+
+        protected override void OnHandleCreated(EventArgs e)
+        {
+            base.OnHandleCreated(e);
+            _forcePresent = true;
+        }
+
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing)
+                FreeSurface();
+            base.Dispose(disposing);
         }
 
         protected override void OnPaintBackground(PaintEventArgs e) {  }

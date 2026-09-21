@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Drawing;
 using System.Drawing.Drawing2D;
 using System.Windows.Forms;
@@ -7,7 +7,7 @@ namespace LFSDriftTools
 {
     public class CircularCropControl : Control
     {
-        public Image SourceImage { get; set; } = null;
+        public Image? SourceImage { get; set; } = null;
 
         private float _panX = 0f;
         public float PanX
@@ -30,7 +30,7 @@ namespace LFSDriftTools
             set { _zoom = Math.Clamp(value, 0.5f, 3f); Invalidate(); }
         }
 
-        public event EventHandler PanZoomChanged;
+        public event EventHandler? PanZoomChanged;
 
         private bool _dragging;
         private Point _dragStart;
@@ -65,10 +65,10 @@ namespace LFSDriftTools
 
                 using var path = new GraphicsPath();
                 path.AddEllipse(dialRect);
-                var oldClip = g.Clip;
+                var clipState = g.Save();
                 g.SetClip(path, CombineMode.Intersect);
                 g.DrawImage(SourceImage, drawX, drawY, drawW, drawH);
-                g.Clip = oldClip;
+                g.Restore(clipState);
             }
             else
             {
@@ -76,7 +76,7 @@ namespace LFSDriftTools
                 g.FillEllipse(brush, dialRect);
                 using var textBrush = new SolidBrush(Color.FromArgb(140, 140, 150));
                 var text = "No image";
-                var font = new Font("Segoe UI", 9f);
+                var font = _placeholderFont ??= new Font("Segoe UI", 9f);
                 var size = g.MeasureString(text, font);
                 g.DrawString(text, font, textBrush, dialRect.X + diameter / 2f - size.Width / 2f,
                     dialRect.Y + diameter / 2f - size.Height / 2f);
@@ -84,6 +84,15 @@ namespace LFSDriftTools
 
             using var ringPen = new Pen(Color.FromArgb(200, 255, 255, 255), 2f);
             g.DrawEllipse(ringPen, dialRect);
+        }
+
+        private Font? _placeholderFont;
+
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing)
+                _placeholderFont?.Dispose();
+            base.Dispose(disposing);
         }
 
         protected override void OnMouseDown(MouseEventArgs e)
