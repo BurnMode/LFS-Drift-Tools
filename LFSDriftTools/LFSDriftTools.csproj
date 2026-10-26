@@ -1,0 +1,122 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <UseWindowsForms>true</UseWindowsForms>
+    <AssemblyName>LFSDriftTools</AssemblyName>
+    <RootNamespace>LFSDriftTools</RootNamespace>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <NoWarn>$(NoWarn);WFO1000</NoWarn>
+    <ApplicationIcon>app.ico</ApplicationIcon>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <Product>LFS Drift Tools</Product>
+    <AssemblyTitle>LFS Drift Tools</AssemblyTitle>
+    <Description>Companion app for Live for Speed: drift scoring, in-game HUD and overlay, rev limiter, turn signals and Controller Assist.</Description>
+    <Company>BurnMode</Company>
+    <Authors>BurnMode</Authors>
+    <Copyright>Copyright (c) 2026 BurnMode</Copyright>
+    <NeutralLanguage>en</NeutralLanguage>
+    <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
+	<Version>0.897.1001</Version>
+	<AssemblyVersion>0.897.1001.0</AssemblyVersion>
+	<FileVersion>0.897.1001.0</FileVersion>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Nefarius.Drivers.HidHide" Version="3.4.0" />
+    <PackageReference Include="Nefarius.Utilities.DeviceManagement" Version="5.2.0" />
+    <PackageReference Include="SharpDX.DirectInput" Version="4.2.0" />
+    <PackageReference Include="SharpDX.XInput" Version="4.2.0" />
+    <PackageReference Include="Nefarius.ViGEm.Client" Version="1.21.256" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Compile Update="UI\LayeredForm.cs">
+      <SubType>Form</SubType>
+    </Compile>
+    <Compile Update="UI\MainForm.*.cs">
+      <SubType>Code</SubType>
+    </Compile>
+    <Compile Update="UI\WindowShadow.cs">
+      <SubType>Code</SubType>
+    </Compile>
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Update="Data\Fonts\active.otf">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </None>
+    <None Update="Data\Fonts\tachotype2_*.ttf">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+    <None Update="Data\Fonts\tachotype2_*_OFL.txt">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+    <None Update="Data\Sounds\indicator_cancel.wav">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </None>
+    <None Update="Data\Sounds\indicator_click_off.wav">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </None>
+    <None Update="Data\Sounds\achievement_unlock.wav">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </None>
+    <None Update="Data\Sounds\indicator_click_on.wav">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </None>
+    <EmbeddedResource Include="Data\Lang\en.json" LogicalName="LFSDriftTools.Lang.en.json" />
+    <None Update="Data\Lang\*.json">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+    <None Update="Data\Images\*.png">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </None>
+    <None Update="Data\Drivers\ViGEmBusSetup.exe">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </None>
+    <None Update="Data\Drivers\HidHideSetup.exe">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </None>
+  </ItemGroup>
+
+  <PropertyGroup>
+    <LdtSaveKeyFile Condition="'$(LdtSaveKeyFile)' == ''">$(USERPROFILE)\.lfs-drift-tools\save-key.props</LdtSaveKeyFile>
+  </PropertyGroup>
+
+  <Import Project="$(LdtSaveKeyFile)" Condition="Exists('$(LdtSaveKeyFile)')" />
+
+  <PropertyGroup>
+    <LdtSaveKeyRelease>false</LdtSaveKeyRelease>
+    <LdtSaveKeyRelease Condition="'$(LdtSaveKeyA)' != '' And '$(LdtSaveKeyB)' != ''">true</LdtSaveKeyRelease>
+    <LdtSaveKeyId Condition="'$(LdtSaveKeyRelease)' == 'false'">0</LdtSaveKeyId>
+    <LdtSaveKeyA Condition="'$(LdtSaveKeyRelease)' == 'false'">a290cbd8e999f536c5bdddfca7c9e6133cbe76aba0f064f0d396ba0396016b2d</LdtSaveKeyA>
+    <LdtSaveKeyB Condition="'$(LdtSaveKeyRelease)' == 'false'">cdae931a3ef60bcefd4110f8dcddf16589074743f6395cde69d06a30155e63ad</LdtSaveKeyB>
+  </PropertyGroup>
+
+  <Target Name="LdtGenerateBuildSecrets" BeforeTargets="CoreCompile">
+    <Error Condition="$(LdtSaveKeyA.Length) != 64 Or $(LdtSaveKeyB.Length) != 64" Text="The save key in $(LdtSaveKeyFile) must have two 64-character hex parts (LdtSaveKeyA, LdtSaveKeyB)." />
+    <Error Condition="'$(LdtSaveKeyRelease)' == 'true' And ('$(LdtSaveKeyId)' == '' Or '$(LdtSaveKeyId)' == '0')" Text="The release save key in $(LdtSaveKeyFile) needs LdtSaveKeyId 1 or higher." />
+    <PropertyGroup>
+      <LdtBuildSecretsFile>$(IntermediateOutputPath)BuildSecrets.g.cs</LdtBuildSecretsFile>
+      <LdtBuildSecretsSource>namespace LFSDriftTools
+{
+    internal static class BuildSecrets
+    {
+        public static readonly bool IsReleaseKey = $(LdtSaveKeyRelease)%3B
+        public static readonly byte SaveKeyId = $(LdtSaveKeyId)%3B
+        public static readonly string SaveKeyA = "$(LdtSaveKeyA)"%3B
+        public static readonly string SaveKeyB = "$(LdtSaveKeyB)"%3B
+    }
+}</LdtBuildSecretsSource>
+    </PropertyGroup>
+    <WriteLinesToFile File="$(LdtBuildSecretsFile)" Lines="$(LdtBuildSecretsSource)" Overwrite="true" WriteOnlyWhenDifferent="true" />
+    <ItemGroup>
+      <Compile Include="$(LdtBuildSecretsFile)" />
+      <FileWrites Include="$(LdtBuildSecretsFile)" />
+    </ItemGroup>
+  </Target>
+
+</Project>
